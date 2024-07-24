@@ -1,0 +1,48 @@
+{
+  "name": "tester",
+  "version": "0.0.1",
+  "private": true,
+  "scripts": {
+    "start": "hdc rport tcp:8081 tcp:8081 && react-native start",
+    "install:dev": "npm run pack:pkg && npm i",
+    "postinstall": "node ./scripts/create-build-profile",
+    "pack:pkg": "",
+    "install:pkg": "",
+    "dev": "",
+    "android": "react-native run-android"
+  },
+  "dependencies": {
+    "@gorhom/portal": "^1.0.14",
+    "react": "18.2.0",
+    "react-native": "0.72.5",
+    "react-native-harmony": "file:rnoh_package/react-native-harmony/rnoh-react-native-harmony-0.72.27.tgz",
+    "react-native-qrcode-svg": "^6.2.0"
+  },
+  "devDependencies": {
+    "@babel/core": "^7.20.0",
+    "@babel/preset-env": "^7.20.0",
+    "@babel/runtime": "^7.20.0",
+    "@react-native-community/eslint-config": "^3.2.0",
+    "@react-native/metro-config": "^0.72.9",
+    "@rnoh/testerino": "file:rnoh_package/testerino/rnoh-testerino-0.0.9.tgz",
+    "@tsconfig/react-native": "^2.0.2",
+    "@types/jest": "^29.2.1",
+    "@types/react": "^18.0.24",
+    "@types/react-test-renderer": "^18.0.0",
+    "babel-jest": "^29.2.1",
+    "eslint": "^8.19.0",
+    "jest": "^29.2.1",
+    "metro-config": "^0.76.3",
+    "metro-react-native-babel-preset": "0.73.9",
+    "prettier": "^2.4.1",
+    "react-test-renderer": "18.2.0",
+    "typescript": "4.8.4"
+  },
+  "jest": {
+    "preset": "react-native"
+  },
+  "overrides": {
+    "@rnoh/react-native-harmony-cli": "file:rnoh_package/react-native-harmony-cli/rnoh-react-native-harmony-cli-0.0.26.tgz",
+    "@react-native/codegen": "0.74.0"
+  }
+}
