@@ -7,8 +7,15 @@ set(WITH_HITRACE_SYSTRACE 1)
 add_compile_definitions(WITH_HITRACE_SYSTRACE)
 
 add_subdirectory("${RNOH_CPP_DIR}" ./rn)
+
+add_subdirectory("${CMAKE_CURRENT_SOURCE_DIR}/../../../oh_modules/@react-native-oh-tpl/react-native-reanimated/src/main/cpp" ./reanimated)
+add_subdirectory("../../../../skia/src/main/cpp" ./skia)
+
 add_library(rnoh_app SHARED
     "./PackageProvider.cpp"
     "${RNOH_CPP_DIR}/RNOHAppNapiBridge.cpp"
 )
 target_link_libraries(rnoh_app PUBLIC rnoh)
+
+target_link_libraries(rnoh_app PUBLIC rnoh_reanimated)
+target_link_libraries(rnoh_app PUBLIC rnoh_skia)
