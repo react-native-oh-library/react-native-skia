@@ -1,0 +1,11 @@
+{
+  "name": "@react-native-oh-tpl/react-native-skia",
+  "version": "1.3.7-0.0.1",
+  "description": "Please describe the basic information.",
+  "main": "index.ets",
+  "author": "",
+  "license": "Apache-2.0",
+  "dependencies": {
+    "@rnoh/react-native-openharmony": 'file:../react_native_openharmony.har'
+  }
+}

@@ -12,12 +12,19 @@ import {
 } from '@rnoh/react-native-openharmony';
 import font from '@ohos.font';
 import { createRNPackages } from '../RNPackagesFactory';
+import { RNCSkiaDomView, SKIA_DOM_VIEW_TYPE } from '@react-native-oh-tpl/react-native-skia';
 
-const arkTsComponentNames: Array<string> = ["SampleView", "GeneratedSampleView", "PropsDisplayer"];
+const arkTsComponentNames: Array<string> = ["SampleView", "GeneratedSampleView", "PropsDisplayer", SKIA_DOM_VIEW_TYPE];
 @Builder
 export function buildCustomRNComponent(ctx: ComponentBuilderContext) {
   // There seems to be a problem with the placement of ArkTS components in mixed mode. Nested Stack temporarily avoided.
   Stack(){
+    if (ctx.componentName == SKIA_DOM_VIEW_TYPE) {
+      RNCSkiaDomView({
+        ctx: ctx.rnComponentContext,
+        tag: ctx.tag,
+      })
+    }
   }
   .position({x:0, y: 0})
 
