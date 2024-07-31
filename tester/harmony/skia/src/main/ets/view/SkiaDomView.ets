@@ -35,7 +35,7 @@ export struct SkiaDomView {
 
   viewWidth: number = 0;
   viewHeight: number = 0;
-  tag: number = 0;
+  nativeID: number = 0;
 
 
   aboutToAppear(): void {
@@ -47,16 +47,14 @@ export struct SkiaDomView {
     Column() {
       XComponent({
         id: X_COMPONENT_ID,
-        type: XComponentType.SURFACE,
+        type: XComponentType.TEXTURE,
         libraryname: "rnoh_skia",
         controller: this.xComponentController
       }).onLoad((xComponentContext) => {
         this.xComponentContext = xComponentContext as XComponentContext;
         this.surfaceID = Number(this.xComponentController.getXComponentSurfaceId());
-        console.log('liwang----------->XComponent onLoad tag=' + this.tag + ", surfaceID=" + this.surfaceID);
-
-
-        this.xComponentContext.registerView(X_COMPONENT_ID, this.tag)
+        console.log('liwang----------->XComponent onLoad nativeID=' + this.nativeID + ", surfaceID=" + this.surfaceID);
+        this.xComponentContext.registerView(X_COMPONENT_ID, this.nativeID);
       })
       .width(this.viewWidth)
       .height(this.viewHeight)

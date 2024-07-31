@@ -18,6 +18,13 @@
 #include <glog/logging.h>
 #include "common.h"
 
+#include <js_native_api.h>
+#include <js_native_api_types.h>
+#include <ace/xcomponent/native_interface_xcomponent.h>
+#include <napi/native_api.h>
+#include "NativeRender.h"
+#include "NativeImageAdaptor.h"
+
 EXTERN_C_START
 static napi_value Init(napi_env env, napi_value exports) {
     DLOG(INFO) << "Init begins";
@@ -25,14 +32,26 @@ static napi_value Init(napi_env env, napi_value exports) {
         DLOG(INFO) << "env or exports is null";
         return nullptr;
     }
-    napi_property_descriptor desc[] = {{"registerView", nullptr, RNSkia::PluginRender::RegisterView, nullptr, nullptr,
-                                        nullptr, napi_default, nullptr}};
-    auto napiResult = napi_define_properties(env, exports, sizeof(desc) / sizeof(desc[0]), desc);
-    if (napiResult != napi_ok) {
-        DLOG(ERROR) << "Export: napi_define_properties failed";
+    
+    //surface
+//     napi_property_descriptor desc[] = {{"registerView", nullptr, RNSkia::PluginRender::RegisterView, nullptr, nullptr,
+//                                         nullptr, napi_default, nullptr}};
+//     auto napiResult = napi_define_properties(env, exports, sizeof(desc) / sizeof(desc[0]), desc);
+//     if (napiResult != napi_ok) {
+//         DLOG(ERROR) << "Export: napi_define_properties failed";
+//     }
+//     RNSkia::PluginManager::GetInstance()->Export(env, exports);
+    
+    //texture
+    napi_property_descriptor desc[] = {
+        { "getNativeRender", nullptr, RNSkia::NativeRender::GetNativeRender, nullptr, nullptr, nullptr, napi_default, nullptr },
+        { "registerView", nullptr, RNSkia::NativeRender::RegisterView, nullptr, nullptr, nullptr, napi_default, nullptr }
+    };
+    napi_define_properties(env, exports, sizeof(desc) / sizeof(desc[0]), desc);
+    bool ret = RNSkia::NativeRender::GetInstance()->Export(env, exports);
+    if (!ret) {
+        DLOG(ERROR) << "NativeRender Init failed";
     }
-
-    RNSkia::PluginManager::GetInstance()->Export(env, exports);
     return exports;
 }
 
