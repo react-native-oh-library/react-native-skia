@@ -2,7 +2,6 @@
 #define HARMONY_RNSKOPENGLCANVASPROVIDER_H
 #include "HarmonyBufferUtils.h"
 #include "HarmonyOpenGLHelper.h"
-//#include "iRNSkHarmonyView.h"
 
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wdocumentation"
@@ -20,6 +19,7 @@
 #include <ace/xcomponent/native_interface_xcomponent.h>
 #include <native_window/external_window.h>
 #include "native_drawing/drawing_surface.h"
+#include "NativeImageAdaptor.h"
 #endif // HARMONY_RNSKOPENGLCANVASPROVIDER_H
 #pragma once
 
@@ -36,30 +36,22 @@ class WindowSurfaceHolder {
 public:
     // 构造函数，初始化宽度和高度
     WindowSurfaceHolder(OHNativeWindow *window, int width, int height) {
-
-//         _Image = OH_NativeImage_Create(_textureId, _textureTarget);
-//         _window = OH_NativeImage_AcquireNativeWindow(_Image);
-        // 设置NativeWindow的宽高
-        int code = SET_BUFFER_GEOMETRY;
-        _width = width;
-        _height = height;
-        int32_t ret = OH_NativeWindow_NativeWindowHandleOpt(_window, code, _width, _height);
-        
-        
         _width = width;
         _height = height;
         if (_width > 0) {
             _widthPercent = 0.5 * _height / _width;
         }
-        _window = window;
-        DLOG(INFO) << "WindowSurfaceHolder init _width: " << _width << " _height: " << _height << " _widthPercent: " << _widthPercent;
+        //_window = window;
+        _window = NativeImageAdaptor::GetInstance()->getNativeWindow();
+        DLOG(INFO) << "WindowSurfaceHolder init _width: " << _width << " _height: " << _height
+                   << " _widthPercent: " << _widthPercent;
     }
 
     // 析构函数，释放本地窗口
     ~WindowSurfaceHolder() {
-        OH_NativeImage_DetachContext(_Image);
-        OH_NativeImage_Destroy(&_Image);
-        OH_NativeWindow_DestroyNativeWindow(_window);
+        if (_window) {
+            OH_NativeWindow_DestroyNativeWindow(_window);
+        }
     }
 
     // 获取宽度
@@ -93,7 +85,7 @@ public:
                               "not set new surface as current surface.";
                 return nullptr;
             }
-            
+
 
             // Set up parameters for the render target so that it
             // matches the underlying OpenGL context.
@@ -148,7 +140,7 @@ public:
 
     // 将生产的内容写入NativeWindowBuffer
     void WriteNativeWindowBuffer() { // buffer用来绑定OpenGL画布
-        OHNativeWindowBuffer* buffer = nullptr;
+        OHNativeWindowBuffer *buffer = nullptr;
         int fenceFd;
         // 通过 OH_NativeWindow_NativeWindowRequestBuffer 获取 OHNativeWindowBuffer 实例
         OH_NativeWindow_NativeWindowRequestBuffer(_window, &buffer, &fenceFd);
@@ -167,13 +159,13 @@ public:
                 *pixel++ = value;
             }
         }
-        
+
         // 将NativeWindowBuffer提交到NativeWindow
         //  设置刷新区域，如果Region中的Rect为nullptr,或者rectNumber为0，则认为NativeWindowBuffer全部有内容更改。
         Region region{nullptr, 0};
         // 通过OH_NativeWindow_NativeWindowFlushBuffer 提交给消费者使用，例如：显示在屏幕上。
         OH_NativeWindow_NativeWindowFlushBuffer(_window, buffer, fenceFd, region);
-        
+
         // 内存使用完记得去掉内存映射
         int result = munmap(mappedAddr, handle->size);
         if (result == -1) {
@@ -183,8 +175,9 @@ public:
 
     // 更新纹理图像到OpenGL纹理
     void updateTexImage() {
-        //OH_NativeImage_UpdateSurfaceImage(_Image);
-        // 对update绑定到对应textureId的纹理做对应的opengl后处理后，将纹理上屏
+        //NativeImageAdaptor::GetInstance()->Update();
+        // OH_NativeImage_UpdateSurfaceImage(_Image);
+        //  对update绑定到对应textureId的纹理做对应的opengl后处理后，将纹理上屏
     }
 
     /**
@@ -213,8 +206,6 @@ public:
     bool present() {
         // 刷新并提交直接上下文
         ThreadContextHolder::ThreadSkiaOpenGLContext.directContext->flushAndSubmit();
-        
-        WriteNativeWindowBuffer();
 
         // 交换缓冲区
         return SkiaOpenGLHelper::swapBuffers(&ThreadContextHolder::ThreadSkiaOpenGLContext, _glSurface);
@@ -226,7 +217,7 @@ private:
     EGLSurface _glSurface = EGL_NO_SURFACE; // OpenGL表面
     GrGLuint _textureId;
     GrGLuint _textureTarget;
-    OH_NativeImage *_Image;
+    OH_NativeImage *image_;
     int _width = 0;  // 宽度
     int _height = 0; // 高度
     float _widthPercent = 0.0;
@@ -247,9 +238,9 @@ public:
                        << "Failed creating Skia Direct Context\n";
             return nullptr;
         }
-    
+
         auto colorType = kN32_SkColorType; //
-    
+
         SkSurfaceProps props(0, kUnknown_SkPixelGeometry); // kUnknown_SkPixelGeometry
         if (!SkiaOpenGLHelper::makeCurrent(&ThreadContextHolder::ThreadSkiaOpenGLContext,
                                            ThreadContextHolder::ThreadSkiaOpenGLContext.gl1x1Surface)) {
@@ -257,29 +248,29 @@ public:
                           "not set new surface as current surface.\n";
             return nullptr;
         }
-    
+
         // 创建纹理
         auto texture = ThreadContextHolder::ThreadSkiaOpenGLContext.directContext->createBackendTexture(
             width, height, colorType, skgpu::Mipmapped::kNo, GrRenderable::kYes);
-    
+
         if (!texture.isValid()) {
             DLOG(INFO) << "couldn't create offscreen texture:" << width << height;
         }
-    
+
         struct ReleaseContext {
             SkiaOpenGLContext *context;
             GrBackendTexture texture;
         };
-    
+
         auto releaseCtx = new ReleaseContext({&ThreadContextHolder::ThreadSkiaOpenGLContext, texture});
-    
+
         // GrBackendTexture->SkSurface
         return SkSurfaces::WrapBackendTexture(
             ThreadContextHolder::ThreadSkiaOpenGLContext.directContext.get(), texture, kTopLeft_GrSurfaceOrigin, 0,
             colorType, nullptr, &props,
             [](void *addr) {
                 auto releaseCtx = reinterpret_cast<ReleaseContext *>(addr);
-    
+
                 releaseCtx->context->directContext->deleteBackendTexture(releaseCtx->texture);
             },
             releaseCtx);
@@ -325,11 +316,12 @@ public:
             }
         }
 
-        auto backendTex = MakeGLBackendTexture(ThreadContextHolder::ThreadSkiaOpenGLContext.directContext.get(),
-                                 const_cast< OH_NativeBuffer *>(hardwareBuffer), description.width, description.height,
+        auto backendTex =
+            MakeGLBackendTexture(ThreadContextHolder::ThreadSkiaOpenGLContext.directContext.get(),
+                                 const_cast<OH_NativeBuffer *>(hardwareBuffer), description.width, description.height,
                                  &deleteImageProc, &updateImageProc, &deleteImageCtx, false, format, false);
         if (!backendTex.isValid()) {
-             DLOG(INFO) <<"Failed to convert HardwareBuffer to OpenGL Texture!";
+            DLOG(INFO) << "Failed to convert HardwareBuffer to OpenGL Texture!";
             return nullptr;
         }
         sk_sp<SkImage> image = SkImages::BorrowTextureFrom(
@@ -377,7 +369,7 @@ public:
 
                 // Draw into canvas using callback
                 cb(surface->getCanvas());
-
+                
                 // Swap buffers and show on screen
                 return _surfaceHolder->present();
 

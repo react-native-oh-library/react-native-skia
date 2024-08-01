@@ -26,6 +26,14 @@
 #pragma clang diagnostic pop
 
 namespace RNSkia {
+// using GetPlatformDisplayExt = PFNEGLGETPLATFORMDISPLAYEXTPROC;
+// constexpr const char *EGL_EXT_PLATFORM_WAYLAND = "EGL_EXT_platform_wayland";
+// constexpr const char *EGL_KHR_PLATFORM_WAYLAND = "EGL_KHR_platform_wayland";
+// constexpr int32_t EGL_CONTEXT_CLIENT_VERSION_NUM = 2;
+// constexpr char CHARACTER_WHITESPACE = ' ';
+// constexpr const char *CHARACTER_STRING_WHITESPACE = " ";
+// constexpr const char *EGL_GET_PLATFORM_DISPLAY_EXT = "eglGetPlatformDisplayEXT";
+// constexpr int32_t NATIVE_CACHE_BUFFER = 3;
 
 /**
  * Singleton holding the default display and shared eglContext that will be the
@@ -35,7 +43,49 @@ class OpenGLResourceHolder {
 private:
     OpenGLResourceHolder() {
         DLOG(INFO) << "OpenGLResourceHolder Initialize OpenGL";
-        // Initialize OpenGL
+//         glDisplay = GetPlatformEglDisplay(EGL_PLATFORM_OHOS_KHR, EGL_DEFAULT_DISPLAY, NULL);
+//         if (glDisplay == EGL_NO_DISPLAY) {
+//             return;
+//         }
+//         EGLint major, minor;
+//         // Initialize EGLDisplay
+//         if (eglInitialize(glDisplay, &major, &minor) == EGL_FALSE) {
+//             return;
+//         }
+//         // The API for binding graphic drawing is OpenGLES
+//         if (eglBindAPI(EGL_OPENGL_ES_API) == EGL_FALSE) {
+//             return;
+//         }
+//         unsigned int ret;
+//         EGLint count;
+//         EGLint config_attribs[] = {EGL_SURFACE_TYPE,
+//                                    EGL_WINDOW_BIT,
+//                                    EGL_RED_SIZE,
+//                                    8,
+//                                    EGL_GREEN_SIZE,
+//                                    8,
+//                                    EGL_BLUE_SIZE,
+//                                    8,
+//                                    EGL_ALPHA_SIZE,
+//                                    8,
+//                                    EGL_RENDERABLE_TYPE,
+//                                    EGL_OPENGL_ES3_BIT,
+//                                    EGL_NONE};
+//         // Obtain a valid system configuration information
+//         ret = eglChooseConfig(glDisplay, config_attribs, &glConfig, 1, &count);
+//         if (!(ret && static_cast<unsigned int>(count) >= 1)) {
+//             return;
+//         }
+//         static const EGLint context_attribs[] = {EGL_CONTEXT_CLIENT_VERSION, EGL_CONTEXT_CLIENT_VERSION_NUM, EGL_NONE};
+//         glContext = eglCreateContext(glContext, glConfig, EGL_NO_CONTEXT, context_attribs);
+//         if (glContext == EGL_NO_CONTEXT) {
+//             return;
+//         }
+//         // Associated Context
+//         eglMakeCurrent(glDisplay, EGL_NO_SURFACE, EGL_NO_SURFACE, glContext);
+
+
+        /*// Initialize OpenGL
         glDisplay = eglGetDisplay(EGL_DEFAULT_DISPLAY);
         if (glDisplay == EGL_NO_DISPLAY) {
             DLOG(INFO) << "eglGetDisplay failed : " << glGetError();
@@ -60,7 +110,7 @@ private:
         glContext = eglCreateContext(glDisplay, glConfig, glContext, contextAttribs);
         if (glContext == EGL_NO_CONTEXT) {
             DLOG(INFO) << "glCreateContext failed : " << glGetError();
-        }
+        }*/
     }
 
     ~OpenGLResourceHolder() {
@@ -98,7 +148,9 @@ public:
     /**
      * Shared eglConfig
      */
-    std::atomic<EGLConfig> glConfig = 0;
+    EGLConfig glConfig = 0;
+    
+    
 
 private:
     /**
@@ -137,6 +189,43 @@ private:
 
         return glConfig;
     }
+
+//     EGLDisplay GetPlatformEglDisplay(EGLenum platform, void *native_display, const EGLint *attrib_list) {
+//         static GetPlatformDisplayExt eglGetPlatformDisplayExt = NULL;
+//         if (!eglGetPlatformDisplayExt) {
+//             const char *extensions = eglQueryString(EGL_NO_DISPLAY, EGL_EXTENSIONS);
+//             if (extensions && (CheckEglExtension(extensions, EGL_EXT_PLATFORM_WAYLAND) ||
+//                                CheckEglExtension(extensions, EGL_KHR_PLATFORM_WAYLAND))) {
+//                 eglGetPlatformDisplayExt = (GetPlatformDisplayExt)eglGetProcAddress(EGL_GET_PLATFORM_DISPLAY_EXT);
+//             }
+//         }
+//
+//         if (eglGetPlatformDisplayExt) {
+//             return eglGetPlatformDisplayExt(platform, native_display, attrib_list);
+//         }
+//
+//         return eglGetDisplay((EGLNativeDisplayType)native_display);
+//     }
+//
+//     bool CheckEglExtension(const char *eglExtensions, const char *eglExtension) {
+//         // Check egl extension
+//         size_t extLenth = strlen(eglExtension);
+//         const char *endPos = eglExtensions + strlen(eglExtensions);
+//
+//         while (eglExtensions < endPos) {
+//             size_t len = 0;
+//             if (*eglExtensions == CHARACTER_WHITESPACE) {
+//                 eglExtensions++;
+//                 continue;
+//             }
+//             len = strcspn(eglExtensions, CHARACTER_STRING_WHITESPACE);
+//             if (len == extLenth && strncmp(eglExtension, eglExtensions, len) == 0) {
+//                 return true;
+//             }
+//             eglExtensions += len;
+//         }
+//         return false;
+//     }
 };
 
 struct SkiaOpenGLContext {
