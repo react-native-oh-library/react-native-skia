@@ -25,9 +25,9 @@ add_library(${PACKAGE_NAME} SHARED ${rnoh_skia_SRC})
 target_include_directories(${PACKAGE_NAME} PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 target_include_directories(${PACKAGE_NAME} PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/skia)
 target_include_directories(${PACKAGE_NAME} PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/rnskia)
+target_include_directories(${PACKAGE_NAME} PUBLIC ${HMOS_SDK_NATIVE}/sysroot/usr/include)
 
-
-
+target_link_directories(${PACKAGE_NAME} PUBLIC ${HMOS_SDK_NATIVE}/sysroot/usr/lib/aarch64-linux-ohos)
 target_link_libraries(${PACKAGE_NAME} PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/lib/libthird_party__harfbuzz.a)
 target_link_libraries(${PACKAGE_NAME} PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/lib/libthird_party__expat.a)
 target_link_libraries(${PACKAGE_NAME} PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/lib/libthird_party__freetype2.a)
@@ -111,7 +111,6 @@ find_library(
     uv
 )
 
-
 target_link_libraries(
     ${PACKAGE_NAME}
     PUBLIC
@@ -126,8 +125,16 @@ target_link_libraries(
     libnative_buffer.so
     libace_napi.z.so
 
-    libnative_media_core.so
+
     libavplayer.so
+    libnative_media_core.so
+    libnative_media_avsource.so
+    libnative_media_acodec.so
+    libnative_media_avdemuxer.so
+    libnative_media_codecbase.so
+    libnative_media_vdec.so
+    libohaudio.so
+    librcp_c.so
 
     ${EGL-lib} ${GLES-lib} ${hilog-lib} ${libace-lib} ${libnapi-lib} ${libuv-lib}
 #    libEGL.so

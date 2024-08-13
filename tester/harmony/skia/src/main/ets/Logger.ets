@@ -59,4 +59,4 @@ class Logger {
   }
 }
 
-export default new Logger('VideoPlayer', 0xFF00, true)
+export default new Logger('Skia', 0xFF00, true)

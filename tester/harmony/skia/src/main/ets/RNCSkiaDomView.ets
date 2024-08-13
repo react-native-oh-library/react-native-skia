@@ -44,7 +44,6 @@ export type SkiaDomViewDescriptor = Descriptor<"SkiaDomView", ViewBaseProps, Ski
 
 const TAG: string = 'RNOH in SkiaDomView'
 
-
 @Component
 export struct RNCSkiaDomView {
   ctx!: RNOHContext;

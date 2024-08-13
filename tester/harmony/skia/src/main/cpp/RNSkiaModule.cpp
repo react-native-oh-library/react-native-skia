@@ -10,7 +10,7 @@ namespace rnoh {
 
 bool RNSkiaModule::install(jsi::Runtime &rt) {
     DLOG(INFO) << "RNSkiaModule::install";
-    auto pixelDensity = 300;
+    auto pixelDensity = 3.25;
 
     platformContext = std::make_shared<RNSkia::HarmonyPlatformContext>(&rt, jsInvoker_, pixelDensity);
     RNSkia::SkiaManager::getInstance().setContext(platformContext);
