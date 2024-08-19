@@ -14,16 +14,14 @@
  */
 
 #include <hilog/log.h>
-#include "plugin_manager.h"
 #include <glog/logging.h>
 #include "common.h"
+#include "plugin_manager.h"
 
 #include <js_native_api.h>
 #include <js_native_api_types.h>
 #include <ace/xcomponent/native_interface_xcomponent.h>
 #include <napi/native_api.h>
-#include "NativeRender.h"
-#include "NativeImageAdaptor.h"
 
 EXTERN_C_START
 static napi_value Init(napi_env env, napi_value exports) {
@@ -32,31 +30,19 @@ static napi_value Init(napi_env env, napi_value exports) {
         DLOG(INFO) << "env or exports is null";
         return nullptr;
     }
-    
-    //surface
-//     napi_property_descriptor desc[] = {{"registerView", nullptr, RNSkia::PluginRender::RegisterView, nullptr, nullptr,
-//                                         nullptr, napi_default, nullptr}};
-//     auto napiResult = napi_define_properties(env, exports, sizeof(desc) / sizeof(desc[0]), desc);
-//     if (napiResult != napi_ok) {
-//         DLOG(ERROR) << "Export: napi_define_properties failed";
-//     }
-//     RNSkia::PluginManager::GetInstance()->Export(env, exports);
-    
-    //texture
     napi_property_descriptor desc[] = {
-        { "getNativeRender", nullptr, RNSkia::NativeRender::GetNativeRender, nullptr, nullptr, nullptr, napi_default, nullptr },
-        { "registerView", nullptr, RNSkia::NativeRender::RegisterView, nullptr, nullptr, nullptr, napi_default, nullptr }
-    };
-    napi_define_properties(env, exports, sizeof(desc) / sizeof(desc[0]), desc);
-    bool ret = RNSkia::NativeRender::GetInstance()->Export(env, exports);
-    if (!ret) {
-        DLOG(ERROR) << "NativeRender Init failed";
+        {"registerView", nullptr, RNSkia::PluginRender::RegisterView, nullptr, nullptr, nullptr, napi_default, nullptr}};
+    auto napiResult = napi_define_properties(env, exports, sizeof(desc) / sizeof(desc[0]), desc);
+    if (napiResult != napi_ok) {
+        DLOG(ERROR) << "Export: napi_define_properties failed";
     }
+    RNSkia::PluginManager::GetInstance()->Export(env, exports);
+    
     return exports;
 }
 
 EXTERN_C_END
-static napi_module nativerenderModule = {.nm_version = 1,
+static napi_module rn_skiaModule = {.nm_version = 1,
                                          .nm_flags = 0,
                                          .nm_filename = nullptr,
                                          // 入口函数
@@ -67,4 +53,4 @@ static napi_module nativerenderModule = {.nm_version = 1,
                                          .reserved = {0}};
 
 // 使用NAPI接口napi_module_register()传入模块描述信息进行模块注册
-extern "C" __attribute__((constructor)) void RegisterModule(void) { napi_module_register(&nativerenderModule); }
+extern "C" __attribute__((constructor)) void RegisterModule(void) { napi_module_register(&rn_skiaModule); }

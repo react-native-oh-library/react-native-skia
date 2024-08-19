@@ -19,7 +19,6 @@
 #include <ace/xcomponent/native_interface_xcomponent.h>
 #include <native_window/external_window.h>
 #include "native_drawing/drawing_surface.h"
-#include "NativeImageAdaptor.h"
 #endif // HARMONY_RNSKOPENGLCANVASPROVIDER_H
 #pragma once
 
@@ -41,14 +40,14 @@ public:
         if (_width > 0) {
             _widthPercent = 0.5 * _height / _width;
         }
-        //_window = window;
-        _window = NativeImageAdaptor::GetInstance()->getNativeWindow();
+        _window = window;
         DLOG(INFO) << "WindowSurfaceHolder init _width: " << _width << " _height: " << _height
                    << " _widthPercent: " << _widthPercent;
     }
 
     // 析构函数，释放本地窗口
     ~WindowSurfaceHolder() {
+        DLOG(INFO) << "~WindowSurfaceHolder release _window: " << _window;
         if (_window) {
             OH_NativeWindow_DestroyNativeWindow(_window);
         }
@@ -212,7 +211,7 @@ public:
     }
 
 private:
-    OHNativeWindow *_window;                // 本地窗口
+    OHNativeWindow* _window;                // 本地窗口
     sk_sp<SkSurface> _skSurface = nullptr;  // Skia表面
     EGLSurface _glSurface = EGL_NO_SURFACE; // OpenGL表面
     GrGLuint _textureId;

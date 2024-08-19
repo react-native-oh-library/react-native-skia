@@ -45,7 +45,9 @@ public:
 
         // Try to render directly when the surface has been set so that
         // we don't have to wait until the draw loop returns.
+        DLOG(INFO) << "surfaceAvailable to renderImmediate";
         RNSkView::renderImmediate();
+        DLOG(INFO) << "surfaceAvailable to renderImmediate finish";
     }
 
     void surfaceDestroyed() override {
@@ -89,12 +91,14 @@ public:
         if (eGLCore.EglContextInit(window, width, height)) {
             eGLCore.Background();
         }
+        int32_t has = 0;
+        eGLCore.Draw(has);
     }
 
     void render() override {
-        // int32_t has = 0;
-        // eGLCore.Draw(has);
+        DLOG(INFO) << "render to renderImmediate";
         RNSkView::renderImmediate();
+        DLOG(INFO) << "render to renderImmediate finish";
     }
 };
 } // namespace RNSkia

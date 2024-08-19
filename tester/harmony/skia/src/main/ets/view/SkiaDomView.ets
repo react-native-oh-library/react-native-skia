@@ -22,6 +22,8 @@
  * SOFTWARE.
  */
 import XComponentContext from '../XComponentContext';
+import { display } from '@kit.ArkUI';
+import Logger from '../Logger';
 
 const TAG: string = 'RNOH in ctrl'
 const X_COMPONENT_ID = 'SkiaDomView';
@@ -39,22 +41,26 @@ export struct SkiaDomView {
 
 
   aboutToAppear(): void {
-
+    display.getAllDisplays((error, display)=>{
+      console.log('liwang----------------->', JSON.stringify(display));
+      console.log('liwang----------------->', JSON.stringify(error));
+    });
   }
 
 
   build() {
     Column() {
       XComponent({
-        id: X_COMPONENT_ID,
-        type: XComponentType.TEXTURE,
+        id: X_COMPONENT_ID + "_" + this.nativeID,
+        type: XComponentType.SURFACE,
         libraryname: "rnoh_skia",
         controller: this.xComponentController
       }).onLoad((xComponentContext) => {
         this.xComponentContext = xComponentContext as XComponentContext;
         this.surfaceID = Number(this.xComponentController.getXComponentSurfaceId());
         console.log('liwang----------->XComponent onLoad nativeID=' + this.nativeID + ", surfaceID=" + this.surfaceID);
-        this.xComponentContext.registerView(X_COMPONENT_ID, this.nativeID);
+        Logger.debug(TAG, )
+        this.xComponentContext?.registerView(X_COMPONENT_ID + "_" + this.nativeID, this.nativeID);
       })
       .width(this.viewWidth)
       .height(this.viewHeight)
