@@ -57,16 +57,16 @@ int32_t AudioPlayerOnWriteData(OH_AudioRenderer *renderer, void *userData, void 
     // 将待播放的数据，按length长度写入buffer
     unsigned char *audioBuffer = (unsigned char *)buffer; // 将void指针转换为unsigned char指针
     int bufferSize = length / sizeof(unsigned char);      // 计算buffer中可以存放的unsigned char数量
-    
+
     int32_t localBufferSize = data->tmpBuffer.size();
-    DLOG(INFO) <<"enter LocalBufferSize: %{public}d"<< localBufferSize;
-    
+    DLOG(INFO) <<"enter LocalBufferSize: "<< localBufferSize;
+
     if (localBufferSize >= length) {
         std::unique_lock<std::mutex> lock(data->mutex_);
         data->buffer.assign(data->tmpBuffer.begin(), data->tmpBuffer.begin() + length);
         data->tmpBuffer.erase(data->tmpBuffer.begin(), data->tmpBuffer.begin() + length);
         lock.unlock();
-        
+
         for (int i = 0; i < length; i++) {
             *audioBuffer = data->buffer[i];
             audioBuffer++;
@@ -87,7 +87,7 @@ int32_t AudioPlayerOnWriteData(OH_AudioRenderer *renderer, void *userData, void 
             }
             audioBuffer++;
         }
-        DLOG(INFO) <<"size < length : %{public}d"<< length;
+        DLOG(INFO) <<"size < length : "<< length;
     }
     return 0;
 }
@@ -100,7 +100,7 @@ int32_t AudioPlayerOnStreamEvent(OH_AudioRenderer *renderer, void *userData, OH_
         return 1;
     }
     AudioControlData *data = static_cast<AudioControlData *>(userData);
-    DLOG(INFO) <<"MyOnStreamEvent event: %{public}d"<< event;
+    DLOG(INFO) <<"MyOnStreamEvent event: "<< event;
     return 0;
 }
 // 自定义音频中断事件函数
@@ -113,7 +113,7 @@ int32_t AudioPlayerOnInterruptEvent(OH_AudioRenderer *renderer, void *userData, 
         return 1;
     }
     AudioControlData *data = static_cast<AudioControlData *>(userData);
-    DLOG(INFO) <<"MyOnInterruptEvent type: %{public}d, hint:"<< type <<"hint: %{public}d"<< hint;
+    DLOG(INFO) <<"MyOnInterruptEvent type:  "<< type <<" hint:  "<< hint;
     return 0;
 }
 // 自定义异常回调函数
@@ -125,7 +125,7 @@ int32_t AudioPlayerOnError(OH_AudioRenderer *renderer, void *userData, OH_AudioS
         return 1;
     }
     AudioControlData *data = static_cast<AudioControlData *>(userData);
-    DLOG(INFO) <<"MyOnError error: %{public}d,"<< error;
+    DLOG(INFO) <<"MyOnError error: ,"<< error;
     return 0;
 }
 

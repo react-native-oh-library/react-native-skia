@@ -17,5 +17,4 @@ void SkiaManager::setManager(std::shared_ptr<RNSkia::RNSkManager> manager) { rnS
 
 std::shared_ptr<RNSkia::RNSkManager> SkiaManager::getManager() { return rnSkManager; };
 
-
 } // namespace RNSkia

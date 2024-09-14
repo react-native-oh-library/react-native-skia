@@ -1,6 +1,6 @@
 #include "SkiaPackage.h"
 #include "RNSkiaModule.h"
-#include "SkiaDomViewNapiBinder.h"
+#include "SkiaViewNapiBinder.h"
 #include "SkiaViewJSIBinder.h"
 
 
@@ -23,15 +23,19 @@ std::unique_ptr<TurboModuleFactoryDelegate> SkiaPackage::createTurboModuleFactor
 std::vector<facebook::react::ComponentDescriptorProvider> SkiaPackage::createComponentDescriptorProviders() {
     return {
         facebook::react::concreteComponentDescriptorProvider<facebook::react::SkiaDomViewComponentDescriptor>(),
+//         facebook::react::concreteComponentDescriptorProvider<facebook::react::SkiaPictureViewComponentDescriptor>(),
     };
 }
 
 ComponentJSIBinderByString SkiaPackage::createComponentJSIBinderByName() {
-    return {{"SkiaDomView", std::make_shared<SkiaDomViewJSIBinder>()}};
+    return {{"SkiaDomView", std::make_shared<SkiaDomViewJSIBinder>()},
+//             {"SkiaPictureView", std::make_shared<SkiaPictureViewJSIBinder>()}
+    };
 };
 
 ComponentNapiBinderByString SkiaPackage::createComponentNapiBinderByName() {
-    return {{"SkiaDomView", std::make_shared<SkiaDomViewNapiBinder>()}};
+    return {{"SkiaDomView", std::make_shared<SkiaDomViewNapiBinder>()},
+//             {"SkiaPictureView", std::make_shared<SkiaDomViewNapiBinder>()}
+    };
 };
-
 } // namespace rnoh

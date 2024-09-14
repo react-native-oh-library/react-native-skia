@@ -16,118 +16,117 @@
 #ifndef RN_SK_HARMONY_VIDEO_H
 #define RN_SK_HARMONY_VIDEO_H
 
+#include <rawfile/raw_file_manager.h>
 #include <string>
 #include "RNSkVideo.h"
-
+#include "audio_decoder.h"
+#include "audio_player.h"
 #include "RNSkPlatformContext.h"
 
+#include <bits/alltypes.h>
 #include <mutex>
 #include <memory>
 #include <atomic>
 #include <thread>
 #include <unistd.h>
-#include "audio_decoder.h"
-#include "audio_player.h"
+
 #include "decoder.h"
 #include "demuxer.h"
 #include "sample_info.h"
-#include <glog/logging.h>
+
 
 namespace RNSkia {
 
-using namespace std::chrono_literals;
-
 class RNSkHarmonyVideo : public RNSkVideo {
 public:
-    std::string url;
-
-    RNSkHarmonyVideo() = default;
-    RNSkHarmonyVideo(std::string url, RNSkPlatformContext *context) : url(std::move(url)), context(context) {}
-
+    RNSkHarmonyVideo() {}
+    static RNSkHarmonyVideo *GetInstance()
+    {
+        return &RNSkHarmonyVideo::HarmonyVideo;
+    }
+    
+    RNSkHarmonyVideo(std::string url, RNSkPlatformContext *context, const NativeResourceManager *nativeResourceManager)
+    : URI(url), context(context) ,nativeResMgr(nativeResourceManager) {
+        this->nativeResMgr = nativeResourceManager;
+        sampleInfo_.uri = URI;
+        Init(sampleInfo_);
+    }
     ~RNSkHarmonyVideo();
-
-    RNSkHarmonyVideo *GetInstance();
-    RNSkPlatformContext *context;
+    
+    bool IsRunning() { return isStarted_; }
+    
+    int32_t OpenFile(SampleInfo &sampleInfo);
     int32_t Init(SampleInfo &sampleInfo);
     int32_t Start();
-
-    void PauseAndResume() {
-        if (!isStarted_) {
-            DLOG(ERROR) << "PauseAndResume player is start";
-            return;
-        }
-        std::lock_guard<std::mutex> lock(pauseMutex_);
-        isPause_ = !isPause_;
-        pauseCond_.notify_all();
-    }
-
-    bool IsRunning() { return isStarted_; }
-
     void StartRelease();
-
+    void Release();
+    void ReleaseAudio();
+    void AudioPlay();
+    void PauseAndResume();
+    
+    RNSkPlatformContext *context;
+    const NativeResourceManager *nativeResMgr;
+    std::string DEFAULT_ASSETS_DEST = "assets/";
+    std::string DEFAULT_HTTP_DEST = "http";
 private:
-    int32_t loops_ = 1;
-
+    
+    int32_t frameCount = 0;
+    OH_NativeBuffer *nativeBuffer = nullptr;
+    
+    static RNSkHarmonyVideo HarmonyVideo;
+    
     std::mutex pauseMutex_;
     std::condition_variable pauseCond_;
     bool isPause_{false};
-
-    void Release();
-    void ReleaseAudio();
-    void DecInputThread();
-    void DecOutputThread();
+    
     void DecAudioInputThread();
     void DecAudioOutputThread();
-    void AudioPlay();
 
+    void DecInputThread();
+    void DecOutputThread();
+    void RenderThread();
+    void GetBufferData(CodecBufferInfo bufferInfo);
+    
     int32_t InitAudio();
     void InitControlSignal();
-
-    void GetBufferData(CodecBufferInfo bufferInfo);
     void GetPCMBufferData(AudioCodecBufferInfo bufferInfo);
-
-    std::mutex renderMutex_;
-    std::queue<std::vector<uint8_t>> renderQueue_;
-    std::unique_ptr<std::thread> renderThread_ = nullptr;
-    std::condition_variable renderCond_;
-
-    std::unique_ptr<Demuxer> demuxer_ = nullptr;
+    
+    std::string URI;
     std::unique_ptr<VideoDecoder> videoDecoder_ = nullptr;
+    std::unique_ptr<Demuxer> demuxer_ = nullptr;
     std::unique_ptr<AudioDecoder> audioDecoder_ = nullptr;
     std::unique_ptr<AudioPlayer> audioPlayer_ = nullptr;
+    
+    
     ADecSignal *audioSignal_ = nullptr;
     VDecSignal *signal_ = nullptr;
 
     std::atomic<bool> isStop_{false};
     std::atomic<bool> isVideoEnd_{false};
     std::atomic<bool> isAudioEnd_{false};
-    std::atomic<bool> isStarted_{false};
-    std::atomic<bool> isReleased_{false};
     std::atomic<bool> isEndOfFile_{false};
     std::atomic<bool> isVideoEndOfFile_{false};
 
     std::unique_ptr<std::thread> decAudioInputThread_ = nullptr;
     std::unique_ptr<std::thread> decAudioOutputThread_ = nullptr;
     std::unique_ptr<std::thread> audioPlayerThread_ = nullptr;
-
-    std::mutex mutex_;
-    std::unique_ptr<std::thread> decInputThread_ = nullptr;
-    std::unique_ptr<std::thread> decOutputThread_ = nullptr;
-    SampleInfo sampleInfo_;
-
-    static constexpr int64_t MICROSECOND = 1000000;
+    
     static constexpr int32_t DEFAULT_FRAME_RATE = 30;
     static constexpr int32_t ONEK = 1024;
     static constexpr int32_t AUDIO_SLEEP_TIME = 300;
-
-    int32_t bytesPerRow_ = 0;
-    int32_t sliceWidth_ = 0;
-    int32_t sliceHeight_ = 0;
-    int32_t sliceFormat_ = 0;
-
-    int32_t renderFrameCurIdx_ = 0;
-
+    
+    std::mutex mutex_;
+    std::atomic<bool> isStarted_{false};
+    std::atomic<bool> isReleased_{false};
+    std::unique_ptr<std::thread> decInputThread_ = nullptr;
+    std::unique_ptr<std::thread> decOutputThread_ = nullptr;
+    std::condition_variable doneCond_;
+    SampleInfo sampleInfo_;
+    VDecSignal *signal = nullptr;
+    static constexpr int64_t MICROSECOND = 1000000;
+    
 public:
+    
     sk_sp<SkImage> nextImage(double *timeStamp = nullptr) override;
     double duration() override;
     double framerate() override;
@@ -137,8 +136,13 @@ public:
     void play() override;
     void pause() override;
     void setVolume(float volume) override;
+    
 };
 
 } // namespace RNSkia
 
 #endif // RN_SK_HARMONY_VIDEO_H
+
+
+
+

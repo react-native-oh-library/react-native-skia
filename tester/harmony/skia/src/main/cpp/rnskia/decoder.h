@@ -31,7 +31,9 @@ public:
     int32_t PushInputData(CodecBufferInfo &info);
     int32_t FreeOutputData(uint32_t bufferIndex, bool render);
     int32_t Release();
-
+    
+    SampleInfo Info;
+    
 private:
     int32_t SetCallback(VDecSignal *signal);
 

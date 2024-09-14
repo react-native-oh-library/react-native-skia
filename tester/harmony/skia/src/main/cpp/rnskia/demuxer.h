@@ -33,12 +33,14 @@ public:
     bool hasAudio() { return audioTrackId_ != -1; }
     bool hasVideo() { return videoTrackId_ != -1; }
     OH_AVDemuxer *demuxer;
-
+    SampleInfo sampleInfo;
+    OH_AVBuffer *buffer = nullptr;
+    int32_t videoTrackId_ = -1;
 private:
     OH_AVSource *source;
     
 
-    int32_t videoTrackId_ = -1;
+    
     int32_t audioTrackId_ = -1;
 };
 

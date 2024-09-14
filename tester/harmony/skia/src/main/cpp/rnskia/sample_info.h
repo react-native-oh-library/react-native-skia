@@ -16,6 +16,7 @@
 #ifndef SAMPLE_INFO_H
 #define SAMPLE_INFO_H
 
+#include <EGL/egl.h>
 #include <EGL/eglplatform.h>
 #include <bits/alltypes.h>
 #include <cstdint>
@@ -27,7 +28,7 @@
 #include <native_buffer/native_buffer.h>
 #include "multimedia/player_framework/native_avcodec_base.h"
 #include "multimedia/player_framework/native_avbuffer.h"
-
+#include <glog/logging.h>
 namespace RNSkia {
 
 const std::string_view MIME_VIDEO_AVC = "video/avc";
@@ -39,14 +40,14 @@ constexpr int32_t BITRATE_30M = 30 * 1024 * 1024; // 30Mbps
 
 struct SampleInfo {
     int32_t sampleId = 0;
-    
+
     int32_t inputFd = -1;
     int32_t outFd = -1;
     int64_t inputFileOffset = 0;
     int64_t inputFileSize = 0;
     std::string inputFilePath;
     std::string outputFilePath;
-    std::string codecMime = MIME_VIDEO_AVC.data();
+    std::string codecMime = MIME_VIDEO_AVC.data(); // 硬解:std::string codecMime = OH_AVCODEC_MIMETYPE_VIDEO_HEVC 创建H265解码器
     int32_t videoWidth = 0;
     int32_t videoHeight = 0;
     double frameRate = 0.0;
@@ -59,25 +60,32 @@ struct SampleInfo {
 
     int64_t frameInterval = 0;
     int32_t perfmode = 0;
-    int32_t durationTime = 0;
+    
+    int64_t duration = 0;
+    int32_t rotate;
+
+    OH_AVPixelFormat pixelFormat = AV_PIXEL_FORMAT_NV12; // AV_PIXEL_FORMAT_YUVI420; AV_PIXEL_FORMAT_NV12/**
+    int32_t NumberFrames = 0;
     uint32_t maxFrames = UINT32_MAX;
     int32_t isHDRVivid = 0;
     uint32_t repeatTimes = 1;
-    OH_AVPixelFormat pixelFormat = AV_PIXEL_FORMAT_NV12; // AV_PIXEL_FORMAT_YUVI420;
+    
     bool needDumpOutput = false;
     uint32_t bitrateMode = CBR;
     int32_t hevcProfile = HEVC_PROFILE_MAIN;
-    int32_t rotation = 0;
+    
     NativeWindow* window = nullptr;
+    EGLSurface eglSurface = EGL_NO_SURFACE;
+    
 
     uint32_t bufferSize = 0;
     double readTime = 0;
     double memcpyTime = 0;
     double writeTime = 0;
-    
+
     void (*PlayDoneCallback)(void *context) = nullptr;
     void *playDoneCallbackData = nullptr;
-    
+
     int32_t width;
     int32_t height;
     std::string uri;
@@ -102,12 +110,14 @@ struct CodecBufferInfo {
         : bufferIndex(argBufferIndex), buffer(reinterpret_cast<uintptr_t *>(argBuffer))
     {
         OH_AVBuffer_GetBufferAttr(argBuffer, &attr);
+//         DLOG(INFO) << "OH_AVBuffer_GetBufferAttr argBuffer: " << argBuffer<<" buffer: "<<buffer;
     };
 
     CodecBufferInfo(uint32_t argBufferIndex, OH_AVBuffer *argBuffer, OH_AVCodec *argCodec)
         : bufferIndex(argBufferIndex), bufferOrigin(argBuffer), codec(argCodec)
     {
         OH_AVBuffer_GetBufferAttr(argBuffer, &attr);
+//         DLOG(INFO) << "OH_AVBuffer_GetBufferAttr argBuffer: " << argBuffer <<" bufferOrigin: "<<bufferOrigin;
     };
 };
 
