@@ -32,26 +32,24 @@ import {
 import { SkiaDomView } from './view/SkiaDomView';
 import Logger from './Logger';
 
-import { componentSnapshot } from '@kit.ArkUI';
+export interface SkiaPictureViewState {}
 
-export interface SkiaDomViewState {}
-
-export interface SkiaDomViewProps extends ViewRawProps {
+export interface SkiaPictureViewProps extends ViewRawProps {
   mode: string
   debug: boolean
 }
 
-export const SKIA_DOM_VIEW_TYPE: string = "SkiaDomView";
+export const SKIA_PICTURE_VIEW_TYPE: string = "SkiaPictureView";
 
-export type SkiaDomViewDescriptor = Descriptor<"SkiaDomView", ViewBaseProps, SkiaDomViewState, SkiaDomViewProps>
+export type SkiaPictureViewDescriptor = Descriptor<"SkiaPictureView", ViewBaseProps, SkiaPictureViewState, SkiaPictureViewProps>
 
-const TAG: string = 'RNOH in SkiaDomView'
+const TAG: string = 'RNOH in SkiaPictureView'
 
 @Component
-export struct RNCSkiaDomView {
+export struct RNCSkiaPictureView {
   ctx!: RNOHContext;
   tag: number = -1;
-  @State descriptor: SkiaDomViewDescriptor = {} as SkiaDomViewDescriptor;
+  @State descriptor: SkiaPictureViewDescriptor = {} as SkiaPictureViewDescriptor;
   private callbackList: Array<() => void> = []
   @Provide('mode') mode: string = "";
   @Provide('debug') debug: boolean = false;
@@ -60,12 +58,12 @@ export struct RNCSkiaDomView {
   @State viewHeight: number = 0;
 
   aboutToAppear(): void {
-    this.descriptor = this.ctx.descriptorRegistry.getDescriptor<SkiaDomViewDescriptor>(this.tag);
+    this.descriptor = this.ctx.descriptorRegistry.getDescriptor<SkiaPictureViewDescriptor>(this.tag);
     Logger.debug(TAG, `descriptor rawProps, ${JSON.stringify(this.descriptor.rawProps)}`);
     Logger.debug(TAG, `descriptor layoutMetrics, ${JSON.stringify(this.descriptor.layoutMetrics)}`);
     this.callbackList.push(this.ctx.descriptorRegistry.subscribeToDescriptorChanges(this.tag,
       (newDescriptor) => {
-        this.descriptor = (newDescriptor as SkiaDomViewDescriptor);
+        this.descriptor = (newDescriptor as SkiaPictureViewDescriptor);
 
         /*------ 当RN侧属性有更改 -------*/
         Logger.debug(TAG, `newDescriptor rawProps, ${JSON.stringify(this.descriptor.rawProps)}`);
