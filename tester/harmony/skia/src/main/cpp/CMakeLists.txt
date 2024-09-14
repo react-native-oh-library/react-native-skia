@@ -4,6 +4,8 @@ set(CMAKE_VERBOSE_MAKEFILE on)
 
 add_definitions(-DOHOS_PLATFORM)
 
+add_subdirectory("./json" ./jsoncpp)
+
 set (PACKAGE_NAME "rnoh_skia")
 set (SKIA_LIB "skia")
 set (SKIA_SVG_LIB "svg")
@@ -17,14 +19,24 @@ file(GLOB rnoh_skia_SRC CONFIGURE_DEPENDS
 
     ./skia/*.cpp
     ./skia/third_party/*.cpp
-
+    ./skia_ohos/*.cpp
     ./rnskia/*.cpp
+    ./skia/src/ports/SkFontHost_FreeType.cpp
+    ./skia/src/core/SkScalerContext.cpp
+    ./skia/src/core/SkTypeface.cpp
+    ./skia/src/ports/SkFontHost_FreeType_common.cpp
     )
 add_library(${PACKAGE_NAME} SHARED ${rnoh_skia_SRC})
 
 target_include_directories(${PACKAGE_NAME} PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 target_include_directories(${PACKAGE_NAME} PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/skia)
+target_include_directories(${PACKAGE_NAME} PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/skia/include/)
+target_include_directories(${PACKAGE_NAME} PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/skia/src/)
 target_include_directories(${PACKAGE_NAME} PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/rnskia)
+target_include_directories(${PACKAGE_NAME} PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
+target_include_directories(${PACKAGE_NAME} PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/freetype)
+target_include_directories(${PACKAGE_NAME} PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/src)
+target_include_directories(${PACKAGE_NAME} PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/skia_ohos/)
 target_include_directories(${PACKAGE_NAME} PUBLIC ${HMOS_SDK_NATIVE}/sysroot/usr/include)
 
 target_link_directories(${PACKAGE_NAME} PUBLIC ${HMOS_SDK_NATIVE}/sysroot/usr/lib/aarch64-linux-ohos)
@@ -45,7 +57,7 @@ target_link_libraries(${PACKAGE_NAME} PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/lib/lib
 target_link_libraries(${PACKAGE_NAME} PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/lib/libmodules__skottie.a)
 target_link_libraries(${PACKAGE_NAME} PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/lib/libmodules__skresources.a)
 target_link_libraries(${PACKAGE_NAME} PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/lib/libmodules__sksg.a)
-target_link_libraries(${PACKAGE_NAME} PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/lib/libpathkit.a)
+#target_link_libraries(${PACKAGE_NAME} PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/lib/libpathkit.a)
 
 set (SKIA_LIBS_PATH "${CMAKE_CURRENT_SOURCE_DIR}/lib")
 add_library(skia STATIC IMPORTED)
@@ -119,6 +131,7 @@ target_link_libraries(
     ${SKIA_SKPARAGRAPH_LIB}
     ${SKIA_SKUNICODE_LIB}
     ${SKIA_LIB}
+    jsoncpp
 
     libnative_image.so
     libnative_window.so

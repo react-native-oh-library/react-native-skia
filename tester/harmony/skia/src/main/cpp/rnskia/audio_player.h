@@ -49,15 +49,18 @@ public:
     void InsertBuffer(std::vector<uint8_t> buffer);
 
     void SetVolume(float volume);
-    
+
     void Init(AudioInitData audioInitData);
     void Start() { OH_AudioRenderer_Start(audioRenderer_); }
     void Stop() { OH_AudioRenderer_Stop(audioRenderer_); }
     void Pause() { OH_AudioRenderer_Pause(audioRenderer_); }
-    
+
     void EndOfFile() { audioControlData_.isEOS = true; }
-    bool IsStop() {return audioControlData_.isStop;}
-    
+    bool IsStop()
+    {
+        return audioControlData_.isStop;
+    }
+
     void GetState(OH_AudioStream_State *state) {OH_AudioRenderer_GetCurrentState(audioRenderer_, state);}
 private:
     AudioControlData audioControlData_;

@@ -14,100 +14,349 @@
  */
 
 #include "RNSkHarmonyVideo.h"
+#include "RNSkOpenGLCanvasProvider.h"
+#include <glog/logging.h>
 #include <chrono>
-#include <cstdint>
+#include <bits/alltypes.h>
 #include <multimedia/player_framework/native_averrors.h>
+#include "plugin_manager.h"
+#include <cstdint>
 #include <fcntl.h>
-#include <sys/stat.h>
+#include <regex>
 #include <vector>
 
-namespace RNSkia {
+#undef LOG_TAG
+#define LOG_TAG "player"
 
+namespace {
+using namespace std::chrono_literals;
+}
+namespace RNSkia {
+RNSkHarmonyVideo RNSkHarmonyVideo::HarmonyVideo;
 RNSkHarmonyVideo::~RNSkHarmonyVideo()
 {
     RNSkHarmonyVideo::StartRelease();
 }
 
-RNSkHarmonyVideo *RNSkHarmonyVideo::GetInstance()
+int32_t RNSkHarmonyVideo::OpenFile(SampleInfo &sampleInfo)
 {
-    static RNSkHarmonyVideo GetInstance;
-    return &GetInstance;
-}
-
-int32_t OpenFile(SampleInfo &sampleInfo)
-{
+    DLOG(INFO) <<"OpenFile enter.";
     if (sampleInfo.uri.empty()) {
         DLOG(INFO) <<"OpenFile: url empty";
         return AV_ERR_UNKNOWN;
     }
-    const char *file = sampleInfo.uri.c_str();
+    
+    std::string assetsFilePath = sampleInfo.uri;
+    std::string Prefixes = "../../";
+    
+    if (sampleInfo.uri.find(Prefixes) == 0) {
+        assetsFilePath = DEFAULT_ASSETS_DEST + sampleInfo.uri.substr(Prefixes.length());
+        DLOG(INFO) << "ReadAssetsData assetsFilePath=" << assetsFilePath;
+    }
+      
+    if (nativeResMgr == nullptr) {
+        DLOG(ERROR) << "ReadAssetsData env error, nativeResMgr: "<< nativeResMgr;
+    }
+    
+    RawFile *_file = OH_ResourceManager_OpenRawFile(nativeResMgr, assetsFilePath.c_str());
+    if (_file == nullptr) {
+        DLOG(ERROR) << "ReadAssetsData open file error.";
+    }
+    RawFileDescriptor descriptor;
+    OH_ResourceManager_GetRawFileDescriptor(_file, descriptor);
 
-    sampleInfo.inputFd = -1;
-    sampleInfo.inputFileSize = 0;
-    sampleInfo.inputFileOffset = 0;
-    sampleInfo.inputFd = open(file, O_RDONLY);
-    DLOG(INFO) <<"Open file: fd = %{public}d" << sampleInfo.inputFd;
+    sampleInfo.inputFd = descriptor.fd;
+    sampleInfo.inputFileSize = descriptor.length;
+    sampleInfo.inputFileOffset = descriptor.start;
+    DLOG(INFO) <<"Open file: fd = " << sampleInfo.inputFd<<" sampleInfo.inputFileSize: " << sampleInfo.inputFileSize;
     if (sampleInfo.inputFd == -1) {
-        DLOG(ERROR) <<"cont open file";
+        DLOG(ERROR) <<"cont open file, error: " << strerror(errno);
         return AV_ERR_UNKNOWN;
     }
 
-    struct stat fileStatus {};
-    if (stat(file, &fileStatus) == 0) {
-        sampleInfo.inputFileSize = static_cast<size_t>(fileStatus.st_size);
-        DLOG(INFO) <<"Get stat:%{public}zu" << sampleInfo.inputFileSize;
-        return AV_ERR_OK;
-    } else {
-        DLOG(INFO) <<"Get stat file size error";
-        return AV_ERR_UNKNOWN;
-    }
+    DLOG(INFO) <<"OpenFile end.";
+    return AV_ERR_OK;
 }
 
 int32_t RNSkHarmonyVideo::Init(SampleInfo &sampleInfo)
 {
+    DLOG(INFO) << "Init enter.";
     std::lock_guard<std::mutex> lock(mutex_);
     if (isStarted_) {
         DLOG(ERROR) <<"Already started.";
         return AV_ERR_UNKNOWN;
     }
-    if (OpenFile(sampleInfo) != AV_ERR_OK) {
-        return AV_ERR_UNKNOWN;
+    std::string HTTPFilePath = sampleInfo.uri;
+    std::string https = "https"; 
+    if (sampleInfo.uri.find(https) == 0) {
+        HTTPFilePath = DEFAULT_HTTP_DEST + sampleInfo.uri.substr(https.length());
+        
+        DLOG(INFO) << "OpenFile HTTPFilePath=" << https;
+        sampleInfo.uri = HTTPFilePath;
+    } else {
+        OpenFile(sampleInfo);
     }
+    
+    sampleInfo_ = sampleInfo;
+
     videoDecoder_ = std::make_unique<VideoDecoder>();
     if (!videoDecoder_) {
         DLOG(ERROR) << "Create videoDecoder_ failed";
         return AV_ERR_UNKNOWN;
     }
-
     demuxer_ = std::make_unique<Demuxer>();
-    int32_t ret = demuxer_->CreateDemuxer(sampleInfo);
+    int32_t ret = demuxer_->CreateDemuxer(sampleInfo_);
     if (ret != AV_ERR_OK) {
         DLOG(ERROR) << "Create demuxer failed";
         return AV_ERR_UNKNOWN;
     }
-    
-    ret = videoDecoder_->CreateVideoDecoder(sampleInfo.codecMime);
+    ret = videoDecoder_->CreateVideoDecoder(sampleInfo_.codecMime);
     if (ret != AV_ERR_OK) {
         DLOG(ERROR) << "Create video decoder failed";
         return AV_ERR_UNKNOWN;
     }
-
     if (demuxer_->hasAudio()) {
         ret = InitAudio();
         if (ret != AV_ERR_OK) {
             return ret;
         }
     }
+    signal = new VDecSignal;
     
-    signal_ = new VDecSignal;
-    ret = videoDecoder_->Config(sampleInfo, signal_);
+//     sampleInfo_.window = PluginManager::GetInstance()->m_window; // PluginManager  OH_NativeWindow
+
+    ret = videoDecoder_->Config(sampleInfo_, signal);
     if (ret != AV_ERR_OK) {
-        DLOG(ERROR) << "Decoder config failed";
+        DLOG(ERROR) <<  "Decoder config failed";
         return AV_ERR_UNKNOWN;
     }
-    
     InitControlSignal();
-    return Start();
+    
+    return AV_ERR_OK;
+}
+
+int32_t RNSkHarmonyVideo::Start()
+{
+    DLOG(INFO) << "RNSkHarmonyVideo Start begin.";
+    std::lock_guard<std::mutex> lock(mutex_);
+    if (isStarted_) {
+        DLOG(ERROR) <<  "Already started.";
+        return AV_ERR_UNKNOWN;
+    }
+    int32_t ret = videoDecoder_->StartVideoDecoder();
+    if (ret != AV_ERR_OK) {
+        DLOG(ERROR) <<  "Decoder start failed";
+        return AV_ERR_UNKNOWN;
+    }
+    isStarted_ = true;
+    
+    // 有无音频
+    if (demuxer_->hasAudio()) {
+        DLOG(INFO) <<"video has audio";
+        ret = audioDecoder_->StartAudioDecoder();
+        if (ret != AV_ERR_OK) {
+            DLOG(ERROR) << "audio Decoder start failed";
+            return AV_ERR_UNKNOWN;
+        }
+        // 音频输入输出播放
+        decAudioInputThread_ = std::make_unique<std::thread>(&RNSkHarmonyVideo::DecAudioInputThread, this);
+        decAudioOutputThread_ = std::make_unique<std::thread>(&RNSkHarmonyVideo::DecAudioOutputThread, this);
+        audioPlayerThread_ = std::make_unique<std::thread>(&RNSkHarmonyVideo::AudioPlay, this);
+        if (decAudioInputThread_ == nullptr || decAudioOutputThread_ == nullptr || audioPlayerThread_ == nullptr) {
+            DLOG(ERROR) << "Create thread failed";
+            ReleaseAudio();
+            return AV_ERR_UNKNOWN;
+        }
+    } else {
+        isAudioEnd_ = true;
+    }
+    
+    decInputThread_ = std::make_unique<std::thread>(&RNSkHarmonyVideo::DecInputThread, this);
+    decOutputThread_ = std::make_unique<std::thread>(&RNSkHarmonyVideo::DecOutputThread, this);
+    if (decInputThread_ == nullptr || decOutputThread_ == nullptr) {
+        DLOG(ERROR) << "Create thread failed";
+        StartRelease();
+        return AV_ERR_UNKNOWN;
+    }
+    doneCond_.notify_all();
+    return AV_ERR_OK;
+}
+
+void RNSkHarmonyVideo::StartRelease()
+{
+    if (!isReleased_) {
+        isReleased_ = true;
+        ReleaseAudio();
+        Release();
+    }
+}
+
+void RNSkHarmonyVideo::ReleaseAudio()
+{
+    DLOG(INFO) << "ReleaseAudio enter.";
+    if (decAudioInputThread_ && decAudioInputThread_->joinable()) {
+        decAudioInputThread_->join();
+    }
+    decAudioInputThread_.reset();
+
+    if (decAudioOutputThread_ && decAudioOutputThread_->joinable()) {
+        decAudioOutputThread_->join();
+        decAudioOutputThread_.reset();
+    }
+
+    if (audioPlayerThread_ && audioPlayerThread_->joinable()) {
+        audioPlayerThread_->detach();
+        audioPlayerThread_.reset();
+    }
+    if (audioPlayer_ != nullptr) {
+        audioPlayer_->Release();
+        audioPlayer_.reset();
+    }
+    if (audioDecoder_ != nullptr) {
+        audioDecoder_->Release();
+        audioDecoder_.reset();
+    }
+    if (audioSignal_ != nullptr) {
+        delete audioSignal_;
+        audioSignal_ = nullptr;
+    }
+    DLOG(INFO) << "ReleaseAudio release end";
+}
+
+void RNSkHarmonyVideo::Release()
+{
+    DLOG(INFO) << "Release enter.";
+    std::lock_guard<std::mutex> lock(mutex_);
+    isStarted_ = false;
+    
+    if (decInputThread_ && decInputThread_->joinable()) {
+        decInputThread_->detach();
+        decInputThread_.reset();
+    }
+    if (decOutputThread_ && decOutputThread_->joinable()) {
+        decOutputThread_->detach();
+        decOutputThread_.reset();
+    }
+    decOutputThread_.reset();
+    if (demuxer_ != nullptr) {
+        demuxer_->Release();
+        demuxer_.reset();
+    }
+
+    if (videoDecoder_ != nullptr) {
+        videoDecoder_->Release();
+        videoDecoder_.reset();
+    }
+    if (signal != nullptr) {
+        delete signal;
+        signal = nullptr;
+    }
+    if (sampleInfo_.inputFd != -1) {
+        close(sampleInfo_.inputFd);
+        sampleInfo_.inputFd = -1;
+    }
+    isStop_ = false;
+    isStarted_ = false;
+    isReleased_ = true;
+    isPause_ = false;
+    isEndOfFile_ = false;
+    isVideoEndOfFile_ = false;
+
+    doneCond_.notify_all();
+    if (sampleInfo_.PlayDoneCallback) {
+        sampleInfo_.PlayDoneCallback(sampleInfo_.playDoneCallbackData);
+        DLOG(INFO) <<"play end callback";
+    }
+    doneCond_.notify_all();
+    DLOG(INFO) << "Release end.";
+}
+
+void RNSkHarmonyVideo::DecInputThread()
+{
+    DLOG(INFO) << "DecInputThread enter";
+    while (true) {
+        if (!isStarted_) {
+            DLOG(ERROR) << "Decoder input thread out";
+            break;
+        }
+        std::unique_lock<std::mutex> lock(signal->inputMutex_);
+        bool condRet = signal->inputCond_.wait_for(
+            lock, 300ms, [this]() { return !isStarted_ || !signal->inputBufferInfoQueue_.empty(); });
+        if (!isStarted_) {
+            DLOG(ERROR) << "Work done, thread out";
+            break;
+        }
+        if (signal->inputBufferInfoQueue_.empty()) {
+            DLOG(ERROR) << "Buffer queue is empty, continue, cond ret: "<< condRet;
+        }
+        
+        CodecBufferInfo bufferInfo = signal->inputBufferInfoQueue_.front();
+        signal->inputBufferInfoQueue_.pop();
+        signal->inputFrameCount_++;
+        lock.unlock();
+        
+        demuxer_->ReadSample(reinterpret_cast<OH_AVBuffer *>(bufferInfo.buffer), bufferInfo.attr);
+        // 送入输入队列进行解码
+        int32_t ret = videoDecoder_->PushInputData(bufferInfo);
+        if (ret != AV_ERR_OK) {
+            DLOG(ERROR) << "Push data failed, thread out";
+            break;
+        }
+        
+        if (bufferInfo.attr.flags & AVCODEC_BUFFER_FLAGS_EOS) {
+            DLOG(ERROR) << "Catch EOS, thread out";
+            break;
+        }
+    }
+}
+
+void RNSkHarmonyVideo::DecOutputThread()
+{
+    DLOG(INFO) << "DecOutputThread enter";
+    if (sampleInfo_.frameRate <= 0) {
+        sampleInfo_.frameRate = DEFAULT_FRAME_RATE;
+    }
+    sampleInfo_.frameInterval = MICROSECOND / sampleInfo_.frameRate;
+    DLOG(INFO) << "sampleInfo_.frameInterval:  "<< sampleInfo_.frameInterval;
+    while (true) {
+        thread_local auto lastPushTime = std::chrono::system_clock::now();
+        if (!isStarted_) {
+            DLOG(ERROR) << "Decoder output thread out";
+            break;
+        }
+        std::unique_lock<std::mutex> lock(signal->outputMutex_);
+        bool condRet = signal->outputCond_.wait_for(
+            lock, 300ms, [this]() { return !isStarted_ || !signal->outputBufferInfoQueue_.empty(); });
+        if (!isStarted_) {
+            DLOG(ERROR) << "Work done, thread out";
+            break;
+        }
+        if (signal->outputBufferInfoQueue_.empty()) {
+            DLOG(ERROR) << "Buffer queue is empty, continue, cond ret: " << condRet;
+        }
+        CodecBufferInfo bufferInfo = signal->outputBufferInfoQueue_.front();
+        signal->outputBufferInfoQueue_.pop();
+        if (bufferInfo.attr.flags & AVCODEC_BUFFER_FLAGS_EOS) {
+            DLOG(ERROR) << "Catch EOS, thread out";
+            break;
+        }
+        signal->outputFrameCount_++;
+        frameCount =  signal->outputFrameCount_;
+        DLOG(INFO) << "DecOutputThread 输出线程 第 " <<signal->outputFrameCount_ <<" 帧, 大小: "<< bufferInfo.attr.size << 
+        " flag: "<<bufferInfo.attr.flags <<" 播放时间标记: "<<  bufferInfo.attr.pts << " 微秒, bufferOrigin: " << bufferInfo.bufferOrigin;
+        lock.unlock();
+        OH_AVBuffer *Buffer = reinterpret_cast<OH_AVBuffer *>(bufferInfo.buffer);
+        nativeBuffer = OH_AVBuffer_GetNativeBuffer(Buffer);
+
+        int32_t ret = videoDecoder_->FreeOutputData(bufferInfo.bufferIndex, true);
+        if (ret != AV_ERR_OK) {
+            DLOG(ERROR) << "DecOutputThread 解码器输出线程退出";
+            break;
+        }
+        std::this_thread::sleep_until(lastPushTime + std::chrono::microseconds(sampleInfo_.frameInterval));
+        lastPushTime = std::chrono::system_clock::now();
+    }
+    DLOG(ERROR) << "DecOutputThread 线程结束, 当前帧: "<< signal->outputFrameCount_;
 }
 
 int32_t RNSkHarmonyVideo::InitAudio()
@@ -128,7 +377,7 @@ int32_t RNSkHarmonyVideo::InitAudio()
     AudioInitData audioInitData;
     audioInitData.channelCount = sampleInfo_.channelCount;
     audioInitData.samplingRate = sampleInfo_.sampleRate;
-    DLOG(ERROR) << "audio audioInitData %{public}d" << audioInitData.samplingRate;
+    DLOG(INFO) << "audio audioInitData ：" << audioInitData.samplingRate;
     audioPlayer_->Init(audioInitData);
     return AV_ERR_OK;
 }
@@ -148,274 +397,9 @@ void RNSkHarmonyVideo::InitControlSignal()
     isVideoEndOfFile_ = false;
 }
 
-int32_t RNSkHarmonyVideo::Start()
-{
-    if (isStarted_) {
-        DLOG(ERROR) << "Already started.";
-        return AV_ERR_UNKNOWN;
-    }
-    if (!videoDecoder_ || !demuxer_) {
-        DLOG(ERROR) << "Please Init first.";
-        return AV_ERR_UNKNOWN;
-    }
-    isStarted_ = true;
-    int32_t ret = videoDecoder_->StartVideoDecoder();
-    if (ret != AV_ERR_OK) {
-        DLOG(ERROR) << "Decoder start failed";
-        return AV_ERR_UNKNOWN;
-    }
-    if (demuxer_->hasAudio()) {
-        DLOG(INFO) <<"video has audio";
-        ret = audioDecoder_->StartAudioDecoder();
-        if (ret != AV_ERR_OK) {
-            DLOG(ERROR) << "audio Decoder start failed";
-            return AV_ERR_UNKNOWN;
-        }
-        
-        decAudioInputThread_ = std::make_unique<std::thread>(&RNSkHarmonyVideo::DecAudioInputThread, this);
-        decAudioOutputThread_ = std::make_unique<std::thread>(&RNSkHarmonyVideo::DecAudioOutputThread, this);
-        audioPlayerThread_ = std::make_unique<std::thread>(&RNSkHarmonyVideo::AudioPlay, this);
-        if (decAudioInputThread_ == nullptr || decAudioOutputThread_ == nullptr || audioPlayerThread_ == nullptr) {
-            DLOG(ERROR) << "Create thread failed";
-            
-            ReleaseAudio();
-            return AV_ERR_UNKNOWN;
-        }
-    } else {
-        isAudioEnd_ = true;
-    }
-    
-    decInputThread_ = std::make_unique<std::thread>(&RNSkHarmonyVideo::DecInputThread, this);
-    decOutputThread_ = std::make_unique<std::thread>(&RNSkHarmonyVideo::DecOutputThread, this);
-    if (decInputThread_ == nullptr || decOutputThread_ == nullptr) {
-        DLOG(ERROR) << "Create thread failed";
-        StartRelease();
-        return AV_ERR_UNKNOWN;
-    }
-    return AV_ERR_OK;
-}
-
-void RNSkHarmonyVideo::StartRelease()
-{
-    DLOG(INFO) <<"StartRelease %{public}d"<< isVideoEnd_.load()<< " %{public}d" << isAudioEnd_.load();
-    if (isReleased_) return;
-    // 获取锁
-    std::unique_lock<std::mutex> lock(mutex_);
-    if (!isVideoEnd_ || !isAudioEnd_) return;
-    // 确保只释放一次
-    if (!isReleased_) {
-        // 执行释放操作
-        ReleaseAudio();
-        Release();
-    }
-}
-
-void RNSkHarmonyVideo::ReleaseAudio()
-{
-    if (decAudioInputThread_ && decAudioInputThread_->joinable()) {
-        decAudioInputThread_->join();
-    }
-    decAudioInputThread_.reset();
-    
-    if (decAudioOutputThread_ && decAudioOutputThread_->joinable()) {
-        decAudioOutputThread_->join();
-        decAudioOutputThread_.reset();
-    }
-    
-    if (audioPlayerThread_ && audioPlayerThread_->joinable()) {
-        audioPlayerThread_->detach();
-        audioPlayerThread_.reset();
-    }
-    if (audioPlayer_ != nullptr) {
-        audioPlayer_->Release();
-        audioPlayer_.reset();
-    }
-    if (audioDecoder_ != nullptr) {
-        audioDecoder_->Release();
-        audioDecoder_.reset();
-    }
-    if (audioSignal_ != nullptr) {
-        delete audioSignal_;
-        audioSignal_ = nullptr;
-    }
-    DLOG(ERROR) << "Player: audio release end";
-}
-
-void RNSkHarmonyVideo::Release()
-{
-    if (decInputThread_ && decInputThread_->joinable()) {
-        decInputThread_->join();
-    }
-    decInputThread_.reset();
-
-    if (decOutputThread_ && decOutputThread_->joinable()) {
-        decOutputThread_->join();
-    }
-    decOutputThread_.reset();
-
-    if (renderThread_ && renderThread_->joinable()) {
-        renderThread_->detach();
-        renderThread_.reset();
-    }
-    
-    if (videoDecoder_ != nullptr) {
-        videoDecoder_->Release();
-        videoDecoder_.reset();
-    }
-    if (demuxer_ != nullptr) {
-        demuxer_->Release();
-        demuxer_.reset();
-    }
-    
-    if (sampleInfo_.inputFd != -1) {
-        close(sampleInfo_.inputFd);
-        sampleInfo_.inputFd = -1;
-    }
-
-    auto emptyQueue = std::queue<std::vector<uint8_t>>();
-    renderQueue_.swap(emptyQueue);
-    if (signal_ != nullptr) {
-        delete signal_;
-        signal_ = nullptr;
-    }
-    
-    isStop_ = false;
-    isStarted_ = false;
-    isReleased_ = true;
-    isPause_ = false;
-    isEndOfFile_ = false;
-    isVideoEndOfFile_ = false;
-    renderFrameCurIdx_ = 0;
-    if (sampleInfo_.PlayDoneCallback) {
-        sampleInfo_.PlayDoneCallback(sampleInfo_.playDoneCallbackData);
-        DLOG(INFO) <<"play end callback";
-    }
-    DLOG(ERROR) << "Player: release end: %{public}d"<< loops_;
-}
-
-void RNSkHarmonyVideo::DecInputThread()
-{
-    while (true) {
-        if (!isStarted_) {
-            DLOG(ERROR) << "Decoder input thread out";
-            break;
-        }
-        if (isStop_) {
-            DLOG(ERROR) << "play stop";
-            break;
-        }
-        std::unique_lock<std::mutex> lock(signal_->inputMutex_);
-        bool condRet = signal_->inputCond_.wait_for(
-            lock, 300ms, [this]() { return !isStarted_ || !signal_->inputBufferInfoQueue_.empty();});
-        if (!isStarted_) {
-            DLOG(ERROR) << "Work done, thread out";
-            break;
-        }
-        if (signal_->inputBufferInfoQueue_.empty()) {
-            DLOG(ERROR) << "DecInputThread Buffer queue is empty, continue, cond ret: %{public}d"<< condRet;
-            continue;
-        }
-
-        CodecBufferInfo bufferInfo = signal_->inputBufferInfoQueue_.front();
-        signal_->inputBufferInfoQueue_.pop();
-        signal_->inputFrameCount_++;
-        lock.unlock();
-
-        if (!bufferInfo.buffer) {
-            DLOG(ERROR) << "DecInputThread bufferInfo buffer empty, continue";
-            continue;
-        }
-        demuxer_->ReadSample(reinterpret_cast<OH_AVBuffer *>(bufferInfo.buffer), bufferInfo.attr);
-        int32_t ret = videoDecoder_->PushInputData(bufferInfo);
-        if (ret != AV_ERR_OK) {
-            DLOG(ERROR) << "Push data failed, thread out";
-            break;
-        }
-        
-        if (bufferInfo.attr.flags & AVCODEC_BUFFER_FLAGS_EOS) {
-            DLOG(ERROR) << "Catch EOS, in thread out";
-            break;
-        }
-    }
-    DLOG(ERROR) << "DecInputThread thread out";
-}
-
-void RNSkHarmonyVideo::GetBufferData(CodecBufferInfo bufferInfo)
-{
-    std::vector<uint8_t> buffer;
-    OH_AVFormat *temFormat = OH_VideoDecoder_GetOutputDescription(bufferInfo.codec);
-    OH_AVFormat_GetIntValue(temFormat, OH_MD_KEY_VIDEO_STRIDE, &bytesPerRow_);
-    OH_AVFormat_GetIntValue(temFormat, OH_MD_KEY_WIDTH, &sliceWidth_);
-    OH_AVFormat_GetIntValue(temFormat, OH_MD_KEY_HEIGHT, &sliceHeight_);
-    OH_AVFormat_GetIntValue(temFormat, OH_MD_KEY_PIXEL_FORMAT, &sliceFormat_);
-    
-    OH_AVFormat_Destroy(temFormat);
-    if (!bufferInfo.bufferOrigin)
-        return;
-    uint8_t *dataPtr = reinterpret_cast<uint8_t *>(OH_AVBuffer_GetAddr(bufferInfo.bufferOrigin));
-    buffer.assign(dataPtr, dataPtr + bufferInfo.attr.size);
-
-    std::unique_lock<std::mutex> pauseLock(pauseMutex_);
-    pauseCond_.wait(pauseLock, [this]() { return !isPause_;});
-    pauseLock.unlock();
-    std::unique_lock<std::mutex> lock(renderMutex_);
-    renderQueue_.push(buffer);
-    renderCond_.notify_all();
-}
-
-void RNSkHarmonyVideo::DecOutputThread()
-{
-    DLOG(ERROR) << "sampleInfo_.frameInterval:  %{public}ld"<< sampleInfo_.frameInterval;
-    while (true) {
-        thread_local auto lastPushTime = std::chrono::system_clock::now();
-        if (!isStarted_) {
-            DLOG(ERROR) << "Decoder output thread out";
-            break;
-        }
-        if (isStop_) {
-            DLOG(ERROR) << "play stop";
-            break;
-        }
-        std::unique_lock<std::mutex> lock(signal_->outputMutex_);
-        bool condRet = signal_->outputCond_.wait_for(
-            lock, 300ms, [this]() { return !isStarted_ || !signal_->outputBufferInfoQueue_.empty(); });
-        if (!isStarted_) {
-            DLOG(ERROR) << "Decoder output thread done out";
-            break;
-        }
-        if (signal_->outputBufferInfoQueue_.empty()) {
-            DLOG(ERROR) << "DecOutputThread Buffer queue is empty, continue, cond ret: %{public}d"<< condRet;
-            continue;
-        }
-
-        CodecBufferInfo bufferInfo = signal_->outputBufferInfoQueue_.front();
-        signal_->outputBufferInfoQueue_.pop();
-        if (bufferInfo.attr.flags & AVCODEC_BUFFER_FLAGS_EOS) {
-            DLOG(ERROR) << "Catch EOS, out thread out";
-            isVideoEndOfFile_ = true;
-            break;
-        }
-        
-        signal_->outputFrameCount_++;
-        DLOG(INFO) <<"Out buffer count: %{public}d" << signal_->outputFrameCount_ << "size: %{public}d" <<
-            bufferInfo.attr.size << "flag: %{public}u" <<  bufferInfo.attr.flags << " pts: %{public}ld" <<  bufferInfo.attr.pts;
-        lock.unlock();
-        GetBufferData(bufferInfo);
-
-        int32_t ret = videoDecoder_->FreeOutputData(bufferInfo.bufferIndex, false);
-        if (ret != AV_ERR_OK) {
-            DLOG(ERROR) << "Decoder output thread out free";
-            break;
-        }
-
-        std::this_thread::sleep_until(lastPushTime + std::chrono::microseconds(sampleInfo_.frameInterval));
-        lastPushTime = std::chrono::system_clock::now();
-    }
-    DLOG(ERROR) << "Exit, frame count: %{public}u"<< signal_->outputFrameCount_;
-}
-
 void RNSkHarmonyVideo::DecAudioInputThread()
 {
+    DLOG(INFO) << "DecAudioInputThenter enter";
     while (true) {
         if (!isStarted_) {
             DLOG(ERROR) << "audio Decoder input thread out";
@@ -433,10 +417,9 @@ void RNSkHarmonyVideo::DecAudioInputThread()
             break;
         }
         if (audioSignal_->audioInputBufferInfoQueue_.empty()) {
-            DLOG(ERROR) << "audio Buffer queue is empty, continue, cond ret: %{public}d"<< condRet;
-            continue;
+            DLOG(ERROR) << "audio Buffer queue is empty, continue, cond ret: "<< condRet;
         }
-
+        
         AudioCodecBufferInfo bufferInfo = audioSignal_->audioInputBufferInfoQueue_.front();
         audioSignal_->audioInputBufferInfoQueue_.pop();
         lock.unlock();
@@ -462,14 +445,14 @@ void RNSkHarmonyVideo::GetPCMBufferData(AudioCodecBufferInfo bufferInfo)
     uint8_t *dataPtr = reinterpret_cast<uint8_t *>(OH_AVBuffer_GetAddr(bufferInfo.bufferOrigin));
     std::vector<uint8_t> oneFrame;
     oneFrame.assign(dataPtr, dataPtr + bufferInfo.attr.size);
-    
+
     audioPlayer_->InsertBuffer(oneFrame);
 }
 
 void RNSkHarmonyVideo::DecAudioOutputThread()
 {
-    DLOG(ERROR) << "DecAudioOutputThread :%{public}ld %{public}ld "<<
-        ONEK * MICROSECOND / int32_t(sampleInfo_.sampleRate)<< "%{public}ld" << sampleInfo_.frameInterval;
+    DLOG(INFO) << "DecAudioOutputThread :  "<< ONEK * MICROSECOND / int32_t(sampleInfo_.sampleRate) << 
+    " sampleInfo_.frameInterval " << sampleInfo_.frameInterval;
     int32_t audioFrameInterval = ONEK * MICROSECOND / int32_t(sampleInfo_.sampleRate);
     while (true) {
         thread_local auto lastPushTime = std::chrono::system_clock::now();
@@ -489,8 +472,7 @@ void RNSkHarmonyVideo::DecAudioOutputThread()
             break;
         }
         if (audioSignal_->audioOutputBufferInfoQueue_.empty()) {
-            DLOG(ERROR) << "audio out Buffer queue is empty, continue, cond ret: %{public}d"<< condRet;
-            continue;
+            DLOG(ERROR) << "audio out Buffer queue is empty, continue, cond ret: "<< condRet;
         }
 
         AudioCodecBufferInfo bufferInfo = audioSignal_->audioOutputBufferInfoQueue_.front();
@@ -502,11 +484,11 @@ void RNSkHarmonyVideo::DecAudioOutputThread()
         }
         lock.unlock();
         GetPCMBufferData(bufferInfo);
-        
+
         int32_t ret = audioDecoder_->FreeOutputData(bufferInfo.bufferIndex, false);
         if (ret != AV_ERR_OK) {
             DLOG(ERROR) << "audio Decoder output thread out free";
-            break;
+            return;
         }
         std::this_thread::sleep_until(lastPushTime + std::chrono::microseconds(audioFrameInterval));
         lastPushTime = std::chrono::system_clock::now();
@@ -516,11 +498,14 @@ void RNSkHarmonyVideo::DecAudioOutputThread()
 
 void RNSkHarmonyVideo::AudioPlay()
 {
+    DLOG(INFO) << "AudioPlay start audioPlayer_=" << audioPlayer_;
     audioPlayer_->Start();
     while (true) {
+        DLOG(INFO) << "AudioPlay audioPlayer_=" << audioPlayer_;
         if (isEndOfFile_) {
             DLOG(ERROR) << "AudioPlay end of file";
             audioPlayer_->EndOfFile();
+            break;
         }
         if (audioPlayer_->IsStop()) {
             DLOG(ERROR) << "AudioPlay stop";
@@ -530,6 +515,7 @@ void RNSkHarmonyVideo::AudioPlay()
             DLOG(ERROR) << "play stop";
             break;
         }
+        
         std::unique_lock<std::mutex> pauseLock(pauseMutex_);
         if (isPause_) {
             audioPlayer_->Pause();
@@ -540,40 +526,62 @@ void RNSkHarmonyVideo::AudioPlay()
         std::chrono::milliseconds sleepTime(AUDIO_SLEEP_TIME);
         std::this_thread::sleep_for(sleepTime);
     }
-    
+
     audioPlayer_->Stop();
     isAudioEnd_ = true;
     StartRelease();
+    DLOG(INFO) << "AudioPlay finish audioPlayer_=" << audioPlayer_;
+}
+
+void RNSkHarmonyVideo::PauseAndResume()
+{
+    if (!isStarted_) {
+        DLOG(ERROR) << "PauseAndResume player is start";
+        return;
+    }
+    std::lock_guard<std::mutex> lock(pauseMutex_);
+    isPause_ = !isPause_;
+    pauseCond_.notify_all();
 }
 
 sk_sp<SkImage> RNSkHarmonyVideo::nextImage(double *timeStamp)
 {
-    seek(*timeStamp);
-    OH_NativeBuffer_Config config = {};
-    config.width = sliceWidth_;
-    config.height = sliceHeight_;
-    config.format = sliceFormat_;
-    config.stride = bytesPerRow_;
-    OH_NativeBuffer *buffer = OH_NativeBuffer_Alloc(&config);
-    if (buffer == nullptr) {
-        return 0;
+    DLOG(INFO) << "nextImage enter  转换 第 "<< frameCount <<" 帧, nativeBuffer: "<<nativeBuffer;
+    if (frameCount > 0) {
+        OH_NativeBuffer_Config config;
+        if(nativeBuffer) {
+            OH_NativeBuffer_GetConfig(nativeBuffer, &config);
+        }
+        DLOG(INFO) << "nextImage OH_NativeBuffer_Config width : "<<config.width<<" height : "<<config.height
+            <<" pixelFormat : "<< config.format<<" usage :"<<config.usage<< " stride :"<<config.stride;
+//         int ret = OH_NativeBuffer_Unreference(nativeBuffer);
+//         if (ret != AV_ERR_OK) {
+//             DLOG(ERROR) << "nextImage OH_NativeBuffer_Unreference failed";
+//         }
+//         OH_AVBuffer_Destroy(buffer);
+        
+        return context->makeImageFromNativeBuffer(nativeBuffer);
+//         return SkiaOpenGLSurfaceFactory::makeImageFromHardwareBuffer(nativeBuffer);
     }
-    return context->makeImageFromNativeBuffer(buffer);
+     return nullptr;
 }
 
 double RNSkHarmonyVideo::duration()
 {
-    double duration = static_cast<double>(sampleInfo_.durationTime * 1000);
+    DLOG(INFO) << "duration enter  视频总时长（微秒） : "<<demuxer_->sampleInfo.duration;
+    double duration = static_cast<double>(demuxer_->sampleInfo.duration);
     return duration;
 }
 
 double RNSkHarmonyVideo::framerate()
 {
+    DLOG(INFO) << "framerate enter  视频帧率 :" << sampleInfo_.frameRate;
     return sampleInfo_.frameRate;
 }
 
 void RNSkHarmonyVideo::seek(double timestamp)
 {
+    DLOG(INFO) << "seek enter  入参时间戳 : " << timestamp;
     int64_t millisecond = static_cast<int64_t>(timestamp * 1000);
     int32_t ret = OH_AVDemuxer_SeekToTime(demuxer_->demuxer, millisecond, OH_AVSeekMode::SEEK_MODE_NEXT_SYNC);
     if (ret != AV_ERR_OK) {
@@ -584,36 +592,40 @@ void RNSkHarmonyVideo::seek(double timestamp)
 
 float RNSkHarmonyVideo::getRotationInDegrees()
 {
-    float rotation_ = static_cast<float>(sampleInfo_.rotation);
-    return rotation_;
+    float rotation = static_cast<float>(sampleInfo_.rotate);
+    DLOG(INFO) << "rotation  视频角度: "<< sampleInfo_.rotate;
+    return rotation;
 }
 
 SkISize RNSkHarmonyVideo::getSize()
 {
-    return SkISize::Make(sampleInfo_.width, sampleInfo_.height);
+    DLOG(INFO) << "getSize enter  width: "<< demuxer_->sampleInfo.videoWidth << " height :" <<demuxer_->sampleInfo.videoHeight;
+    return SkISize::Make(demuxer_->sampleInfo.videoWidth, demuxer_->sampleInfo.height);
 }
 
 void RNSkHarmonyVideo::play()
 {
+    DLOG(INFO) << "play enter";
     if (isStarted_) {
         DLOG(ERROR) << "Already started.";
         return;
     }
-    RNSkHarmonyVideo *GetInstance = RNSkHarmonyVideo::GetInstance();
-    sampleInfo_.uri = url;
-    GetInstance->Init(sampleInfo_);
+    Start();
+    DLOG(INFO) << "play end.";
 }
 
 void RNSkHarmonyVideo::pause()
 {
-    RNSkHarmonyVideo *GetInstance = RNSkHarmonyVideo::GetInstance();
-    GetInstance->PauseAndResume();
+    DLOG(INFO) << "pause enter.";
+    PauseAndResume();
 }
 
 void RNSkHarmonyVideo::setVolume(float volume)
 {
-   audioPlayer_->SetVolume(volume);
+    DLOG(INFO) << "setVolume enter.";
+    float a = 200.000000;
+    audioPlayer_->SetVolume(a);
+    DLOG(INFO) << "setVolume volume:"<< volume;
 }
 
-} // namespace RNSkia
-
+} // namespace skia

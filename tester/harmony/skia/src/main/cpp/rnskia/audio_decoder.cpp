@@ -28,7 +28,7 @@ void OnAudioCodecError(OH_AVCodec *codec, int32_t errorCode, void *userData)
     (void)codec;
     (void)errorCode;
     (void)userData;
-    DLOG(ERROR) <<"On codec error, error code: %{public}d"<< errorCode;
+    DLOG(ERROR) <<"On codec error, error code: "<< errorCode;
 }
 
 void OnAudioCodecFormatChange(OH_AVCodec *codec, OH_AVFormat *format, void *userData)
@@ -81,7 +81,7 @@ int32_t AudioDecoder::SetCallback(ADecSignal *signal)
     ret = OH_AudioCodec_RegisterCallback(decoder, {OnAudioCodecError, OnAudioCodecFormatChange,
                                             OnAudioNeedInputBuffer, OnAudioNewOutputBuffer}, signal);
     if (ret != AV_ERR_OK) {
-        DLOG(ERROR) <<"Set callback failed, ret: %{public}d"<< ret;
+        DLOG(ERROR) <<"Set callback failed, ret: "<< ret;
         return AV_ERR_UNKNOWN;
     }
     return AV_ERR_OK;
@@ -103,11 +103,11 @@ int32_t AudioDecoder::ConfigureAudioDecoder(const SampleInfo &sampleInfo)
     } else {
         DLOG(INFO) <<"audio mime is not aac";
     }
-    // DLOG(INFO) <<"AudioDecoder config: %{public}d - %{public}ld = %{public}d", sampleInfo.sampleRate,
-    //     sampleInfo.audioBitrate, sampleInfo.channelCount;
+//     DLOG(INFO) <<"AudioDecoder config: %{public}d - %{public}ld = %{public}d", sampleInfo.sampleRate,
+//         sampleInfo.audioBitrate, sampleInfo.channelCount;
     int ret = OH_AudioCodec_Configure(decoder, format);
     if (ret != AV_ERR_OK) {
-        DLOG(ERROR) <<"Config failed, ret: %{public}d"<< ret;
+        DLOG(ERROR) <<"Config failed, ret: "<< ret;
         return AV_ERR_UNKNOWN;
     }
     OH_AVFormat_Destroy(format);
@@ -126,23 +126,23 @@ int32_t AudioDecoder::Config(const SampleInfo &sampleInfo, ADecSignal *signal)
         DLOG(ERROR) <<"Invalid param: codecUserData";
         return AV_ERR_UNKNOWN;
     }
-    
+
     int32_t ret = ConfigureAudioDecoder(sampleInfo);
     if (ret != AV_ERR_OK) {
         DLOG(ERROR) <<"Configure failed";
         return AV_ERR_UNKNOWN;
     }
-    
+
     ret = SetCallback(signal);
     if (ret != AV_ERR_OK) {
-        DLOG(ERROR) <<"Set callback failed, ret: %{public}d"<< ret;
+        DLOG(ERROR) <<"Set callback failed, ret: "<< ret;
         return AV_ERR_UNKNOWN;
     }
-    
+
     {
         int ret = OH_AudioCodec_Prepare(decoder);
         if (ret != AV_ERR_OK) {
-            DLOG(ERROR) <<"audio Prepare failed, ret: %{public}d"<< ret;
+            DLOG(ERROR) <<"audio Prepare failed, ret: "<< ret;
             return AV_ERR_UNKNOWN;
         }
     }
@@ -159,7 +159,7 @@ int32_t AudioDecoder::StartAudioDecoder()
 
     int ret = OH_AudioCodec_Start(decoder);
     if (ret != AV_ERR_OK) {
-        DLOG(ERROR) <<"audio Start failed, ret: %{public}d"<< ret;
+        DLOG(ERROR) <<"audio Start failed, ret: "<< ret;
         return AV_ERR_UNKNOWN;
     }
     return AV_ERR_OK;

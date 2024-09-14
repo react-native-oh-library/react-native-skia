@@ -9,6 +9,7 @@
 
 #include "HarmonyPlatformContext.h"
 #include <memory>
+#include <rawfile/raw_file_manager.h>
 
 namespace RNSkia {
 
