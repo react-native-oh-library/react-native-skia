@@ -12,10 +12,8 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-
 export default interface XComponentContext {
   registerView(xComponentId: string, nativeId: number): void;
-  setMode(mode: string): void;
-  setDebugMode(show: boolean): void;
-  dropInstance(): void;
+  setModeAndDebug(xComponentId: string, mode: string, show: boolean): void;
+  onSurfaceSizeChanged(xComponentId: string, nativeId: number, width: number, height: number): void;
 };

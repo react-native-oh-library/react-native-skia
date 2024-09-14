@@ -3,7 +3,6 @@ import {
 import type { TurboModule, TurboModuleContext } from '@rnoh/react-native-openharmony/ts';
 import { RNSkiaModule } from './RNSkiaModule';
 
-
 class RNSkiaTurboModulesFactory extends TurboModulesFactory {
   createTurboModule(name: string): TurboModule | null {
     if (name === 'RNSkiaModule') {
