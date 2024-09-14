@@ -2,6 +2,7 @@
 #include "RNOH/ArkTSTurboModule.h"
 #include "SkiaManager.h"
 #include <fstream>
+#include "RNOH/RNInstance.h"
 
 using namespace facebook;
 using namespace react;
@@ -13,6 +14,11 @@ bool RNSkiaModule::install(jsi::Runtime &rt) {
     auto pixelDensity = 3.25;
 
     platformContext = std::make_shared<RNSkia::HarmonyPlatformContext>(&rt, jsInvoker_, pixelDensity);
+    if (!m_ctx.instance.expired()) {
+        auto rnInstance = m_ctx.instance.lock();
+        auto nativeResourceManager = rnInstance->getNativeResourceManager();
+        platformContext->setNativeResourceManager(nativeResourceManager);
+    }
     RNSkia::SkiaManager::getInstance().setContext(platformContext);
     rNSkManager = std::make_shared<RNSkia::RNSkManager>(&rt, jsInvoker_, platformContext);
     RNSkia::SkiaManager::getInstance().setManager(rNSkManager);

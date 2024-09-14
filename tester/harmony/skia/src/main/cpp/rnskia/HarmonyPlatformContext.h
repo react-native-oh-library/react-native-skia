@@ -1,7 +1,9 @@
 #ifndef HARMONY_PLAT_FORM_CONTEXT_H
 #define HARMONY_PLAT_FORM_CONTEXT_H
 
+#include <memory>
 #include <queue>
+#include <rawfile/raw_file_manager.h>
 
 #include "HarmonyPlayLink.h"
 #include "HarmonyBufferUtils.h"
@@ -9,6 +11,7 @@
 #include "RNSkPlatformContext.h"
 #include "HarmonyOpenGLHelper.h" //OpenGL支撑文件
 #include "RNSkManager.h"
+#include "RNOH/ArkTSTurboModule.h"
 
 namespace RNSkia {
 
@@ -20,8 +23,11 @@ struct WriteData {
     std::vector<uint8_t> *responseData;
 };
 
+
 class HarmonyPlatformContext : public RNSkPlatformContext {
 public:
+    friend class rnoh::ArkTSTurboModule::Context;
+    friend rnoh::ArkTSTurboModule::Context rnoh::ArkTSTurboModule::getContext();
     HarmonyPlatformContext(jsi::Runtime *runtime, std::shared_ptr<react::CallInvoker> callInvoker, float pixelDensity);
 
     ~HarmonyPlatformContext() override;
@@ -57,14 +63,21 @@ public:
     sk_sp<SkFontMgr> createFontMgr() override;
 
     std::vector<uint8_t> ReadFileData(const std::string &sourceUri);
+    
+    std::vector<uint8_t> ReadAssetsData(const std::string &sourceUri);
 
     std::vector<uint8_t> PerformHTTPRequest(const std::string &sourceUri);
 
     static size_t WriteCallback(void *contents, size_t size, size_t nmemb, void *userp);
 
     uint32_t GetBufferFormatFromSkColorType(SkColorType bufferFormat);
+    
+    void setNativeResourceManager(const NativeResourceManager *nativeResMgr);
+    
+    void runOnDrawThread(std::function<void()> task);
 
 private:
+    std::string DEFAULT_ASSETS_DEST = "assets/";
     // 绘制循环
     bool drawLoopActive = false;
     std::unique_ptr<PlayLink> playLink;
@@ -73,6 +86,7 @@ private:
     std::condition_variable taskCond; // 线程间的同步和通知
     bool stopMainLoop = false;
     std::thread mainThread;
+    const NativeResourceManager *nativeResourceManager;
 };
 
 } // namespace RNSkia

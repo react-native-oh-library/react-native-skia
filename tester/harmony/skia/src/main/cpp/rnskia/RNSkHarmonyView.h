@@ -5,7 +5,6 @@
 #include <vector>
 
 #include "RNSkOpenGLCanvasProvider.h"
-#include "egl_core.h"
 
 namespace RNSkia {
 
@@ -28,9 +27,6 @@ public:
     virtual void viewDidUnmount() = 0;
 
     virtual std::shared_ptr<RNSkView> getSkiaView() = 0;
-
-    virtual void init(void *window, int width, int height) = 0;
-    virtual void render() = 0;
 };
 
 template <typename T> class RNSkHarmonyView : public T, public RNSkBaseHarmonyView {
@@ -76,29 +72,9 @@ public:
     void viewDidUnmount() override { T::endDrawingLoop(); }
 
     void updateTouchPoints(std::vector<RNSkTouchInfo> touches) override {
-        auto scale = getPixelDensity();
-        for (auto &touch : touches) {
-            touch.x /= scale;
-            touch.y /= scale;
-        }
         T::updateTouchState(touches);
     }
 
     std::shared_ptr<RNSkView> getSkiaView() override { return T::shared_from_this(); }
-
-    EGLCore eGLCore;
-    void init(void *window, int width, int height) override {
-        if (eGLCore.EglContextInit(window, width, height)) {
-            eGLCore.Background();
-        }
-        int32_t has = 0;
-        eGLCore.Draw(has);
-    }
-
-    void render() override {
-        DLOG(INFO) << "render to renderImmediate";
-        RNSkView::renderImmediate();
-        DLOG(INFO) << "render to renderImmediate finish";
-    }
 };
 } // namespace RNSkia

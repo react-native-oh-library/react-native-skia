@@ -31,7 +31,9 @@ static napi_value Init(napi_env env, napi_value exports) {
         return nullptr;
     }
     napi_property_descriptor desc[] = {
-        {"registerView", nullptr, RNSkia::PluginRender::RegisterView, nullptr, nullptr, nullptr, napi_default, nullptr}};
+        {"registerView", nullptr, RNSkia::PluginRender::RegisterView, nullptr, nullptr, nullptr, napi_default, nullptr},
+        {"onSurfaceSizeChanged", nullptr, RNSkia::PluginRender::SurfaceSizeChanged, nullptr, nullptr, nullptr, napi_default, nullptr},
+    };
     auto napiResult = napi_define_properties(env, exports, sizeof(desc) / sizeof(desc[0]), desc);
     if (napiResult != napi_ok) {
         DLOG(ERROR) << "Export: napi_define_properties failed";
