@@ -1,32 +1,27 @@
 #include "HarmonyPlatformContext.h"
-// #include "HarmonyBufferUtils.h"
-
-
-#include <multimedia/image_framework/image_pixel_map_mdk.h>
+#include "RemoteCommunicationKit/rcp.h"
+#include <cstdlib>
+#include <rawfile/raw_file_manager.h>
+#include <stdio.h>
+#include <unistd.h>
 #include <cstring>
 #include <fstream>
 #include <iostream>
-// #include <curl/curl.h>
+#include "RemoteCommunicationKit/rcp.h"
+#include <iostream>
+#include <regex>
 #include "include/core/SkTypeface.h"
 #include "RNSkPlatformContext.h"
-#include "native_buffer/native_buffer.h" // releaseNativeBuffer/makeImageFromNativeBuffer
-
-// #include "include/core/SkData.h"
-// #include "include/core/SkImageInfo.h"       // SkImageInfo::Make
-// #include "include/core/SkColorSpace.h"      // SkColorSpace::MakeSRGB());
-// #include "include/core/SkRefCnt.h"          // createFontMgr
-// #include "include/core/SkAlphaType.h"       // kPremul_SkAlphaType
-// #include "include/core/SkBitmap.h"
-// #include "include/core/SkCanvas.h"
-// #include "include/core/SkSurface.h"
-
+#include "native_buffer/native_buffer.h"
 #include "include/gpu/ganesh/SkSurfaceGanesh.h"
 #include "include/ports/SkFontMgr_android.h"
-#include "include/gpu/ganesh/SkImageGanesh.h" // BorrowTextureFrom
-// #include "include/gpu/ganesh/gl/GrGLBackendSurface.h"    // MakeGL
-// #include "include/gpu/GrTypes.h"            // kTopLeft_GrSurfaceOrigin
+#include "include/gpu/ganesh/SkImageGanesh.h"
+#include "plugin_manager.h"
 #include "src/gpu/ganesh/gl/GrGLDefines.h"
-
+#include "SkiaManager.h"
+#include "skia_ohos/SkFontMgr_ohos.h"
+#include "RNOH/RNInstance.h"
+#include "RNSkHarmonyVideo.h"
 
 namespace RNSkia {
 
@@ -36,16 +31,13 @@ thread_local SkiaOpenGLContext ThreadContextHolder::ThreadSkiaOpenGLContext;
 HarmonyPlatformContext::HarmonyPlatformContext(jsi::Runtime *runtime, std::shared_ptr<react::CallInvoker> callInvoker,
                                                float pixelDensity)
     : RNSkPlatformContext(runtime, callInvoker, pixelDensity), drawLoopActive(false),
-      playLink(std::make_unique<PlayLink>([](double deltaTime) {})) {
+      playLink(std::make_unique<PlayLink>([this](double deltaTime) {
+          notifyDrawLoop(false);
+      })) {
     mainThread = std::thread(&HarmonyPlatformContext::runTaskOnMainThread, this);
 }
 
 HarmonyPlatformContext::~HarmonyPlatformContext() { SetStopRunOnMainThread(); }
-
-// void HarmonyPlatformContext::InitializeGLTextureHelper(GrGLuint texID, EGLImageKHR image, EGLDisplay display,
-//                                                        GrGLuint texTarget) {
-//     glTextureHelper = std::make_unique<GLTextureHelper>(texID, image, display, texTarget);
-// }
 
 // 启动绘图循环
 void HarmonyPlatformContext::startDrawLoop() {
@@ -119,6 +111,8 @@ sk_sp<SkImage> HarmonyPlatformContext::makeImageFromNativeBuffer(void *buffer) {
         format = GrBackendFormats::MakeGL(GR_GL_RGBA8, GR_GL_TEXTURE_EXTERNAL);
     case NATIVEBUFFER_PIXEL_FMT_RGB_565:
         format = GrBackendFormats::MakeGL(GR_GL_RGB565, GR_GL_TEXTURE_EXTERNAL);
+    case NATIVEBUFFER_PIXEL_FMT_RGBA_1010102:
+        format = GrBackendFormats::MakeGL(GR_GL_RGB10_A2, GR_GL_TEXTURE_EXTERNAL);
     case NATIVEBUFFER_PIXEL_FMT_RGB_888:
         format = GrBackendFormats::MakeGL(GR_GL_RGB8, GR_GL_TEXTURE_EXTERNAL);
     default:
@@ -187,39 +181,57 @@ void HarmonyPlatformContext::releaseNativeBuffer(uint64_t pointer) {
     }
 }
 
-std::shared_ptr<RNSkVideo> HarmonyPlatformContext::createVideo(const std::string &url) { return nullptr; }
+std::shared_ptr<RNSkVideo> HarmonyPlatformContext::createVideo(const std::string &url) 
+{
+    return std::make_shared<RNSkHarmonyVideo>(url, this, nativeResourceManager); 
+}
+
+std::string getScheme(const std::string &uri) { // 解析uri
+    std::regex uriRegex(R"(^([a-zA-Z][a-zA-Z0-9+.-]*):)");
+    std::smatch match;
+    if (std::regex_search(uri, match, uriRegex)) {
+        return match[1].str();
+    }
+    return "";
+}
 
 // 异步执行流操作
 void HarmonyPlatformContext::performStreamOperation(const std::string &sourceUri,
                                                     const std::function<void(std::unique_ptr<SkStreamAsset>)> &op) {
-    std::thread([=]() {
-        std::vector<uint8_t> data;
+    auto loader = [=]() {
+        std::vector<uint8_t> buffer;
         try {
-            // 引入URI解析库
-            if (sourceUri.find(':') == std::string::npos && sourceUri.find('.') != std::string::npos) {
-                data = ReadFileData(sourceUri); // 读取文件数据
+            std::string scheme = getScheme(sourceUri);
+            if (scheme == "file") {
+                buffer = ReadFileData(sourceUri);
+            } else if (scheme == "asset") {
+                buffer = ReadAssetsData(sourceUri);
+            } else if (scheme == "http" || "https") {
+                buffer = PerformHTTPRequest(sourceUri);
             } else {
-                data = PerformHTTPRequest(sourceUri); // 执行HTTP请求
+                DLOG(ERROR) << "performStreamOperation The URL is invalid (scheme is 'file || http || https')";
             }
 
-            if (!data.empty()) {
+            if (!buffer.empty()) {
+                size_t length = buffer.size();
+                uint8_t *uint8Ptr = buffer.data();
+                // 将 uint8_t* 转换为 char*
+                char *charPtr = reinterpret_cast<char *>(uint8Ptr);
+                charPtr[length] = '\0';
+
                 // 使用SkData::MakeFromCopy创建SkData
-                sk_sp<SkData> skData = SkData::MakeWithCopy(data.data(), data.size());
+                sk_sp<SkData> skData = SkData::MakeWithCopy(charPtr, length);
                 auto skStream = SkMemoryStream::Make(skData);
 
-                //                 sk_sp<SkMemoryStream> stream(SkMemoryStream::Make(skData).release());
-                //                 // 释放sk_sp
-                //                 std::unique_ptr<SkStreamAsset> streamUniquePtr(stream.release());
-                //                 // 将unique_ptr传递给回调函数
-                //                 op(std::move(streamUniquePtr));
-
                 op(std::move(skStream));
+            } else {
+                DLOG(ERROR) << "performStreamOperation buffer is empty";
             }
         } catch (const std::exception &e) {
-            std::cerr << "出现异常: " << e.what() << std::endl;
-            op(nullptr);
+            DLOG(ERROR) << "performStreamOperation exception";
         }
-    }).detach();
+    };
+    std::thread(loader).detach();
 }
 
 void HarmonyPlatformContext::raiseError(const std::exception &err) {
@@ -228,12 +240,55 @@ void HarmonyPlatformContext::raiseError(const std::exception &err) {
 }
 
 sk_sp<SkSurface> HarmonyPlatformContext::makeOffscreenSurface(int width, int height) {
-    return SkiaOpenGLSurfaceFactory::makeOffscreenSurface(width, height);
+    DLOG(INFO) << "makeOffscreenSurface START";
+    // 关联Skia和OpenGL，
+    if (!SkiaOpenGLHelper::createSkiaDirectContextIfNecessary(&ThreadContextHolder::ThreadSkiaOpenGLContext)) {
+        DLOG(ERROR) << "Could not create Skia Surface from native window / surface."
+                   << "Failed creating Skia Direct Context\n";
+        return nullptr;
+    }
+
+    auto colorType = kN32_SkColorType; //
+    SkSurfaceProps props(0, kUnknown_SkPixelGeometry); // kUnknown_SkPixelGeometry
+    if (!SkiaOpenGLHelper::makeCurrent(&ThreadContextHolder::ThreadSkiaOpenGLContext,
+                                       ThreadContextHolder::ThreadSkiaOpenGLContext.gl1x1Surface)) {
+        DLOG(ERROR) << "Could not create EGL Surface from native window / surface. Could "
+                      "not set new surface as current surface.\n";
+        return nullptr;
+    }
+
+    // 创建纹理
+    auto texture = ThreadContextHolder::ThreadSkiaOpenGLContext.directContext->createBackendTexture(
+        width, height, colorType, skgpu::Mipmapped::kNo, GrRenderable::kYes);
+
+    if (!texture.isValid()) {
+        DLOG(ERROR) << "couldn't create offscreen texture:" << width << height;
+    }
+
+    struct ReleaseContext {
+        SkiaOpenGLContext *context;
+        GrBackendTexture texture;
+    };
+
+    auto releaseCtx = new ReleaseContext({&ThreadContextHolder::ThreadSkiaOpenGLContext, texture});
+
+    DLOG(INFO) << "makeOffscreenSurface END";
+    // GrBackendTexture->SkSurface
+    return SkSurfaces::WrapBackendTexture(
+        ThreadContextHolder::ThreadSkiaOpenGLContext.directContext.get(), texture, kTopLeft_GrSurfaceOrigin, 0,
+        colorType, nullptr, &props,
+        [](void *addr) {
+            auto releaseCtx = reinterpret_cast<ReleaseContext *>(addr);
+
+            releaseCtx->context->directContext->deleteBackendTexture(releaseCtx->texture);
+        
+            DLOG(INFO) << "makeOffscreenSurface RELEASE";
+        },
+        releaseCtx);
 }
 
 sk_sp<SkFontMgr> HarmonyPlatformContext::createFontMgr() {
-    //     return SkFontMgr_New_Android(nullptr);
-    return nullptr;
+    return SkFontMgr_New_OHOS();
 }
 
 // 从具有给定标签（tag）的视图（View）中捕获屏幕截图，并将其转换为 SkImage 对象
@@ -270,26 +325,23 @@ sk_sp<SkImage> HarmonyPlatformContext::takeScreenshotFromViewTag(size_t tag) {
     OH_PixelMap_UnAccessPixels(bitmap);
 
   // Return our newly created SkImage!
-    return skImage;*/
+    return skImage;
+    return nullptr;*/
+    DLOG(ERROR) << "takeScreenshotFromViewTag not implement tag: " << tag;
     return nullptr;
 }
 
 // 读取文件数据
 std::vector<uint8_t> HarmonyPlatformContext::ReadFileData(const std::string &sourceUri) {
     std::vector<uint8_t> buffer;
-    // 检查文件是否存在
-    // std::filesystem::path sourcePath(sourceUri.c_str());
-    // if (!std::filesystem::exists(sourcePath)) {
-    //    std::cerr << "File does not exist: " << sourceUri << std::endl;
-    //    return buffer;
-    //}
+
     if (access(sourceUri.c_str(), F_OK) != 0) {
-        std::cerr << "File does not exist: " << sourceUri << std::endl;
+        DLOG(ERROR) << "File does not exist: " << sourceUri << std::endl;
         return buffer;
     }
     std::ifstream file(sourceUri, std::ios::binary | std::ios::ate);
     if (!file) {
-        std::cerr << "Failed to open file: " << sourceUri << std::endl;
+        DLOG(ERROR) << "Failed to open file: " << sourceUri << std::endl;
         return buffer;
     }
     std::streamsize size = file.tellg();
@@ -297,48 +349,79 @@ std::vector<uint8_t> HarmonyPlatformContext::ReadFileData(const std::string &sou
     file.seekg(0, std::ios::beg); // 回到文件头
     // 读取文件内容到buffer中
     if (!file.read(reinterpret_cast<char *>(buffer.data()), size)) {
-        std::cerr << "Failed to read file: " << sourceUri << std::endl;
+        DLOG(ERROR) << "Failed to read file: " << sourceUri << std::endl;
         buffer.clear();
     }
     return buffer;
 }
 
-// 使用libcurl库的写入函数
-size_t HarmonyPlatformContext::WriteCallback(void *contents, size_t size, size_t nmemb, void *userp) {
-    WriteData *writeData = static_cast<WriteData *>(userp);
-    size_t totalBytes = size * nmemb;
-    //     writeData->responseData->insert(writeData->responseData->end(), static_cast<char *>(contents),
-    //                                     static_cast<char *>(contents) + totalBytes);
-    return totalBytes;
+std::vector<uint8_t> HarmonyPlatformContext::ReadAssetsData(const std::string &sourceUri) {
+    std::string assetsFilePath = sourceUri;
+    std::string Prefixes = "asset://";
+    if (sourceUri.find(Prefixes) == 0) {
+        assetsFilePath = DEFAULT_ASSETS_DEST + sourceUri.substr(Prefixes.length());
+    }
+    if (nativeResourceManager == nullptr) {
+        DLOG(ERROR) << "ReadAssetsData env error ;";
+    }
+    RawFile *_file = OH_ResourceManager_OpenRawFile(nativeResourceManager, assetsFilePath.c_str());
+    size_t length = OH_ResourceManager_GetRawFileSize(_file);
+    std::unique_ptr<char[]> mediaData = std::make_unique<char[]>(length);
+    int rawFileOffset = OH_ResourceManager_ReadRawFile(_file, mediaData.get(), length);
+    DLOG(INFO) << "ReadAssetsData assetsFilePath=" << assetsFilePath + " rawFileOffset=" << rawFileOffset
+               << " length=" << length;
+    std::vector<uint8_t> vec(length);
+    std::memcpy(vec.data(), mediaData.get(), length);
+
+    OH_ResourceManager_CloseRawFile(_file);
+
+    return vec;
 }
 
-// 执行HTTP请求并返回数据
 std::vector<uint8_t> HarmonyPlatformContext::PerformHTTPRequest(const std::string &sourceUri) {
-    std::vector<uint8_t> responseData;
-    //     CURL *curl;
-    //     CURLcode res;
-    //
-    //     curl = curl_easy_init();
-    //     if (curl) {
-    //         WriteData writeData = {&responseData}; // 创建并初始化WriteData结构体
-    //         curl_easy_setopt(curl, CURLOPT_URL, sourceUri.c_str());
-    //         curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, WriteCallback); // 使用静态成员函数或全局函数
-    //         curl_easy_setopt(curl, CURLOPT_WRITEDATA, &writeData);        // 传递WriteData结构体的地址
-    //
-    //         // 执行请求
-    //         res = curl_easy_perform(curl);
-    //         // 检查并处理错误
-    //         if (res != CURLE_OK) {
-    //             std::cerr << "curl_easy_perform() failed: " << curl_easy_strerror(res) << std::endl;
-    //             responseData.clear();
-    //         }
-    //
-    //         curl_easy_cleanup(curl);
-    //     } else {
-    //         std::cerr << "curl_easy_init() failed" << std::endl;
-    //     }
+    std::string Prefixes = "http://localhost";
+    if (sourceUri.find(Prefixes) == 0) {
+        std::size_t questionMarkPos = sourceUri.find('?');
+        std::string pathWithParams =
+            (questionMarkPos != std::string::npos) ? sourceUri.substr(0, questionMarkPos) : sourceUri;
+        std::size_t thirdSlashPos =
+            pathWithParams.find('/', pathWithParams.find('/', pathWithParams.find('/') + 1) + 1);
+        if (thirdSlashPos != std::string::npos) {
+            return ReadAssetsData(pathWithParams.substr(thirdSlashPos + 1));
+        }
+    }
+    std::vector<uint8_t> buffer;
+    reinterpret_cast<char *>(buffer.data());
+    Rcp_Response *response;
+    const char *kHttpServerAddress = sourceUri.c_str();
+    Rcp_Request *request = HMS_Rcp_CreateRequest(kHttpServerAddress);
+    request->method = RCP_METHOD_GET;
 
-    return responseData;
+    uint32_t errCode = 0;
+    // 创建session
+    Rcp_Session *session = HMS_Rcp_CreateSession(NULL, &errCode);
+    // 配置请求回调
+    Rcp_Response *ctx = nullptr;
+    // Rcp_ResponseCallbackObject responseCallback = {ResponseCallback, request};
+    //  发起请求
+    response = HMS_Rcp_FetchSync(session, request, &errCode);
+
+    if (response != nullptr) {
+        buffer.resize(response->body.length);
+        const char *data = response->body.buffer;
+        std::copy(data, data + response->body.length, buffer.begin());
+    }
+    DLOG(INFO) << "PerformHTTPRequest HMS_Rcp_FetchSync errCode:" << errCode;
+
+    // 在退出前取消可能还在执行的requests
+    errCode = HMS_Rcp_CancelSession(session);
+
+    // 清理request
+    HMS_Rcp_DestroyRequest(request);
+    // 关闭session
+    errCode = HMS_Rcp_CloseSession(&session);
+
+    return buffer;
 }
 
 uint32_t HarmonyPlatformContext::GetBufferFormatFromSkColorType(SkColorType bufferFormat) {
@@ -358,6 +441,14 @@ uint32_t HarmonyPlatformContext::GetBufferFormatFromSkColorType(SkColorType buff
     default:
         return NATIVEBUFFER_PIXEL_FMT_RGBA_8888;
     }
+}
+
+void HarmonyPlatformContext::setNativeResourceManager(const NativeResourceManager *nativeResMgr) {
+    this->nativeResourceManager = nativeResMgr;
+}
+
+void HarmonyPlatformContext::runOnDrawThread(std::function<void()> task){
+    playLink->runOnDrawThread(task);
 }
 
 } // namespace RNSkia

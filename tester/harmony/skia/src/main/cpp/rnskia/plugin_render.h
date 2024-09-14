@@ -18,7 +18,9 @@
 #include <ace/xcomponent/native_interface_xcomponent.h>
 #include <cstddef>
 #include <napi/native_api.h>
+#include "HarmonyPlatformContext.h"
 #include "napi/n_func_arg.h"
+#include <rawfile/raw_file_manager.h>
 #include <string>
 #include <unordered_map>
 
@@ -34,7 +36,6 @@ public:
     static PluginRender *GetInstance(std::string &id);
 
     void OnSurfaceChanged(OH_NativeXComponent *component, void *window);
-    void OnTouchEvent(OH_NativeXComponent *component, void *window);
     void OnMouseEvent(OH_NativeXComponent *component, void *window);
     void OnHoverEvent(OH_NativeXComponent *component, bool isHover);
     void OnFocusEvent(OH_NativeXComponent *component, void *window);
@@ -42,6 +43,8 @@ public:
     void OnKeyEvent(OH_NativeXComponent *component, void *window);
     void RegisterCallback(OH_NativeXComponent *nativeXComponent);
     void Export(napi_env env, napi_value exports);
+    
+    RNSkTouchInfo::TouchType getSKTouchType(OH_NativeXComponent_TouchEventType type);
 
     static napi_value RegisterView(napi_env env, napi_callback_info info) {
         DLOG(INFO) << "napi RegisterView";
@@ -68,17 +71,119 @@ public:
         std::string id(xComponentId.get());
         if (m_instance.find(id) != m_instance.end()) {
             PluginRender *instance = m_instance[id];
-            auto view = instance->_harmonyView;
-            std::shared_ptr<RNSkView> rNSkView = view->getSkiaView();
-            size_t nId = static_cast<size_t>(nativeId);
-            SkiaManager::getInstance().getManager()->registerSkiaView(nId, rNSkView);
-            auto render = PluginRender::GetInstance(id);
-            view->surfaceAvailable(render->m_window, render->m_width, render->m_height);
-            DLOG(INFO) << "napi RegisterView finish";
-            //view->render();
+            auto hctx = std::static_pointer_cast<HarmonyPlatformContext>(instance->_context);
+            hctx->runOnDrawThread(
+                [instance = std::move(instance), nativeId = std::move(nativeId), id = std::move(id)]() {
+                    auto view = instance->_harmonyView;
+                    std::shared_ptr<RNSkView> rNSkView = view->getSkiaView();
+                    size_t nId = static_cast<size_t>(nativeId);
+                    SkiaManager::getInstance().getManager()->registerSkiaView(nId, rNSkView);
+                    view->surfaceAvailable(instance->m_window, 1, 1);
+                    DLOG(INFO) << "napi RegisterView finish XComponentId: " << id
+                               << " threadId: " << std::this_thread::get_id();
+                });
         }
         return nullptr;
     };
+    
+    static napi_value SetModeAndDebug(napi_env env, napi_callback_info info) {
+        DLOG(INFO) << "napi SetModeAndDebug";
+        // 获取参数
+        NFuncArg funcArg(env, info);
+        if (!funcArg.InitArgs(NARG_CNT::THREE)) {
+            DLOG(ERROR) << "napi SetModeAndDebug param not match";
+            return nullptr;
+        }
+        napi_value v1 = funcArg.GetArg(NARG_POS::FIRST);
+        NVal nXComponentId(env, v1);
+        auto [v1Succ, xComponentId, nIdLength] = nXComponentId.ToUTF8String();
+        if (!v1Succ) {
+            DLOG(ERROR) << "napi SetModeAndDebug get xComponentId fail";
+            return nullptr;
+        }
+        napi_value v2 = funcArg.GetArg(NARG_POS::SECOND);
+        NVal nMode(env, v2);
+        auto [v2Succ, mode, nModeLength] = nMode.ToUTF8String();
+        if (!v2Succ) {
+            DLOG(ERROR) << "napi SetModeAndDebug get mode fail";
+            return nullptr;
+        }
+        napi_value v3 = funcArg.GetArg(NARG_POS::THIRD);
+        NVal nShowDebug(env, v3);
+        auto [v3Succ, showDebug] = nShowDebug.ToBool();
+        if (!v3Succ) {
+            DLOG(ERROR) << "napi SetModeAndDebug get showDebug fail";
+            return nullptr;
+        }
+        std::string id(xComponentId.get());
+        std::string modeStr(mode.get());
+        DLOG(INFO) << "napi SetModeAndDebug xComponentId: " << id << " mode: " << modeStr << " showDebug: " << showDebug;
+        if (m_instance.find(id) != m_instance.end()) {
+            PluginRender *instance = m_instance[id];
+            auto view = instance->_harmonyView;
+            view->setMode(modeStr);
+            view->setShowDebugInfo(showDebug);
+            DLOG(INFO) << "napi SetModeAndDebug finish XComponentId: " << id
+                               << " threadId: " << std::this_thread::get_id();
+        }
+        return nullptr;
+    }
+
+    static napi_value SurfaceSizeChanged(napi_env env, napi_callback_info info) {
+        DLOG(INFO) << "napi SurfaceSizeChanged";
+        // 获取参数
+        NFuncArg funcArg(env, info);
+        if (!funcArg.InitArgs(NARG_CNT::FOUR)) {
+            DLOG(ERROR) << "napi SurfaceSizeChanged param not match";
+            return nullptr;
+        }
+        napi_value v1 = funcArg.GetArg(NARG_POS::FIRST);
+        NVal nValXcId(env, v1);
+        auto [v1Succ, xComponentId, nLength] = nValXcId.ToUTF8String();
+        if (!v1Succ) {
+            DLOG(ERROR) << "napi SurfaceSizeChanged get xComponentId fail";
+            return nullptr;
+        }
+        napi_value v2 = funcArg.GetArg(NARG_POS::SECOND);
+        NVal nValNativeId(env, v2);
+        auto [v2Succ, nativeId] = nValNativeId.ToInt32();
+        if (!v2Succ) {
+            DLOG(ERROR) << "napi SurfaceSizeChanged get nValNativeId fail";
+            return nullptr;
+        }
+        napi_value v3 = funcArg.GetArg(NARG_POS::THIRD);
+        NVal nWidth(env, v3);
+        auto [v3Succ, width] = nWidth.ToInt32();
+        if (!v3Succ) {
+            DLOG(ERROR) << "napi SurfaceSizeChanged get nWidth fail";
+            return nullptr;
+        }
+        napi_value v4 = funcArg.GetArg(NARG_POS::FOURTH);
+        NVal nHeight(env, v4);
+        auto [v4Succ, height] = nHeight.ToInt32();
+        if (!v4Succ) {
+            DLOG(ERROR) << "napi SurfaceSizeChanged get nHeight fail";
+            return nullptr;
+        }
+        DLOG(INFO) << "napi SurfaceSizeChanged xComponentId: " << xComponentId << " nativeId: " << nativeId
+                   << " width: " << width << " height: " << height;
+        std::string id(xComponentId.get());
+        if (m_instance.find(id) != m_instance.end()) {
+            PluginRender *instance = m_instance[id];
+            auto hctx = std::static_pointer_cast<HarmonyPlatformContext>(instance->_context);
+            hctx->runOnDrawThread(
+                [instance = std::move(instance), nativeId = std::move(nativeId), id = std::move(id)]() {
+                    auto view = instance->_harmonyView;
+                    std::shared_ptr<RNSkView> rNSkView = view->getSkiaView();
+                    size_t nId = static_cast<size_t>(nativeId);
+                    SkiaManager::getInstance().getManager()->registerSkiaView(nId, rNSkView);
+                    view->surfaceSizeChanged(instance->m_width, instance->m_height);
+                    DLOG(INFO) << "napi SurfaceSizeChanged finish XComponentId: " << id
+                               << " threadId: " << std::this_thread::get_id();
+                });
+        }
+        return nullptr;
+    }
 
 public:
     static std::unordered_map<std::string, PluginRender *> m_instance;
@@ -87,6 +192,7 @@ public:
     uint64_t m_height;
 
     std::shared_ptr<RNSkBaseHarmonyView> _harmonyView;
+    std::shared_ptr<RNSkia::RNSkPlatformContext> _context;
 
 
 private:

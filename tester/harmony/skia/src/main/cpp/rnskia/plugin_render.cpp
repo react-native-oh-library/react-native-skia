@@ -34,6 +34,7 @@ namespace RNSkia {
 std::unordered_map<std::string, PluginRender *> PluginRender::m_instance;
 
 PluginRender::PluginRender(std::shared_ptr<RNSkia::RNSkPlatformContext> context) {
+    _context = context;
     _harmonyView = std::make_shared<RNSkHarmonyView<RNSkia::RNSkDomView>>(context);
 }
 
@@ -140,7 +141,22 @@ void DispatchTouchEventCB(OH_NativeXComponent *component, void *window) {
     std::string id(idStr);
     PluginRender *render = PluginRender::GetInstance(id);
     if (render != nullptr) {
-        render->OnTouchEvent(component, window);
+        std::vector<RNSkTouchInfo> touches;
+        OH_NativeXComponent_TouchEvent touchEvent;
+        OH_NativeXComponent_GetTouchEvent(component, window, &touchEvent);
+        if (render != nullptr) {
+            auto scale = render->_harmonyView->getPixelDensity();
+            for (int i = 0; i < touchEvent.numPoints; i++) {
+                RNSkTouchInfo info;
+                info.x = touchEvent.touchPoints[i].x / scale;
+                info.y = touchEvent.touchPoints[i].y / scale;
+                info.force = touchEvent.touchPoints[i].force;
+                info.type = render->getSKTouchType(touchEvent.touchPoints[i].type);
+                info.id = touchEvent.touchPoints[i].id;
+                touches.push_back(info);
+            }
+            render->_harmonyView->updateTouchPoints(touches);
+        }
     }
 }
 
@@ -246,36 +262,24 @@ void PluginRender::OnSurfaceChanged(OH_NativeXComponent *component, void *window
     }
 }
 
-void PluginRender::OnTouchEvent(OH_NativeXComponent *component, void *window) {
-    char idStr[OH_XCOMPONENT_ID_LEN_MAX + 1] = {'\0'};
-    uint64_t idSize = OH_XCOMPONENT_ID_LEN_MAX + 1;
-    if (OH_NativeXComponent_GetXComponentId(component, idStr, &idSize) != OH_NATIVEXCOMPONENT_RESULT_SUCCESS) {
-        DLOG(ERROR) << "Callback DispatchTouchEventCB: Unable to get XComponent id";
-        return;
+RNSkTouchInfo::TouchType PluginRender::getSKTouchType(OH_NativeXComponent_TouchEventType type) {
+    int skType = 3;
+    switch (type) {
+    case OH_NATIVEXCOMPONENT_DOWN:
+        skType = 0;
+        break;
+    case OH_NATIVEXCOMPONENT_MOVE:
+        skType = 1;
+        break;
+    case OH_NATIVEXCOMPONENT_UP:
+        skType = 2;
+        break;
+    case OH_NATIVEXCOMPONENT_CANCEL:
+    case OH_NATIVEXCOMPONENT_UNKNOWN:
+        skType = 3;
+        break;
     }
-    OH_NativeXComponent_TouchEvent touchEvent;
-    OH_NativeXComponent_GetTouchEvent(component, window, &touchEvent);
-
-    float tiltX = 0.0f;
-    float tiltY = 0.0f;
-    OH_NativeXComponent_TouchPointToolType toolType =
-        OH_NativeXComponent_TouchPointToolType::OH_NATIVEXCOMPONENT_TOOL_TYPE_UNKNOWN;
-    OH_NativeXComponent_GetTouchPointToolType(component, 0, &toolType);
-    OH_NativeXComponent_GetTouchPointTiltX(component, 0, &tiltX);
-    OH_NativeXComponent_GetTouchPointTiltY(component, 0, &tiltY);
-    OH_LOG_Print(LOG_APP, LOG_INFO, LOG_PRINT_DOMAIN, "OnTouchEvent",
-                 "touch info: toolType = %{public}d, tiltX = %{public}lf, tiltY = %{public}lf", toolType, tiltX, tiltY);
-
-    std::string id(idStr);
-    PluginRender *render = PluginRender::GetInstance(id);
-    RNSkTouchInfo info;
-    std::vector<RNSkTouchInfo> touches;
-    if (render != nullptr && touchEvent.type == OH_NativeXComponent_TouchEventType::OH_NATIVEXCOMPONENT_UP) {
-        info.x = tiltX;
-        info.y = tiltY;
-        touches.push_back(info);
-        render->_harmonyView->updateTouchPoints(touches);
-    }
+    return (RNSkia::RNSkTouchInfo::TouchType)skType;
 }
 
 void PluginRender::RegisterCallback(OH_NativeXComponent *nativeXComponent) {
