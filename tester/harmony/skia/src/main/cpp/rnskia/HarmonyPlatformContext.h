@@ -4,6 +4,7 @@
 #include <memory>
 #include <queue>
 #include <rawfile/raw_file_manager.h>
+#include <multimedia/image_framework/image_pixel_map_napi.h>
 
 #include "HarmonyPlayLink.h"
 #include "HarmonyBufferUtils.h"
@@ -75,6 +76,11 @@ public:
     void setNativeResourceManager(const NativeResourceManager *nativeResMgr);
     
     void runOnDrawThread(std::function<void()> task);
+    
+    std::shared_ptr<rnoh::TurboModule> _TurboModule;
+    std::shared_ptr<rnoh::RNInstance> _instance;
+    facebook::jsi::Runtime *_runtime;
+    bool Getview(size_t tag);
 
 private:
     std::string DEFAULT_ASSETS_DEST = "assets/";

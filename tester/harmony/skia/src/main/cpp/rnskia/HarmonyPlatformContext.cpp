@@ -21,7 +21,9 @@
 #include "SkiaManager.h"
 #include "skia_ohos/SkFontMgr_ohos.h"
 #include "RNOH/RNInstance.h"
+#include "RNOH/RNInstanceCAPI.h"
 #include "RNSkHarmonyVideo.h"
+#include "RNSkiaModule.h"
 
 namespace RNSkia {
 
@@ -35,6 +37,7 @@ HarmonyPlatformContext::HarmonyPlatformContext(jsi::Runtime *runtime, std::share
           notifyDrawLoop(false);
       })) {
     mainThread = std::thread(&HarmonyPlatformContext::runTaskOnMainThread, this);
+    _runtime = runtime;
 }
 
 HarmonyPlatformContext::~HarmonyPlatformContext() { SetStopRunOnMainThread(); }
@@ -290,45 +293,86 @@ sk_sp<SkSurface> HarmonyPlatformContext::makeOffscreenSurface(int width, int hei
 sk_sp<SkFontMgr> HarmonyPlatformContext::createFontMgr() {
     return SkFontMgr_New_OHOS();
 }
+static SkAlphaType alpha_type(int32_t flags) {
+    switch (flags) {
+    case 1:
+        return kOpaque_SkAlphaType;
+    case 2:
+        return kPremul_SkAlphaType;
+    case 3:
+        return kUnpremul_SkAlphaType;
+    default:
+        break;
+    }
+    return kUnknown_SkAlphaType;
+}
+
+static SkColorType color_type(int32_t format) {
+    switch (format) {
+    case 3:
+        return kRGBA_8888_SkColorType;
+    case 2:
+        return kRGB_565_SkColorType;
+    case 7:
+        return kARGB_4444_SkColorType;
+    case 4:
+        return kBGRA_8888_SkColorType;
+    case 6:
+        return kAlpha_8_SkColorType;
+    case 5:
+        return kRGB_888x_SkColorType;
+    case 10:
+        return kRGBA_1010102_SkColorType;
+    default:
+        break;
+    }
+    return kUnknown_SkColorType;
+}
+
+// 通过napi获取到的pixel，此处声明
+void *SkiaManager::_pixels;
+SkiaManager::Options SkiaManager::option;
+bool HarmonyPlatformContext::Getview(size_t tag) {
+    auto turboModule = _TurboModule;
+    if (!turboModule) {
+        return 0;
+    }
+    auto arkTsTurboModule = std::dynamic_pointer_cast<rnoh::RNSkiaModule>(turboModule);
+    if (!arkTsTurboModule) {
+        return 0;
+    }
+    // 传值给ts侧
+    int viewId = tag;
+    const facebook::jsi::Value value = facebook::jsi::Value(viewId);
+    arkTsTurboModule->call(*_runtime, "TagGetView", &value, 1);
+    return true;
+}
 
 // 从具有给定标签（tag）的视图（View）中捕获屏幕截图，并将其转换为 SkImage 对象
 sk_sp<SkImage> HarmonyPlatformContext::takeScreenshotFromViewTag(size_t tag) {
     // 截图
-    /*
-    auto env = jni::Environment::current();
-    static auto method = javaPart_->getClass()->getMethod<jobject(int)>(
-      "takeScreenshotFromViewTag");
+    DLOG(INFO) << "takeScreenshotFromViewTag Started";
+    if (!Getview(tag)) {
+        DLOG(INFO) << "Getview error";
+        return nullptr;
+    }
+    if (SkiaManager::_pixels == nullptr) {
+        DLOG(INFO) << "bitmap is nullptr,can not takeScreenshotFromViewTag";
+        return nullptr;
+    }
 
-    typedef struct OH_Drawing_Bitmap OH_Drawing_Bitmap;
-    OH_Drawing_Bitmap *bitmap = method(javaPart_.get(), tag).release();
 
-  // Let's convert to a native bitmap and get some info about the bitmap
+    auto colorType = color_type(SkiaManager::option.pixelFormat);
+    auto alphaType = alpha_type(SkiaManager::option.alphaType);
+    auto skInfo =
+        SkImageInfo::Make(SkISize::Make(SkiaManager::option.width, SkiaManager::option.height), colorType, alphaType);
 
-    auto *bmi=OH_Drawing_BitmapGetPixels(bitmap);
-  // Convert bitmap info to a Skia bitmap info
-    auto colorType = color_type(bmi.format);
-    auto alphaType = alpha_type(bmi.flags);
-
-    auto skInfo = SkImageInfo::Make(SkISize::Make(bmi->width, bmi.height),
-                                  colorType, alphaType);
-
-  // Lock pixels
-    NativePixelMap *pixels;
-    OH_PixelMap_AccessPixels(&pixels, &bitmap);
-
-  // Create pixmap from pixels and make a copy of it so that
-  // the SkImage owns its own pixels
-    SkPixmap pm(skInfo, pixels, 4*OH_Drawing_BitmapGetWidth(bitmap));
+    // Create pixmap from pixels and make a copy of it so that
+    // the SkImage owns its own pixels
+    SkPixmap pm(skInfo, SkiaManager::_pixels, SkiaManager::option.stride);
     auto skImage = SkImages::RasterFromPixmapCopy(pm);
 
-  // Unlock pixels
-    OH_PixelMap_UnAccessPixels(bitmap);
-
-  // Return our newly created SkImage!
     return skImage;
-    return nullptr;*/
-    DLOG(ERROR) << "takeScreenshotFromViewTag not implement tag: " << tag;
-    return nullptr;
 }
 
 // 读取文件数据

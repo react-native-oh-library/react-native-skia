@@ -108,28 +108,41 @@ const SnapshotImageDemo = () => {
   // Create a function to take the snapshot
   const onPress = async () => {
     // Take the snapshot of the view
+    console.log('makeImage');
     const snapshot = await makeImageFromView(ref);
+    console.log('makeImage over');
     setImage(snapshot);
   };
+  const onLayout = (event: {
+    nativeEvent: {layout: {width: any; height: any}};
+  }) => {
+    const {width, height} = event.nativeEvent.layout;
+    console.log('View width:', width);
+    console.log('View height:', height);
+  };
+
   return (
-    <View style={{flex: 1, width: 256, height: 256}}>
+    <View style={{flex: 1}}>
       <Pressable onPress={onPress}>
         <View
+          id="1011"
           ref={ref}
           // collapsable={false} is important here
           collapsable={false}
-          style={{backgroundColor: 'cyan', flex: 1}}>
-          <Text>This is a React Native View</Text>
+          onLayout={onLayout}
+          style={{width: 256, height: 256, backgroundColor: 'cyan', flex: 1}}>
+          <Text selectionColor={'red'}>This is a React Native View</Text>
         </View>
       </Pressable>
+      <View style={{backgroundColor: 'red', width: 256, height: 10}}></View>
       {image && (
-        <Canvas style={StyleSheet.absoluteFill}>
+        <Canvas style={{flex: 1, width: 256, height: 256}}>
           <Image
             image={image}
             x={0}
             y={0}
-            width={image.width() / pd}
-            height={image.height() / pd}
+            width={256 / (pd * 2)}
+            height={256 / (pd * 2)}
           />
         </Canvas>
       )}

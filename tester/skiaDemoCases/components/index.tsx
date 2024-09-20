@@ -14,7 +14,6 @@ import ImageFilters_Offset from './Skia_ImageFilters_Offset';
 import ImageFilters_Morphology from './Skia_ImageFilters_Morphology';
 import ImageFilters_RuntimeShader from './Skia_ImageFilters_RuntimeShader';
 import Images from './Skia_Images';
-import Video from './Skia_Video';
 import Text from './Skia_Text';
 import Canvas from './Skia_Canvas';
 import Group from './Skia_Group';
@@ -43,7 +42,6 @@ export default {
   Shapes_Patch,
   Shapes_Picture,
   Images,
-  Video,
   Text,
   Shaders_Language,
   Shaders_Gradients,
@@ -62,6 +60,4 @@ export default {
   Mask,
   PathEffect,
   Animations_Animations,
-  Animations_Gestures,
-  Picture,
 };

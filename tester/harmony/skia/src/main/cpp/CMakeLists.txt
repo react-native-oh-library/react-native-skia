@@ -150,10 +150,16 @@ target_link_libraries(
     librcp_c.so
 
     ${EGL-lib} ${GLES-lib} ${hilog-lib} ${libace-lib} ${libnapi-lib} ${libuv-lib}
-#    libEGL.so
-#    libGLESv3.so
-#    -lGLESv2
-#    -lEGL
+
+    libhilog_ndk.z.so
+    librawfile.z.so
+    libnative_drawing.so
+    libpixelmap_ndk.z.so
+
+    libEGL.so
+    libGLESv3.so
+    -lGLESv2
+    -lEGL
 #    ${CMAKE_CURRENT_SOURCE_DIR}../../../../libs/libcurl.so
 )
 
