@@ -18,6 +18,9 @@ bool RNSkiaModule::install(jsi::Runtime &rt) {
         auto rnInstance = m_ctx.instance.lock();
         auto nativeResourceManager = rnInstance->getNativeResourceManager();
         platformContext->setNativeResourceManager(nativeResourceManager);
+        
+        platformContext->_instance = rnInstance;
+        platformContext->_TurboModule = rnInstance->getTurboModule("RNSkiaModule");
     }
     RNSkia::SkiaManager::getInstance().setContext(platformContext);
     rNSkManager = std::make_shared<RNSkia::RNSkManager>(&rt, jsInvoker_, platformContext);
