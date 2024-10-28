@@ -65,14 +65,56 @@ export const ApplyingEffectsPictureDemo = () => {
   });
   return (
     <View style={{padding: 10, alignItems: 'center'}}>
-      <Group
-        layer={
-          <Paint>
-            <Blur blur={10} />
-          </Paint>
-        }>
+      <Canvas style={{flex: 1, width: 256, height: 256}}>
+        <Group
+          layer={
+            <Paint>
+              <Blur blur={10} />
+            </Paint>
+          }>
+          <Picture picture={picture} />
+        </Group>
+      </Canvas>
+    </View>
+  );
+};
+
+export const SerializationPictureExample = () => {
+  // Create picture
+  const picture = useMemo(
+    () =>
+      createPicture(
+        canvas => {
+          const paint = Skia.Paint();
+          paint.setColor(Skia.Color('pink'));
+          canvas.drawRect({x: 0, y: 0, width: 100, height: 100}, paint);
+
+          const circlePaint = Skia.Paint();
+          circlePaint.setColor(Skia.Color('orange'));
+          canvas.drawCircle(50, 50, 50, circlePaint);
+        },
+        {width: 100, height: 100},
+      ),
+    [],
+  );
+
+  // Serialize the picture
+  const serialized = useMemo(() => picture.serialize(), [picture]);
+
+  // Create a copy from serialized data
+  const copyOfPicture = useMemo(
+    () => (serialized ? Skia.Picture.MakePicture(serialized) : null),
+    [serialized],
+  );
+
+  return (
+    <View style={{padding: 10, alignItems: 'center'}}>
+      <Canvas style={{flex: 1, width: 256, height: 256}}>
         <Picture picture={picture} />
-      </Group>
+        <Group transform={[{translateX: 150}]}>
+          {copyOfPicture && <Picture picture={copyOfPicture} />}
+        </Group>
+      </Canvas>
     </View>
   );
 };
@@ -81,13 +123,22 @@ export default function () {
   return (
     <Tester style={{flex: 1}}>
       <ScrollView>
-        <TestCase itShould="case1: Picture">
+        <TestCase itShould="Picture: picture={picture}">
           <PictureDemo />
         </TestCase>
 
-        {/* <TestCase itShould="case2: Applying Effects Picture">
+        <TestCase
+          itShould="Picture and group layer: picture={picture} layer={
+            <Paint>
+              <Blur blur={10} />
+            </Paint>
+          }">
           <ApplyingEffectsPictureDemo />
-        </TestCase> */}
+        </TestCase>
+
+        <TestCase itShould="Picture and group transform: picture={picture} transform={[{translateX: 150}]}">
+          <SerializationPictureExample />
+        </TestCase>
       </ScrollView>
     </Tester>
   );

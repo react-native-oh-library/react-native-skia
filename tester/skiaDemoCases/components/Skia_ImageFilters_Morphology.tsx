@@ -10,6 +10,7 @@ import {
   Morphology,
   Text,
   useFont,
+  Blur,
 } from '@shopify/react-native-skia';
 
 import {ScrollView} from 'react-native';
@@ -25,7 +26,9 @@ const MorphologyDemo = () => {
           <Morphology radius={1} />
         </Text>
         <Text text="Hello World" x={32} y={96} font={font}>
-          <Morphology radius={0.3} operator="erode" />
+          <Morphology radius={0.3} operator="erode">
+            <Blur blur={4}></Blur>
+          </Morphology>
         </Text>
       </Canvas>
     </View>
@@ -36,7 +39,7 @@ export default function () {
   return (
     <Tester style={{flex: 1}}>
       <ScrollView>
-        <TestCase itShould="case1: The morphology image filter is identical to its SVG counterpart. It is used to erode or dilate the input image. Its usefulness lies primarily in fattening or thinning effects.">
+        <TestCase itShould="Morphology: radius={0.3} operator='erode' children">
           <MorphologyDemo />
         </TestCase>
       </ScrollView>

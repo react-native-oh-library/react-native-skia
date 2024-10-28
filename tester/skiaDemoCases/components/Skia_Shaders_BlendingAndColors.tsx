@@ -48,10 +48,10 @@ export default function () {
   return (
     <Tester style={{flex: 1}}>
       <ScrollView>
-        <TestCase itShould="case1: Blend Shader">
+        <TestCase itShould="Blend1: mode='difference'">
           <BlendDemo />
         </TestCase>
-        <TestCase itShould="case2: Color Shader">
+        <TestCase itShould="Blend2: color='lightBlue'">
           <BlendColorDemo />
         </TestCase>
       </ScrollView>

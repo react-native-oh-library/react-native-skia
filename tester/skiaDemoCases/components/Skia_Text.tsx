@@ -14,7 +14,9 @@ import {
   Skia,
   Paragraph,
   TileMode,
+  //@ts-ignore
   Slant,
+  //@ts-ignore
   Weight,
   useFont,
   Glyphs,
@@ -336,44 +338,44 @@ export default function () {
   return (
     <Tester style={{flex: 1}}>
       <ScrollView>
-        <TestCase itShould="case1: simple paragraph based on system fonts">
+        <TestCase itShould="Paragraph1: paragraph={paragraph} x={0} y={0} width={250}">
           <MyParagraphsys />
         </TestCase>
 
-        <TestCase itShould="case2: simple paragraph based on custom fonts">
+        <TestCase itShould="Paragraph2: simple paragraph based on custom fonts">
           <MyParagraph />
         </TestCase>
 
-        <TestCase itShould="case3: Paragraph Bounding Box">
+        <TestCase itShould="Paragraph3: Paragraph Bounding Box">
           <Rectdemo />
         </TestCase>
 
-        <TestCase itShould="case4: Draw text vertically">
-          <Myglyphdemo />
-        </TestCase>
-
-        <TestCase itShould="case5: Draws text along a path.">
-          <Circledemo />
-        </TestCase>
-
-        <TestCase itShould="case6: Applying Effects, fopr we apply a blur image filter">
-          <MyblurDemo />
-        </TestCase>
-
-        <TestCase itShould="case7: A text blob contains glyphs, positions, and paint attributes specific to the text.">
-          <Myblobdemo />
-        </TestCase>
-
-        <TestCase itShould="case8: Simple Text">
-          <Hmfontmgrdemo />
-        </TestCase>
-
-        <TestCase itShould="case9: Using Paints">
+        <TestCase itShould="Paragraph4: Using Paints">
           <MyParagraph1 />
         </TestCase>
 
-        <TestCase itShould="case10: Text Style Properties">
+        <TestCase itShould="Paragraph5: Applying Effects, fopr we apply a blur image filter">
+          <MyblurDemo />
+        </TestCase>
+
+        <TestCase itShould="Paragraph6: Text Style Properties">
           <MyParagraph123 />
+        </TestCase>
+
+        <TestCase itShould="Glyphs: font={font} x={100} glyphs={glyphs}">
+          <Myglyphdemo />
+        </TestCase>
+
+        <TestCase itShould="TextPath: font={font} path={path} text='Hello World!'">
+          <Circledemo />
+        </TestCase>
+
+        <TestCase itShould="TextBlob: x={10} y={20} blob={blob} color='blue'">
+          <Myblobdemo />
+        </TestCase>
+
+        <TestCase itShould="Text: x={20} y={100} text='Hello World' font={font}">
+          <Hmfontmgrdemo />
         </TestCase>
       </ScrollView>
     </Tester>

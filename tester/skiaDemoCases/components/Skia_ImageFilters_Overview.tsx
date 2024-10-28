@@ -39,7 +39,11 @@ export default function () {
   return (
     <Tester style={{flex: 1}}>
       <ScrollView>
-        <TestCase itShould="case1: Color Filters and Shaders can also be used as Image filters. In the example below, we first apply a color matrix to the content and a blur image filter.">
+        <TestCase
+          itShould="Canvas、Image、Blur、ColorMatrix: matrix={[
+                -0.578, 0.99, 0.588, 0, 0, 0.469, 0.535, -0.003, 0, 0, 0.015,
+                1.69, -0.703, 0, 0, 0, 0, 0, 1, 0,
+              ]}">
           <ComposeImageFilter />
         </TestCase>
       </ScrollView>

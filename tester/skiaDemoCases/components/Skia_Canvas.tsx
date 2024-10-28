@@ -14,7 +14,7 @@ export const CanvasDemo = () => {
 
   return (
     <View style={styles.viewStyle}>
-      <Button
+      {/* <Button
         title="click to makeImageSnapshot"
         onPress={() => {
           const image = ref.current?.makeImageSnapshot();
@@ -34,16 +34,17 @@ export const CanvasDemo = () => {
             setByteLength(bytes.length);
             setShow(true);
           }
-        }}></Button>
+        }}></Button> */}
       <Canvas
         style={styles.canvasStyle}
         ref={ref}
         mode={'default'}
-        onSize={size}>
+        onSize={size}
+        onLayout={event => {}}>
         <Circle r={128} cx={128} cy={128} color="red" />
         <Circle r={64} cx={128} cy={128} color="green" />
       </Canvas>
-      <Text>image.encodeToBytes length={byteLength}</Text>
+      {/* <Text>image.encodeToBytes length={byteLength}</Text>
       {show ? (
         <Canvas style={styles.canvasStyle}>
           <Image
@@ -55,7 +56,7 @@ export const CanvasDemo = () => {
             height={256}
           />
         </Canvas>
-      ) : null}
+      ) : null} */}
     </View>
   );
 };
@@ -64,7 +65,12 @@ export default function () {
   return (
     <Tester style={{flex: 1}}>
       <ScrollView>
-        <TestCase itShould="case1: Canvas Demo">
+        <TestCase
+          itShould="Canvas: style={styles.canvasStyle}
+        ref={ref}
+        mode={'default'}
+        onSize={size}
+        onLayout={event => {}}">
           <CanvasDemo />
         </TestCase>
       </ScrollView>

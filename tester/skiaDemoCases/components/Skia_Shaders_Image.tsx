@@ -8,6 +8,7 @@ import {
 } from '@shopify/react-native-skia';
 import {ScrollView, StyleSheet, View} from 'react-native';
 import {Tester, TestCase} from '@rnoh/testerino';
+import {transform} from 'typescript';
 
 export const ImageShaderDemo = () => {
   const image = useImage(require('../../assets/oslo.jpg'));
@@ -19,9 +20,15 @@ export const ImageShaderDemo = () => {
       <Canvas style={styles.canvasStyle}>
         <Circle cx={128} cy={128} r={128}>
           <ImageShader
+            tx={'repeat'}
+            ty={'repeat'}
+            fm={'nearest'}
+            //@ts-ignore
+            mm={'last'} // 'none' 'last'
             image={image}
             fit="cover"
             rect={{x: 0, y: 0, width: 256, height: 256}}
+            transform={[{skewX: Math.PI / 6}]}
           />
         </Circle>
       </Canvas>
@@ -33,7 +40,10 @@ export default function () {
   return (
     <Tester style={{flex: 1}}>
       <ScrollView>
-        <TestCase itShould="case1: Image Shaders">
+        <TestCase
+          itShould="ImageShader: image={image}
+            fit='cover'
+            rect={{x: 0, y: 0, width: 256, height: 256}}">
           <ImageShaderDemo />
         </TestCase>
       </ScrollView>

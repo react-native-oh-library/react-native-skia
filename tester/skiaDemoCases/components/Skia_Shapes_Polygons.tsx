@@ -138,27 +138,43 @@ export default function () {
   return (
     <Tester style={{flex: 1}}>
       <ScrollView>
-        <TestCase itShould="case1: Rect">
+        <TestCase itShould="Rect: x={0} y={0} width={256} height={256} color='lightblue'">
           <RectExample />
         </TestCase>
 
-        <TestCase itShould="case2: RoundedRect">
+        <TestCase
+          itShould="RoundedRect1: x={0}
+            y={0}
+            width={256}
+            height={256}
+            r={25}
+            color='lightblue'">
           <RoundedRectExample />
         </TestCase>
 
-        <TestCase itShould="case3: Using Custom Radii">
+        <TestCase itShould="RoundedRect2: rect={rrct} color='lightblue'">
           <CustomRoundedRectExample />
         </TestCase>
 
-        <TestCase itShould="case4: DiffRect">
+        <TestCase itShould="DiffRect: inner={inner} outer={outer} color='lightblue'">
           <DiffRectExample />
         </TestCase>
 
-        <TestCase itShould="case5: Line">
+        <TestCase
+          itShould="Line: p1={vec(0, 0)}
+            p2={vec(256, 256)}
+            color='lightblue'
+            style='stroke'
+            strokeWidth={4}">
           <LineExample />
         </TestCase>
 
-        <TestCase itShould="case6: Points">
+        <TestCase
+          itShould="Points: points={points}
+            mode='polygon'
+            color='lightblue'
+            style='stroke'
+            strokeWidth={4}">
           <PointsExample />
         </TestCase>
       </ScrollView>

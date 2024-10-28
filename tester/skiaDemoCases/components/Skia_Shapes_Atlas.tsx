@@ -53,7 +53,17 @@ class AltasExample extends Component {
     return (
       <View style={{padding: 10, alignItems: 'center'}}>
         <Canvas style={{width: 256, height: 256}}>
-          <Atlas image={image} sprites={sprites} transforms={transforms} />
+          <Atlas
+            image={image}
+            sprites={sprites}
+            transforms={transforms}
+            colors={[
+              Float32Array.of(0, 1, 0.498, 1),
+              Float32Array.of(0.737, 0.561, 0.561, 1),
+              Float32Array.of(0.859, 0.439, 0.576, 1),
+            ]}
+            blendMode="color"
+          />
         </Canvas>
       </View>
     );
@@ -64,7 +74,13 @@ export default function () {
   return (
     <Tester style={{flex: 1}}>
       <ScrollView>
-        <TestCase itShould="case1: Altas">
+        <TestCase
+          itShould="Atlas: image={image} sprites={sprites} transforms={transforms}  colors={[
+              Float32Array.of(0, 1, 0.498, 1),
+              Float32Array.of(0.737, 0.561, 0.561, 1),
+              Float32Array.of(0.859, 0.439, 0.576, 1),
+            ]}
+            blendMode='color'">
           <AltasExample />
         </TestCase>
       </ScrollView>

@@ -27,7 +27,7 @@ export function NavigationContainer({
 }: {
   initialPage?: string;
   children: any;
-  hasHeader?: boolean
+  hasHeader?: boolean;
 }) {
   const [currentPageName, setCurrentPageName] = React.useState(initialPage);
   const [registeredPageNames, setRegisteredPageNames] = React.useState<
@@ -51,7 +51,7 @@ export function NavigationContainer({
       }}>
       <View style={{width: '100%', height: '100%', flexDirection: 'column'}}>
         <Page name="INDEX">
-        <IndexPage hasHeader={hasHeader} />
+          <IndexPage hasHeader={hasHeader} />
         </Page>
         {children}
       </View>
@@ -92,39 +92,40 @@ export function Page({name, children}: {name: string; children: any}) {
   ) : null;
 }
 
-export function IndexPage({ hasHeader }: { hasHeader: boolean }) {
+export function IndexPage({hasHeader}: {hasHeader: boolean}) {
   const {navigateTo, registeredPageNames} = useNavigation();
 
   return (
     <FlatList
       data={registeredPageNames}
       ListHeaderComponent={
-        hasHeader ? <View
-          style={{
-            flexDirection: 'row',
-            alignItems: 'center',
-            paddingHorizontal: 16,
-            paddingVertical: 16,
-          }}>
-          <Image
-            style={{width: 32, height: 32}}
-            resizeMode="contain"
-            source={require('../assets/react-native-logo.png')}
-          />
-          <Text
+        hasHeader ? (
+          <View
             style={{
-              color: '#EEE',
-              fontSize: 24,
-              fontWeight: 'bold',
-              padding: 16,
+              flexDirection: 'row',
+              alignItems: 'center',
+              paddingHorizontal: 16,
+              paddingVertical: 16,
             }}>
-            RN Svg Capi Tester
-            {'rnohArchitecture' in Platform.constants
-              ? (` (${Platform.constants.rnohArchitecture})` as string)
-              : ''}
-          </Text>
-        </View>
-        : null
+            <Image
+              style={{width: 32, height: 32}}
+              resizeMode="contain"
+              source={require('../assets/react-native-logo.png')}
+            />
+            <Text
+              style={{
+                color: '#EEE',
+                fontSize: 24,
+                fontWeight: 'bold',
+                padding: 16,
+              }}>
+              RN Skia Capi Tester
+              {'rnohArchitecture' in Platform.constants
+                ? (` (${Platform.constants.rnohArchitecture})` as string)
+                : ''}
+            </Text>
+          </View>
+        ) : null
       }
       renderItem={({item}) => {
         return (

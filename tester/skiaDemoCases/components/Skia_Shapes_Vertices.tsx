@@ -63,11 +63,11 @@ export default function () {
   return (
     <Tester style={{flex: 1}}>
       <ScrollView>
-        <TestCase itShould="case1: Using texture mapping">
+        <TestCase itShould="Vertices1: vertices={vertices} colors={colors}">
           <VerticesDemo />
         </TestCase>
 
-        <TestCase itShould="case2: Using indices">
+        <TestCase itShould="Vertices2: vertices={vertices} colors={colors} indices={indices}">
           <IndicesDemo />
         </TestCase>
       </ScrollView>

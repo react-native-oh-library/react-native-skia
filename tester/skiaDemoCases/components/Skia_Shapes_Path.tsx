@@ -98,19 +98,30 @@ export default function () {
   return (
     <Tester style={{flex: 1}}>
       <ScrollView>
-        <TestCase itShould="case1: Using SVG Notation">
+        <TestCase
+          itShould="Path1:
+            path='M 128 0 L 168 80 L 256 93 L 192 155 L 207 244 L 128 202 L 49 244 L 64 155 L 0 93 L 88 80 L 128 0 Z'
+            color='lightblue'
+          ">
           <SVGNotationPathExample />
         </TestCase>
 
-        <TestCase itShould="case2: Using Path Object">
+        <TestCase itShould="Path2: path={path} color='lightblue'">
           <PathObjectExample />
         </TestCase>
 
-        <TestCase itShould="case3: Trim path">
+        <TestCase
+          itShould="Path3: path='M 128 0 L 168 80 L 256 93 L 192 155 L 207 244 L 128 202 L 49 244 L 64 155 L 0 93 L 88 80 L 128 0 Z'
+            color='lightblue'
+            style='stroke'
+            strokeJoin='round'
+            strokeWidth={5}
+            start={0.25}
+            end={0.75}">
           <TrimPathExample />
         </TestCase>
 
-        <TestCase itShould="case4: Fill Type Path">
+        <TestCase itShould="Path4: path={path} style='stroke' strokeWidth={4} color='#3EB489'">
           <FillTypePathExample />
         </TestCase>
       </ScrollView>

@@ -49,10 +49,12 @@ export default function () {
   return (
     <Tester style={{flex: 1}}>
       <ScrollView>
-        <TestCase itShould="case1: Apply a black and white color matrix to the clipping area">
+        <TestCase
+          itShould="BackdropFilter: clip={{x: 0, y: 128, width: 256, height: 128}}
+          filter={<ColorMatrix matrix={BLACK_AND_WHITE} />}">
           <FilterDemo />
         </TestCase>
-        <TestCase itShould="case2: Creates a backdrop blur. All properties from the group component can be applied to a backdrop filter.">
+        <TestCase itShould="BackdropBlur: blur={4} clip={{x: 0, y: 128, width: 256, height: 128}}">
           <FilterColorDemo />
         </TestCase>
       </ScrollView>

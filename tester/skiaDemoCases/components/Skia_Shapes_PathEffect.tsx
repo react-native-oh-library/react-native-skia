@@ -233,31 +233,39 @@ export default function () {
   return (
     <Tester style={{flex: 1}}>
       <ScrollView>
-        <TestCase itShould="case1: Discrete Path Effect">
+        <TestCase itShould="DiscretePathEffect: length={10} deviation={4}">
           <DiscretePathEffectExample />
         </TestCase>
 
-        <TestCase itShould="case2: Dash Path Effect">
+        <TestCase itShould="DashPathEffect: intervals={[10, 10]}">
           <DashPathEffectExample />
         </TestCase>
 
-        <TestCase itShould="case3: Corner Path Effect">
+        <TestCase itShould="CornerPathEffect: r={200}">
           <CornerPathEffectExample />
         </TestCase>
 
-        <TestCase itShould="case4: Path1D Path Effect">
+        <TestCase
+          itShould="Path1DPathEffect: path='M -10 0 L 0 -10, 10 0, 0 10 Z'
+              advance={20}
+              phase={0}
+              style='rotate'">
           <Path1DPathEffectExample />
         </TestCase>
 
-        <TestCase itShould="case5: Path2D Path Effect">
+        <TestCase
+          itShould="Path2DPathEffect: path='M -10 0 L 0 -10, 10 0, 0 10 Z'
+              matrix={processTransform2d([{scale: 40}])}">
           <Path2DPathEffectExample />
         </TestCase>
 
-        <TestCase itShould="case6: Line2D Path Effect">
+        <TestCase
+          itShould="Line2DPathEffect: width={0}
+              matrix={processTransform2d([{scale: 8}])}">
           <Line2DPathEffectExample />
         </TestCase>
 
-        <TestCase itShould="case7: Compose Path Effect">
+        <TestCase itShould="DashPathEffect and DiscretePathEffect: intervals={[10, 10]} length={10} deviation={10}">
           <ComposePathEffectExample />
         </TestCase>
       </ScrollView>

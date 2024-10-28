@@ -28,36 +28,110 @@ import Shaders_BlendingAndColors from './Skia_Shaders_BlendingAndColors';
 import BackdropFilters from './Skia_BackdropFilters';
 import PathEffect from './Skia_PathEffect';
 import Animations_Animations from './Skia_Animations';
+import Video from './Skia_Video';
+import ColorFilters from './Skia_ColorFilters';
+
+import ZgenPath from './genPath';
+import ZgenRect from './genRect';
+import ZgenRoundedRect from './genRoundedRect';
+import ZgenDiffRect from './genDiffRect';
+import ZgenLine from './genLine';
+import ZgenPoints from './genPoints';
+import ZgenCircle from './genCircle';
+import ZgenOval from './genOval';
+import ZgenAtlas from './genAtlas';
+import ZgenVertices from './genVertices';
+import ZgenPatch from './genPatch';
+import ZgenPicture from './genPicture';
+import ZgenImage from './genImage';
+import ZgenImageSVG from './genImageSVG';
+import ZgenParagraph from './genParagraph';
+import ZgenText from './genText';
+import ZgenGlyphs from './genGlyphs';
+import ZgenTextPath from './genTextPath';
+import ZgenTextBlob from './genTextBlob';
+import ZgenDiscretePathEffect from './genDiscretePathEffect';
+import ZgenDashPathEffect from './genDashPathEffect';
+import ZgenCornerPathEffect from './genCornerPathEffect';
+import ZgenPath1DPathEffect from './genPath1DPathEffect';
+import ZgenPath2DPathEffect from './genPath2DPathEffect';
+import ZgenLine2DPathEffect from './genLine2DPathEffect';
+import ZgenLinearGradient from './genLinearGradient';
+import ZgenRadialGradient from './genRadialGradient';
+import ZgenTwoPointConicalGradient from './genTwoPointConicalGradient';
+import ZgenSweepGradient from './genSweepGradient';
+import ZgenImageShader from './genImageShader';
+import ZgenBlur from './genBlur';
+import ZgenMorphology from './genMorphology';
+import ZgenBlurMask from './genBlurMask';
 
 export default {
-  Canvas,
-  Painting,
-  Group,
-  Shapes_Ellipses,
-  Shapes_Box,
-  Shapes_Path,
-  Shapes_Polygons,
-  Shapes_Atlas,
-  Shapes_Vertices,
-  Shapes_Patch,
-  Shapes_Picture,
-  Images,
-  Text,
-  Shaders_Language,
-  Shaders_Gradients,
-  Shaders_PerlinNoise,
-  Shaders_Image,
-  Shaders_BlendingAndColors,
-  ImageFilters_Overview,
-  ImageFilters_Shadows,
+  ZgenPath,
+  ZgenRect,
+  ZgenRoundedRect,
+  ZgenDiffRect,
+  ZgenLine,
+  ZgenPoints,
+  ZgenCircle,
+  ZgenOval,
+  ZgenAtlas,
+  ZgenVertices,
+  ZgenPatch,
+  ZgenPicture,
+  ZgenImage,
+  ZgenImageSVG,
+  ZgenParagraph,
+  ZgenText,
+  ZgenGlyphs,
+  ZgenTextPath,
+  ZgenTextBlob,
+  ZgenDiscretePathEffect,
+  ZgenDashPathEffect,
+  ZgenCornerPathEffect,
+  ZgenPath1DPathEffect,
+  ZgenPath2DPathEffect,
+  ZgenLine2DPathEffect,
+  ZgenLinearGradient,
+  ZgenRadialGradient,
+  ZgenTwoPointConicalGradient,
+  ZgenSweepGradient,
+  ZgenImageShader,
+  ZgenBlur,
+  ZgenMorphology,
+  ZgenBlurMask,
+
+  Canvas, //1：Canvas
+  Painting, //0：Painting
+  Group, //1：Group
+  // Shapes_Ellipses,
+  Shapes_Box, //2：Box、BoxShadow
+  // Shapes_Path,
+  // Shapes_Polygons,
+  // Shapes_Atlas,
+  // Shapes_Vertices,
+  // Shapes_Patch,
+  // Shapes_Picture,
+  Images, //-2：Image、ImageSVG,1接口
+  // Text,
+  Shaders_Language, //1：Shader
+  // Shaders_Gradients,
+  Shaders_PerlinNoise, //2：FractalNoise、Turbulence
+  Shaders_BlendingAndColors, //2：Blend、ColorShader
+  // Shaders_Image,
+  ImageFilters_Overview, //1：ColorMatrix
+  ImageFilters_Shadows, //1：Shadow
   ImageFilters_Blur,
-  ImageFilters_DisplacementMap,
-  ImageFilters_Offset,
+  ImageFilters_DisplacementMap, //1：DisplacementMap
+  ImageFilters_Offset, //1：Offset
   ImageFilters_Morphology,
-  ImageFilters_RuntimeShader,
-  BackdropFilters,
-  MaskFilters,
-  Mask,
+  ImageFilters_RuntimeShader, //1：RuntimeShader
+  BackdropFilters, //2：BackdropFilter、BackdropBlur
+  // MaskFilters,
+  ColorFilters, //4：BlendColor、Lerp、LinearToSRGBGamma、SRGBToLinearGamma
+  Mask, //1：Mask
+
   PathEffect,
-  Animations_Animations,
+  // Animations_Animations,
+  // Video,
 };
+//54组件

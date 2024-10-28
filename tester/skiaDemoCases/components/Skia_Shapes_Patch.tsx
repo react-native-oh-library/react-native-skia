@@ -42,7 +42,9 @@ export default function () {
   return (
     <Tester style={{flex: 1}}>
       <ScrollView>
-        <TestCase itShould="case1: Patch">
+        <TestCase
+          itShould="Patch: colors={colors}
+          patch={[topLeft, topRight, bottomRight, bottomLeft]}">
           <PatchDemo />
         </TestCase>
       </ScrollView>

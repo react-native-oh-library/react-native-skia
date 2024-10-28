@@ -71,6 +71,8 @@ export const SweepGradientDemo = () => {
         <Rect x={0} y={0} width={256} height={256}>
           <SweepGradient
             c={vec(128, 128)}
+            start={40}
+            end={300}
             colors={['cyan', 'magenta', 'yellow', 'cyan']}
           />
         </Rect>
@@ -83,16 +85,16 @@ export default function () {
   return (
     <Tester style={{flex: 1}}>
       <ScrollView>
-        <TestCase itShould="case1: Linear Gradient Demo">
+        <TestCase itShould="LinearGradient: start={vec(0, 0)} end={vec(256, 256)} colors={['blue', 'yellow']}">
           <LinearGradientDemo />
         </TestCase>
-        <TestCase itShould="case2: Radial Gradient Demo">
+        <TestCase itShould="RadialGradient: c={vec(128, 128)} r={128} colors={['blue', 'yellow']}">
           <RadialGradientDemo />
         </TestCase>
-        <TestCase itShould="case3: Two Point Conical Gradient Demo">
+        <TestCase itShould="TwoPointConicalGradient: start={vec(128, 128)} startR={128} end={vec(128, 16)} endR={16} colors={['blue', 'yellow']}">
           <TwoPointConicalGradientDemo />
         </TestCase>
-        <TestCase itShould="case4: Sweep Gradient Demo">
+        <TestCase itShould="SweepGradient: c={vec(128, 128)} start={40} end={300} colors={['cyan', 'magenta', 'yellow', 'cyan']}">
           <SweepGradientDemo />
         </TestCase>
       </ScrollView>

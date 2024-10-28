@@ -46,11 +46,11 @@ export default function () {
   return (
     <Tester style={{flex: 1}}>
       <ScrollView>
-        <TestCase itShould="case1: Circle">
+        <TestCase itShould="Circle: cx={r} cy={r} r={r} color='cyan'">
           <CircleExample />
         </TestCase>
 
-        <TestCase itShould="case2: Oval">
+        <TestCase itShould="Oval: x={64} y={0} width={128} height={256} color='lightblue'">
           <OvalExample />
         </TestCase>
       </ScrollView>
