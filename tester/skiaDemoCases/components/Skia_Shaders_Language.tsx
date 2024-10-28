@@ -8,6 +8,7 @@ import {
   Skia,
   useImage,
   vec,
+  LinearGradient,
 } from '@shopify/react-native-skia';
 import {ScrollView, StyleSheet, View} from 'react-native';
 import {Tester, TestCase} from '@rnoh/testerino';
@@ -24,6 +25,24 @@ export const SimpleShader = () => {
       <Canvas style={styles.canvasStyle}>
         <Fill>
           <Shader source={source} />
+        </Fill>
+      </Canvas>
+    </View>
+  );
+};
+
+export const SimpleChildrenShader = () => {
+  const source = Skia.RuntimeEffect.Make(`
+  vec4 main(vec2 pos) {
+    // normalized x,y values go from 0 to 1, the canvas is 256x256
+    vec2 normalized = pos/vec2(256);
+    return vec4(normalized.x, normalized.y, 0.5, 1);
+  }`)!;
+  return (
+    <View style={styles.viewStyle}>
+      <Canvas style={styles.canvasStyle}>
+        <Fill>
+          <Shader source={source}></Shader>
         </Fill>
       </Canvas>
     </View>
@@ -73,6 +92,11 @@ export const NestedShaders = () => {
         <Fill>
           <Shader source={source}>
             <ImageShader
+              tx={'repeat'}
+              ty={'repeat'}
+              fm={'nearest'}
+              //@ts-ignore
+              mm={'last'} // 'none' 'last'
               image={image}
               fit="cover"
               rect={{x: 0, y: 0, width: 256, height: 256}}
@@ -88,13 +112,13 @@ export default function () {
   return (
     <Tester style={{flex: 1}}>
       <ScrollView>
-        <TestCase itShould="case1: Simple Shader">
+        <TestCase itShould="Shader1: source={source}">
           <SimpleShader />
         </TestCase>
-        <TestCase itShould="case2: Using Uniforms">
+        <TestCase itShould="Shader2: source={source} uniforms={{c, r, blue}}">
           <UsingUniforms />
         </TestCase>
-        <TestCase itShould="case3: Nested Shaders">
+        <TestCase itShould="Shader3: source={source} children">
           <NestedShaders />
         </TestCase>
       </ScrollView>

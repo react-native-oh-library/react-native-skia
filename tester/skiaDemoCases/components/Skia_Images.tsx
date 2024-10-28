@@ -137,13 +137,7 @@ const SnapshotImageDemo = () => {
       <View style={{backgroundColor: 'red', width: 256, height: 10}}></View>
       {image && (
         <Canvas style={{flex: 1, width: 256, height: 256}}>
-          <Image
-            image={image}
-            x={0}
-            y={0}
-            width={256 / (pd * 2)}
-            height={256 / (pd * 2)}
-          />
+          <Image image={image} x={0} y={0} width={256} height={256} />
         </Canvas>
       )}
     </View>
@@ -154,13 +148,19 @@ export default function () {
   return (
     <Tester style={{flex: 1}}>
       <ScrollView>
-        <TestCase itShould="case1: Image">
+        <TestCase
+          itShould="Image: image={image}
+          fit='contain'
+          x={0}
+          y={0}
+          width={256}
+          height={256}">
           <ImageDemo />
         </TestCase>
         <TestCase itShould="case2: Gif Image Demo">
           <GifImageDemo />
         </TestCase>
-        <TestCase itShould="case3: SVG Image Demo">
+        <TestCase itShould="ImageSVG: svg={tiger} x={0} y={0} width={800} height={800}">
           <SVGImageDemo />
         </TestCase>
         <TestCase itShould="case4: Creating Snapshots of Views">

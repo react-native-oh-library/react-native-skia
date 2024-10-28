@@ -193,28 +193,30 @@ export default function () {
   return (
     <Tester style={{flex: 1}}>
       <ScrollView>
-        <TestCase itShould="case1: Paint Properties">
+        <TestCase itShould="Group1: color='lightblue' style='stroke' strokeWidth={10}">
           <PaintProperties />
         </TestCase>
-        <TestCase itShould="case2: Simple Transformation">
+        <TestCase itShould="Group2: color='lightblue' transform={[{skewX: Math.PI / 6}]}">
           <SimpleTransform />
         </TestCase>
-        <TestCase itShould="case3: Transformation of Origin">
+        <TestCase itShould="Group3:  color='lightblue' transform={[{skewX: Math.PI / 6}]} origin={{x: 128, y: 128}}">
           <SimpleTransformOrigin />
         </TestCase>
-        <TestCase itShould="case4: Clip Rectangle">
+        <TestCase itShould="Group4: clip={rct}">
           <Clip />
         </TestCase>
-        <TestCase itShould="case5: Clip Rounded Rectangle">
+        <TestCase itShould="Group5: clip={roundedRect}">
           <ClipRound />
         </TestCase>
-        <TestCase itShould="case6: Clip Path">
+        <TestCase itShould="Group6: clip={star}">
           <ClipPath />
         </TestCase>
-        <TestCase itShould="case7: Invert Clip">
+        <TestCase itShould="Group7: clip={star} invertClip">
           <InvertClip />
         </TestCase>
-        <TestCase itShould="case8: Layer Effects">
+        <TestCase
+          itShould="Group8: color='lightblue' 
+          layer={<Paint><Blur blur={20} /><ColorMatrix matrix={[1, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 18, -7,]}/></Paint>}">
           <LayerEffectsClip />
         </TestCase>
       </ScrollView>

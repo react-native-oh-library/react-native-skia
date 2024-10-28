@@ -61,7 +61,7 @@ export const InheritanceDemo = () => {
 };
 
 export const PaintDemo = () => {
-  const r = width / 2;
+  const r = width / 6;
   return (
     <View style={styles.viewStyle}>
       <Canvas style={styles.canvasStyle}>
@@ -102,16 +102,16 @@ export default function () {
   return (
     <Tester style={{flex: 1}}>
       <ScrollView>
-        <TestCase itShould="case1: Fills and Strokes">
+        <TestCase itShould="Canvas、Circle、Paint: color='#adbce6' style='stroke' strokeWidth={strokeWidth} ">
           <FillsAndStrokesDemo />
         </TestCase>
-        <TestCase itShould="case2: Inheritance">
+        <TestCase itShould="Canvas、Group、Circle: style='stroke' strokeWidth={10}">
           <InheritanceDemo />
         </TestCase>
-        <TestCase itShould="case3: Complex painting attributes like a shader or an image filter can be passed as children to a group or a drawing.">
+        <TestCase itShould="Canvas、Group、Circle、LinearGradient: Complex painting attributes like a shader or an image filter can be passed as children to a group or a drawing.">
           <PaintDemo />
         </TestCase>
-        <TestCase itShould="case4: Manual Paint Assignment">
+        <TestCase itShould="Canvas、Circle: paint={paint}">
           <ManualPaintDemo />
         </TestCase>
       </ScrollView>

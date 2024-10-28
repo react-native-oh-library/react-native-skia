@@ -34,7 +34,7 @@ export default function () {
   return (
     <Tester style={{flex: 1}}>
       <ScrollView>
-        <TestCase itShould="case1: Color Filters and Shaders can also be used as Image filters. In the example below, we first apply a color matrix to the content and a blur image filter.">
+        <TestCase itShould="DisplacementMap: channelX='g' channelY='a' scale={20}">
           <DisplacementMapDemo />
         </TestCase>
       </ScrollView>

@@ -114,7 +114,24 @@ class DiscretePathEffectExample extends Component {
       <View style={{padding: 10, alignItems: 'center'}}>
         <Canvas style={styles}>
           <Group color="#61DAFB" style="stroke" strokeWidth={15}>
-            <DiscretePathEffect length={10} deviation={4} />
+            <DiscretePathEffect length={10} deviation={4} seed={10} />
+            <Logo center={center} origin={origin} scale={scale} />
+          </Group>
+        </Canvas>
+      </View>
+    );
+  }
+}
+
+class DiscretePathEffectChildrenExample extends Component {
+  render() {
+    return (
+      <View style={{padding: 10, alignItems: 'center'}}>
+        <Canvas style={styles}>
+          <Group color="#61DAFB" style="stroke" strokeWidth={15}>
+            <DiscretePathEffect length={10} deviation={4} seed={10}>
+              <DashPathEffect intervals={[4, 4]} />
+            </DiscretePathEffect>
             <Logo center={center} origin={origin} scale={scale} />
           </Group>
         </Canvas>
@@ -129,7 +146,24 @@ class DashPathEffectExample extends Component {
       <View style={{padding: 10, alignItems: 'center'}}>
         <Canvas style={styles}>
           <Group color="#61DAFB" style="stroke" strokeWidth={15}>
-            <DashPathEffect intervals={[10, 10]} />
+            <DashPathEffect intervals={[10, 10]} phase={4} />
+            <Logo center={center} origin={origin} scale={scale} />
+          </Group>
+        </Canvas>
+      </View>
+    );
+  }
+}
+
+class DashPathEffectChildrenExample extends Component {
+  render() {
+    return (
+      <View style={{padding: 10, alignItems: 'center'}}>
+        <Canvas style={styles}>
+          <Group color="#61DAFB" style="stroke" strokeWidth={15}>
+            <DashPathEffect intervals={[10, 10]} phase={4}>
+              <DiscretePathEffect length={10} deviation={4} seed={10} />
+            </DashPathEffect>
             <Logo center={center} origin={origin} scale={scale} />
           </Group>
         </Canvas>
@@ -148,6 +182,26 @@ class CornerPathEffectExample extends Component {
           </Group>
           <Group color="#61DAFB" style="stroke" strokeWidth={15}>
             <CornerPathEffect r={200} />
+            <SquaredLogo center={center} origin={origin} scale={scale} />
+          </Group>
+        </Canvas>
+      </View>
+    );
+  }
+}
+
+class CornerPathEffectChildrenExample extends Component {
+  render() {
+    return (
+      <View style={{padding: 10, alignItems: 'center'}}>
+        <Canvas style={styles}>
+          <Group color="#61DAFB" style="stroke" strokeWidth={15} opacity={0.5}>
+            <Logo center={center} origin={origin} scale={scale} />
+          </Group>
+          <Group color="#61DAFB" style="stroke" strokeWidth={15}>
+            <CornerPathEffect r={200}>
+              <DashPathEffect intervals={[4, 4]} />
+            </CornerPathEffect>
             <SquaredLogo center={center} origin={origin} scale={scale} />
           </Group>
         </Canvas>
@@ -176,6 +230,27 @@ class Path1DPathEffectExample extends Component {
   }
 }
 
+class Path1DPathEffectChildrenExample extends Component {
+  render() {
+    return (
+      <View style={{padding: 10, alignItems: 'center'}}>
+        <Canvas style={styles}>
+          <Group color="#61DAFB" style="stroke" strokeWidth={15}>
+            <Path1DPathEffect
+              path="M -10 0 L 0 -10, 10 0, 0 10 Z"
+              advance={20}
+              phase={0}
+              style="rotate">
+              <DashPathEffect intervals={[4, 4]} />
+            </Path1DPathEffect>
+            <Logo center={center} origin={origin} scale={scale} />
+          </Group>
+        </Canvas>
+      </View>
+    );
+  }
+}
+
 class Path2DPathEffectExample extends Component {
   render() {
     return (
@@ -194,6 +269,25 @@ class Path2DPathEffectExample extends Component {
   }
 }
 
+class Path2DPathEffectChildrenExample extends Component {
+  render() {
+    return (
+      <View style={{padding: 10, alignItems: 'center'}}>
+        <Canvas style={styles}>
+          <Group color="#61DAFB" style="stroke" strokeWidth={15}>
+            <Path2DPathEffect
+              path="M -10 0 L 0 -10, 10 0, 0 10 Z"
+              matrix={processTransform2d([{scale: 40}])}>
+              <DiscretePathEffect length={10} deviation={4} seed={10} />
+            </Path2DPathEffect>
+            <Logo center={center} origin={origin} scale={scale} />
+          </Group>
+        </Canvas>
+      </View>
+    );
+  }
+}
+
 class Line2DPathEffectExample extends Component {
   render() {
     return (
@@ -204,6 +298,25 @@ class Line2DPathEffectExample extends Component {
               width={0}
               matrix={processTransform2d([{scale: 8}])}
             />
+            <Logo center={center} origin={origin} scale={scale} />
+          </Group>
+        </Canvas>
+      </View>
+    );
+  }
+}
+
+class Line2DPathEffectChildrenExample extends Component {
+  render() {
+    return (
+      <View style={{padding: 10, alignItems: 'center'}}>
+        <Canvas style={styles}>
+          <Group color="#61DAFB" style="stroke" strokeWidth={15}>
+            <Line2DPathEffect
+              width={0}
+              matrix={processTransform2d([{scale: 8}])}>
+              <DashPathEffect intervals={[4, 4]} />
+            </Line2DPathEffect>
             <Logo center={center} origin={origin} scale={scale} />
           </Group>
         </Canvas>
@@ -233,31 +346,55 @@ export default function () {
   return (
     <Tester style={{flex: 1}}>
       <ScrollView>
-        <TestCase itShould="case1: Discrete Path Effect">
+        <TestCase itShould="DiscretePathEffect: length={10} deviation={4} seed={10}">
           <DiscretePathEffectExample />
         </TestCase>
 
-        <TestCase itShould="case2: Dash Path Effect">
+        <TestCase itShould="DiscretePathEffect: length={10} deviation={4} seed={10} children">
+          <DiscretePathEffectChildrenExample />
+        </TestCase>
+
+        <TestCase itShould="DashPathEffect: intervals={[10, 10]} phase={4}">
           <DashPathEffectExample />
         </TestCase>
 
-        <TestCase itShould="case3: Corner Path Effect">
+        <TestCase itShould="DashPathEffect: intervals={[10, 10]} phase={4} children">
+          <DashPathEffectChildrenExample />
+        </TestCase>
+
+        <TestCase itShould="CornerPathEffect: r={200}">
           <CornerPathEffectExample />
         </TestCase>
 
-        <TestCase itShould="case4: Path1D Path Effect">
+        <TestCase itShould="CornerPathEffect: r={200} children">
+          <CornerPathEffectChildrenExample />
+        </TestCase>
+
+        <TestCase itShould="Path1DPathEffect: path='M -10 0 L 0 -10, 10 0, 0 10 Z' advance={20} phase={0} style='rotate'">
           <Path1DPathEffectExample />
         </TestCase>
 
-        <TestCase itShould="case5: Path2D Path Effect">
+        <TestCase itShould="Path1DPathEffect: path='M -10 0 L 0 -10, 10 0, 0 10 Z' advance={20} phase={0} style='rotate' children">
+          <Path1DPathEffectChildrenExample />
+        </TestCase>
+
+        <TestCase itShould="Path2DPathEffect: path='M -10 0 L 0 -10, 10 0, 0 10 Z' matrix={processTransform2d([{scale: 40}])}">
           <Path2DPathEffectExample />
         </TestCase>
 
-        <TestCase itShould="case6: Line2D Path Effect">
+        <TestCase itShould="Path2DPathEffect: path='M -10 0 L 0 -10, 10 0, 0 10 Z' matrix={processTransform2d([{scale: 40}])} children">
+          <Path2DPathEffectChildrenExample />
+        </TestCase>
+
+        <TestCase itShould="Line2DPathEffect: width={0} matrix={processTransform2d([{scale: 8}])}">
           <Line2DPathEffectExample />
         </TestCase>
 
-        <TestCase itShould="case7: Compose Path Effect">
+        <TestCase itShould="Line2DPathEffect: width={0} matrix={processTransform2d([{scale: 8}])} children">
+          <Line2DPathEffectChildrenExample />
+        </TestCase>
+
+        <TestCase itShould="DashPathEffect and DiscretePathEffect: Compose Path Effect">
           <ComposePathEffectExample />
         </TestCase>
       </ScrollView>

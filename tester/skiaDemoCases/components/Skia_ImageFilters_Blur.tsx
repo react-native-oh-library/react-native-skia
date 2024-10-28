@@ -5,7 +5,7 @@ import {
   Canvas,
   useImage,
   Image,
-  ColorMatrix,
+  Shadow,
   Blur,
 } from '@shopify/react-native-skia';
 
@@ -21,7 +21,7 @@ const SimpleBlurDefault = () => {
     <View style={styles.viewStyle}>
       <Canvas style={styles.canvasStyle}>
         <Image x={0} y={0} width={256} height={256} image={image} fit="cover">
-          <Blur blur={4} />
+          <Blur blur={10} mode={'clamp'} />
         </Image>
       </Canvas>
     </View>
@@ -37,7 +37,9 @@ const SimpleBlurClamp = () => {
     <View style={styles.viewStyle}>
       <Canvas style={styles.canvasStyle}>
         <Image x={0} y={0} width={256} height={256} image={image} fit="cover">
-          <Blur blur={4} mode={'clamp'} />
+          <Blur blur={10} mode={'clamp'}>
+            <Shadow dx={-12} dy={-12} blur={25} color="#c7f8ff" inner />
+          </Blur>
         </Image>
       </Canvas>
     </View>
@@ -48,10 +50,10 @@ export default function () {
   return (
     <Tester style={{flex: 1}}>
       <ScrollView>
-        <TestCase itShould="case1: Simple Blur">
+        <TestCase itShould="Blur1: blur={10} mode={'clamp'}">
           <SimpleBlurDefault />
         </TestCase>
-        <TestCase itShould="case1: Simple Blur With mode='clamp'">
+        <TestCase itShould="Blur: blur={10} mode={'clamp'} children">
           <SimpleBlurClamp />
         </TestCase>
       </ScrollView>

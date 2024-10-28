@@ -16,7 +16,14 @@ export const FractalNoiseDemo = () => {
       <Canvas style={styles.canvasStyle}>
         <Fill color="white" />
         <Rect x={0} y={0} width={256} height={256}>
-          <FractalNoise freqX={0.05} freqY={0.05} octaves={4} />
+          <FractalNoise
+            seed={10}
+            freqX={0.05}
+            freqY={0.05}
+            octaves={4}
+            tileWidth={10}
+            tileHeight={5}
+          />
         </Rect>
       </Canvas>
     </View>
@@ -29,7 +36,14 @@ export const TurbulenceNoiseDemo = () => {
       <Canvas style={styles.canvasStyle}>
         <Fill color="white" />
         <Rect x={0} y={0} width={256} height={256}>
-          <Turbulence freqX={0.05} freqY={0.05} octaves={4} />
+          <Turbulence
+            seed={1}
+            freqX={0.05}
+            freqY={0.05}
+            octaves={4}
+            tileWidth={50}
+            tileHeight={1}
+          />
         </Rect>
       </Canvas>
     </View>
@@ -40,10 +54,10 @@ export default function () {
   return (
     <Tester style={{flex: 1}}>
       <ScrollView>
-        <TestCase itShould="case1: Fractal Perlin Noise Shader">
+        <TestCase itShould="FractalNoise: seed={10} freqX={0.05} freqY={0.05} octaves={4} tileWidth={10} tileHeight={5}">
           <FractalNoiseDemo />
         </TestCase>
-        <TestCase itShould="case2: Turbulence Perlin Noise Shader">
+        <TestCase itShould="Turbulence: seed={1} freqX={0.05} freqY={0.05} octaves={4} tileWidth={50} tileHeight={1}">
           <TurbulenceNoiseDemo />
         </TestCase>
       </ScrollView>

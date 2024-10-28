@@ -7,6 +7,7 @@ import {
   Image,
   Offset,
   Fill,
+  ColorMatrix,
 } from '@shopify/react-native-skia';
 
 import {ScrollView} from 'react-native';
@@ -29,12 +30,39 @@ const OffsetDemo = () => {
   );
 };
 
+const OffsetChildrenDemo = () => {
+  const image = useImage(require('../../assets/oslo.jpg'));
+  if (!image) {
+    return null;
+  }
+  return (
+    <View style={styles.viewStyle}>
+      <Canvas style={styles.canvasStyle}>
+        <Fill color="lightblue" />
+        <Image image={image} x={0} y={0} width={256} height={256} fit="cover">
+          <Offset x={64} y={64}>
+            <ColorMatrix
+              matrix={[
+                -0.578, 0.99, 0.588, 0, 0, 0.469, 0.535, -0.003, 0, 0, 0.015,
+                1.69, -0.703, 0, 0, 0, 0, 0, 1, 0,
+              ]}
+            />
+          </Offset>
+        </Image>
+      </Canvas>
+    </View>
+  );
+};
+
 export default function () {
   return (
     <Tester style={{flex: 1}}>
       <ScrollView>
-        <TestCase itShould="case1: This offset filter is identical to its SVG counterpart. It allows offsetting the filtered image.">
+        <TestCase itShould="Offset: x={64} y={64}">
           <OffsetDemo />
+        </TestCase>
+        <TestCase itShould="Offset: x={64} y={64} children">
+          <OffsetChildrenDemo />
         </TestCase>
       </ScrollView>
     </Tester>

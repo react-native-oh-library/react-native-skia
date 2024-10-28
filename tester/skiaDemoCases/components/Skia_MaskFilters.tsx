@@ -22,7 +22,7 @@ export const BlurSolidMaskDemo = () => {
     <View style={styles.viewStyle}>
       <Canvas style={styles.canvasStyle}>
         <Circle c={vec(128)} r={128} color="lightblue">
-          <BlurMask blur={20} style="solid" />
+          <BlurMask blur={22} style="solid" />
         </Circle>
       </Canvas>
     </View>
@@ -34,7 +34,7 @@ export const BlurInnerMaskDemo = () => {
     <View style={styles.viewStyle}>
       <Canvas style={styles.canvasStyle}>
         <Circle c={vec(128)} r={128} color="lightblue">
-          <BlurMask blur={20} style="inner" />
+          <BlurMask blur={24} style="inner" />
         </Circle>
       </Canvas>
     </View>
@@ -46,7 +46,7 @@ export const BlurOuterMaskDemo = () => {
     <View style={styles.viewStyle}>
       <Canvas style={styles.canvasStyle}>
         <Circle c={vec(128)} r={128} color="lightblue">
-          <BlurMask blur={20} style="outer" />
+          <BlurMask blur={26} style="outer" />
         </Circle>
       </Canvas>
     </View>
@@ -57,16 +57,16 @@ export default function () {
   return (
     <Tester style={{flex: 1}}>
       <ScrollView>
-        <TestCase itShould="case1: Creates a blur mask filter. style='normal'">
+        <TestCase itShould="BlurMask1: blur={20} style='normal'">
           <BlurMaskDemo />
         </TestCase>
-        <TestCase itShould="case2: Creates a blur mask filter. style='solid'">
+        <TestCase itShould="BlurMask2: blur={22} style='solid'">
           <BlurSolidMaskDemo />
         </TestCase>
-        <TestCase itShould="case3: Creates a blur mask filter. style='inner'">
+        <TestCase itShould="BlurMask3: blur={24} style='inner'">
           <BlurInnerMaskDemo />
         </TestCase>
-        <TestCase itShould="case4: Creates a blur mask filter. style='outer'">
+        <TestCase itShould="BlurMask4: blur={26} style='outer'">
           <BlurOuterMaskDemo />
         </TestCase>
       </ScrollView>

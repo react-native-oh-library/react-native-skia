@@ -65,11 +65,11 @@ export default function () {
   return (
     <Tester style={{flex: 1}}>
       <ScrollView>
-        <TestCase itShould="case1: Runtime Shader">
+        <TestCase itShould="RuntimeShader1: Runtime Shader source={source}">
           <RuntimeShaderDemo />
         </TestCase>
 
-        <TestCase itShould="case2: Pixel Density">
+        <TestCase itShould="RuntimeShader2: Pixel Density source={source}">
           <PixelDensityDemo />
         </TestCase>
       </ScrollView>
