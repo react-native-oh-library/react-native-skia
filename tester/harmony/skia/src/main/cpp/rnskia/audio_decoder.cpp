@@ -211,4 +211,12 @@ int32_t AudioDecoder::Release()
     return AV_ERR_OK;
 }
 
+int32_t AudioDecoder::Flush()
+{
+    if(decoder!=nullptr){
+        OH_AudioCodec_Flush(decoder);
+    }
+    return AV_ERR_OK;
+}
+
 } // namespace RNSkia

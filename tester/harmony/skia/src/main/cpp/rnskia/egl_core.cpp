@@ -25,6 +25,9 @@
 #include <hilog/log.h>
 
 namespace RNSkia {
+EGLCore EGLCore::GLCore;
+
+
 namespace {
 const unsigned int LOG_PRINT_DOMAIN = 0xFF00;
 constexpr int32_t NUM_4 = 4;

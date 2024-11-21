@@ -20,7 +20,6 @@
 #include <string>
 #include "RNSkVideo.h"
 #include "audio_decoder.h"
-#include "audio_player.h"
 #include "RNSkPlatformContext.h"
 
 #include <bits/alltypes.h>
@@ -33,6 +32,8 @@
 #include "decoder.h"
 #include "demuxer.h"
 #include "sample_info.h"
+#include <ohaudio/native_audiorenderer.h>
+#include <ohaudio/native_audiostreambuilder.h>
 
 
 namespace RNSkia {
@@ -58,71 +59,74 @@ public:
     int32_t OpenFile(SampleInfo &sampleInfo);
     int32_t Init(SampleInfo &sampleInfo);
     int32_t Start();
+    
     void StartRelease();
-    void Release();
+    void ReleaseVideo();
     void ReleaseAudio();
-    void AudioPlay();
-    void PauseAndResume();
+    void ReleaseThread();
+    
+    void SetLoop(int32_t loops = 1) { loops_ = loops; }
     
     RNSkPlatformContext *context;
     const NativeResourceManager *nativeResMgr;
+    
     std::string DEFAULT_ASSETS_DEST = "assets/";
     std::string DEFAULT_HTTP_DEST = "http";
 private:
     
-    int32_t frameCount = 0;
-    OH_NativeBuffer *nativeBuffer = nullptr;
-    
     static RNSkHarmonyVideo HarmonyVideo;
+    int32_t loops_ = 1;
+    uint32_t flags;
+    std::string URI;
+    int32_t frameCount = 0;
+    int64_t milliseconds = 0;
+    int32_t loops = 1;
     
+    SampleInfo sampleInfo_;
+    
+    std::mutex mutex_;
     std::mutex pauseMutex_;
     std::condition_variable pauseCond_;
-    bool isPause_{false};
     
     void DecAudioInputThread();
     void DecAudioOutputThread();
-
-    void DecInputThread();
-    void DecOutputThread();
-    void RenderThread();
-    void GetBufferData(CodecBufferInfo bufferInfo);
+    void DecVideoInputThread();
+    void DecVideoOutputThread();
     
     int32_t InitAudio();
     void InitControlSignal();
-    void GetPCMBufferData(AudioCodecBufferInfo bufferInfo);
-    
-    std::string URI;
-    std::unique_ptr<VideoDecoder> videoDecoder_ = nullptr;
-    std::unique_ptr<Demuxer> demuxer_ = nullptr;
-    std::unique_ptr<AudioDecoder> audioDecoder_ = nullptr;
-    std::unique_ptr<AudioPlayer> audioPlayer_ = nullptr;
-    
-    
-    ADecSignal *audioSignal_ = nullptr;
-    VDecSignal *signal_ = nullptr;
+    void InitAudioPlayer(AudioInitData audioInitData);
 
+    std::condition_variable doneCond_;
+    std::unique_ptr<Demuxer> demuxer_ = nullptr;
+    
+    std::unique_ptr<VideoDecoder> videoDecoder_ = nullptr;
+    std::unique_ptr<AudioDecoder> audioDecoder_ = nullptr;
+    
+    
+    OH_NativeBuffer *nativeBuffer = nullptr;
+    ADecSignal *audioSignal_ = nullptr;
+    VDecSignal *videoSignal_ = nullptr;
+    OH_AudioStreamBuilder* builder_ = nullptr;
+    OH_AudioRenderer* audioRenderer_ = nullptr;
+    
+    std::atomic<bool> isPause_{false};
     std::atomic<bool> isStop_{false};
     std::atomic<bool> isVideoEnd_{false};
     std::atomic<bool> isAudioEnd_{false};
     std::atomic<bool> isEndOfFile_{false};
     std::atomic<bool> isVideoEndOfFile_{false};
-
+    std::atomic<bool> isStarted_{false};
+    std::atomic<bool> isReleased_{false};
+    
     std::unique_ptr<std::thread> decAudioInputThread_ = nullptr;
     std::unique_ptr<std::thread> decAudioOutputThread_ = nullptr;
-    std::unique_ptr<std::thread> audioPlayerThread_ = nullptr;
+    std::unique_ptr<std::thread> decVideoInputThread_ = nullptr;
+    std::unique_ptr<std::thread> decVideoOutputThread_ = nullptr;
     
     static constexpr int32_t DEFAULT_FRAME_RATE = 30;
     static constexpr int32_t ONEK = 1024;
     static constexpr int32_t AUDIO_SLEEP_TIME = 300;
-    
-    std::mutex mutex_;
-    std::atomic<bool> isStarted_{false};
-    std::atomic<bool> isReleased_{false};
-    std::unique_ptr<std::thread> decInputThread_ = nullptr;
-    std::unique_ptr<std::thread> decOutputThread_ = nullptr;
-    std::condition_variable doneCond_;
-    SampleInfo sampleInfo_;
-    VDecSignal *signal = nullptr;
     static constexpr int64_t MICROSECOND = 1000000;
     
 public:
@@ -142,7 +146,3 @@ public:
 } // namespace RNSkia
 
 #endif // RN_SK_HARMONY_VIDEO_H
-
-
-
-

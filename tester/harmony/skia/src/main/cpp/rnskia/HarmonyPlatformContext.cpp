@@ -27,14 +27,16 @@
 
 namespace RNSkia {
 
-thread_local SkiaOpenGLContext ThreadContextHolder::ThreadSkiaOpenGLContext;
+thread_local SkiaOpenGLContext ThreadContextHarmonyHolder::ThreadSkiaOpenGLContext;
 
 
 HarmonyPlatformContext::HarmonyPlatformContext(jsi::Runtime *runtime, std::shared_ptr<react::CallInvoker> callInvoker,
                                                float pixelDensity)
     : RNSkPlatformContext(runtime, callInvoker, pixelDensity), drawLoopActive(false),
       playLink(std::make_unique<PlayLink>([this](double deltaTime) {
-          notifyDrawLoop(false);
+        runOnMainThread([this](){
+            notifyDrawLoop(false);
+        });
       })) {
     mainThread = std::thread(&HarmonyPlatformContext::runTaskOnMainThread, this);
     _runtime = runtime;
@@ -99,42 +101,32 @@ void HarmonyPlatformContext::runOnMainThread(std::function<void()> task) {
 
 // 从本地缓冲区（native buffer）转为Skia的SkImage对象
 sk_sp<SkImage> HarmonyPlatformContext::makeImageFromNativeBuffer(void *buffer) {
-    OH_NativeBuffer *nativeBuffer = static_cast<OH_NativeBuffer *>(buffer);
-
-    DeleteImageProc deleteImageProc = nullptr;
-    UpdateImageProc updateImageProc = nullptr;
-    TexImageCtx deleteImageCtx = nullptr;
-
-    OH_NativeBuffer_Config config;
-    OH_NativeBuffer_GetConfig(nativeBuffer, &config);
-
-    GrBackendFormat format;
-    switch (config.format) {
-    case NATIVEBUFFER_PIXEL_FMT_RGBA_8888:
-        format = GrBackendFormats::MakeGL(GR_GL_RGBA8, GR_GL_TEXTURE_EXTERNAL);
-    case NATIVEBUFFER_PIXEL_FMT_RGB_565:
-        format = GrBackendFormats::MakeGL(GR_GL_RGB565, GR_GL_TEXTURE_EXTERNAL);
-    case NATIVEBUFFER_PIXEL_FMT_RGBA_1010102:
-        format = GrBackendFormats::MakeGL(GR_GL_RGB10_A2, GR_GL_TEXTURE_EXTERNAL);
-    case NATIVEBUFFER_PIXEL_FMT_RGB_888:
-        format = GrBackendFormats::MakeGL(GR_GL_RGB8, GR_GL_TEXTURE_EXTERNAL);
-    default:
-        format = GrBackendFormats::MakeGL(GR_GL_RGBA8, GR_GL_TEXTURE_EXTERNAL);
-    }
-
-    auto backendTex = MakeGLBackendTexture(ThreadContextHolder::ThreadSkiaOpenGLContext.directContext.get(),
-                                           const_cast<OH_NativeBuffer *>(nativeBuffer), config.width, config.height,
-                                           &deleteImageProc, &updateImageProc, &deleteImageCtx, false, format, false);
-    if (!backendTex.isValid()) {
-        DLOG(INFO) << "couldn't create offscreen texture:"
-                      "Failed to convert HardwareBuffer to OpenGL Texture!";
-        return nullptr;
-    }
-
-    sk_sp<SkImage> image = SkImages::BorrowTextureFrom(ThreadContextHolder::ThreadSkiaOpenGLContext.directContext.get(),
-                                                       backendTex, kTopLeft_GrSurfaceOrigin, kRGBA_8888_SkColorType,
-                                                       kOpaque_SkAlphaType, nullptr, deleteImageProc, deleteImageCtx);
-    return image;
+//     OH_NativeBuffer *nativeBuffer = static_cast<OH_NativeBuffer *>(buffer);
+//
+//     DeleteImageProc deleteImageProc = nullptr;
+//     UpdateImageProc updateImageProc = nullptr;
+//     TexImageCtx deleteImageCtx = nullptr;
+//
+//     OH_NativeBuffer_Config config;
+//     if(nativeBuffer) {
+//         OH_NativeBuffer_GetConfig(nativeBuffer, &config);
+//     }
+//     DLOG(INFO) << "HarmonyPlatformContext config.width: "<<config.width<<" config.height: " <<config.height;
+//     GrBackendFormat format = GrBackendFormats::MakeGL(GR_GL_RGBA8, GR_GL_TEXTURE_EXTERNAL);
+//
+//     auto backendTex = MakeGLBackendTexture(ThreadContextHarmonyHolder::ThreadSkiaOpenGLContext.directContext.get(),
+//                                            nativeBuffer, config.width, config.height,
+//                                            &deleteImageProc, &updateImageProc, 
+//                                             &deleteImageCtx,false, format, false);
+//     if (!backendTex.isValid()) {
+//         DLOG(INFO) << "HarmonyPlatformContext OpenGL Texture 转换失败";
+//         return nullptr;
+//     }
+//
+//     sk_sp<SkImage> image = SkImages::BorrowTextureFrom(ThreadContextHarmonyHolder::ThreadSkiaOpenGLContext.directContext.get(),
+//                                                        backendTex, kTopLeft_GrSurfaceOrigin, kRGB_565_SkColorType,
+//                                                        kOpaque_SkAlphaType, nullptr, deleteImageProc, deleteImageCtx);
+    return SkiaOpenGLSurfaceFactory::makeImageFromHardwareBuffer(buffer);
 }
 
 /*
@@ -184,9 +176,9 @@ void HarmonyPlatformContext::releaseNativeBuffer(uint64_t pointer) {
     }
 }
 
-std::shared_ptr<RNSkVideo> HarmonyPlatformContext::createVideo(const std::string &url) 
+std::shared_ptr<RNSkVideo> HarmonyPlatformContext::createVideo(const std::string &url)
 {
-    return std::make_shared<RNSkHarmonyVideo>(url, this, nativeResourceManager); 
+    return std::make_shared<RNSkHarmonyVideo>(url, this, nativeResourceManager);
 }
 
 std::string getScheme(const std::string &uri) { // 解析uri
@@ -243,9 +235,8 @@ void HarmonyPlatformContext::raiseError(const std::exception &err) {
 }
 
 sk_sp<SkSurface> HarmonyPlatformContext::makeOffscreenSurface(int width, int height) {
-    DLOG(INFO) << "makeOffscreenSurface START";
     // 关联Skia和OpenGL，
-    if (!SkiaOpenGLHelper::createSkiaDirectContextIfNecessary(&ThreadContextHolder::ThreadSkiaOpenGLContext)) {
+    if (!SkiaOpenGLHelper::createSkiaDirectContextIfNecessary(&ThreadContextHarmonyHolder::ThreadSkiaOpenGLContext)) {
         DLOG(ERROR) << "Could not create Skia Surface from native window / surface."
                    << "Failed creating Skia Direct Context\n";
         return nullptr;
@@ -253,15 +244,15 @@ sk_sp<SkSurface> HarmonyPlatformContext::makeOffscreenSurface(int width, int hei
 
     auto colorType = kN32_SkColorType; //
     SkSurfaceProps props(0, kUnknown_SkPixelGeometry); // kUnknown_SkPixelGeometry
-    if (!SkiaOpenGLHelper::makeCurrent(&ThreadContextHolder::ThreadSkiaOpenGLContext,
-                                       ThreadContextHolder::ThreadSkiaOpenGLContext.gl1x1Surface)) {
+    if (!SkiaOpenGLHelper::makeCurrent(&ThreadContextHarmonyHolder::ThreadSkiaOpenGLContext,
+                                       ThreadContextHarmonyHolder::ThreadSkiaOpenGLContext.gl1x1Surface)) {
         DLOG(ERROR) << "Could not create EGL Surface from native window / surface. Could "
                       "not set new surface as current surface.\n";
         return nullptr;
     }
 
     // 创建纹理
-    auto texture = ThreadContextHolder::ThreadSkiaOpenGLContext.directContext->createBackendTexture(
+    auto texture = ThreadContextHarmonyHolder::ThreadSkiaOpenGLContext.directContext->createBackendTexture(
         width, height, colorType, skgpu::Mipmapped::kNo, GrRenderable::kYes);
 
     if (!texture.isValid()) {
@@ -273,12 +264,12 @@ sk_sp<SkSurface> HarmonyPlatformContext::makeOffscreenSurface(int width, int hei
         GrBackendTexture texture;
     };
 
-    auto releaseCtx = new ReleaseContext({&ThreadContextHolder::ThreadSkiaOpenGLContext, texture});
+    auto releaseCtx = new ReleaseContext({&ThreadContextHarmonyHolder::ThreadSkiaOpenGLContext, texture});
 
     DLOG(INFO) << "makeOffscreenSurface END";
     // GrBackendTexture->SkSurface
     return SkSurfaces::WrapBackendTexture(
-        ThreadContextHolder::ThreadSkiaOpenGLContext.directContext.get(), texture, kTopLeft_GrSurfaceOrigin, 0,
+        ThreadContextHarmonyHolder::ThreadSkiaOpenGLContext.directContext.get(), texture, kTopLeft_GrSurfaceOrigin, 0,
         colorType, nullptr, &props,
         [](void *addr) {
             auto releaseCtx = reinterpret_cast<ReleaseContext *>(addr);
@@ -491,8 +482,8 @@ void HarmonyPlatformContext::setNativeResourceManager(const NativeResourceManage
     this->nativeResourceManager = nativeResMgr;
 }
 
-void HarmonyPlatformContext::runOnDrawThread(std::function<void()> task){
-    playLink->runOnDrawThread(task);
-}
+// void HarmonyPlatformContext::runOnDrawThread(std::function<void()> task){
+//     playLink->runOnDrawThread(task);
+// }
 
 } // namespace RNSkia

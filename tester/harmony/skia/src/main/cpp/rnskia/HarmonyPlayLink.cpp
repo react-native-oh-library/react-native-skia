@@ -1,7 +1,6 @@
 
 #include "HarmonyPlayLink.h"
 #include "RNSkPlatformContext.h"
-#include <mutex>
 #include <glog/logging.h>
 
 namespace RNSkia {
@@ -40,23 +39,7 @@ void PlayLink::postFrameLoop() {
         CallBack(deltaTime);
         // 重新计算下一次运行的时间点
         nextTime = lastTime + interval;
-        
-        while (!taskQueue.empty()) {
-            DLOG(INFO) << "postFrameLoop run task running:" << running;
-            auto task = std::move(taskQueue.front());
-            taskQueue.pop();
-            task(); // 执行任务
-        }
     }
 }
-
-void PlayLink::runOnDrawThread(std::function<void()> task) {
-    DLOG(INFO) << "runOnDrawThread running:" << running;
-    if (!running) {
-        startDrawLoop();
-    }
-    taskQueue.push(std::move(task));
-}
-
 
 } // namespace RNSkia

@@ -22,6 +22,8 @@
 #include <cstdint>
 #include <js_native_api_types.h>
 #include <multimedia/player_framework/native_avcodec_videoencoder.h>
+
+#include <ohaudio/native_audiostream_base.h>
 #include <string>
 #include <condition_variable>
 #include <queue>
@@ -37,6 +39,16 @@ const std::string_view MIME_VIDEO_HEVC = "video/hevc";
 constexpr int32_t BITRATE_10M = 10 * 1024 * 1024; // 10Mbps
 constexpr int32_t BITRATE_20M = 20 * 1024 * 1024; // 20Mbps
 constexpr int32_t BITRATE_30M = 30 * 1024 * 1024; // 30Mbps
+
+struct AudioInitData {
+    OH_AudioStream_Type type = AUDIOSTREAM_TYPE_RENDERER;
+    int32_t samplingRate = 48000;
+    int32_t channelCount = 2;
+    OH_AudioStream_SampleFormat format = AUDIOSTREAM_SAMPLE_S16LE;
+    OH_AudioStream_EncodingType encodingType = AUDIOSTREAM_ENCODING_TYPE_RAW;
+    OH_AudioStream_Usage usage = AUDIOSTREAM_USAGE_MUSIC;
+};
+
 
 struct SampleInfo {
     int32_t sampleId = 0;
@@ -84,6 +96,7 @@ struct SampleInfo {
     double writeTime = 0;
 
     void (*PlayDoneCallback)(void *context) = nullptr;
+    
     void *playDoneCallbackData = nullptr;
 
     int32_t width;
@@ -143,8 +156,13 @@ public:
     std::condition_variable audioInputCond_;
     std::queue<AudioCodecBufferInfo> audioInputBufferInfoQueue_;
     std::mutex audioOutputMutex_;
+    std::mutex renderMutex;
     std::condition_variable audioOutputCond_;
     std::queue<AudioCodecBufferInfo> audioOutputBufferInfoQueue_;
+    std::condition_variable renderCond;
+    std::queue<unsigned char> renderQueue;
+    
+    bool isInterrupt = false;
 
     void ClearQueue()
     {
@@ -166,12 +184,12 @@ public:
 
     uint32_t inputFrameCount_ = 0;
     std::mutex inputMutex_;
-    std::condition_variable inputCond_;
+    std::condition_variable videoInputCond_;
     std::queue<CodecBufferInfo> inputBufferInfoQueue_;
 
     uint32_t outputFrameCount_ = 0;
     std::mutex outputMutex_;
-    std::condition_variable outputCond_;
+    std::condition_variable videoOutputCond_;
     std::queue<CodecBufferInfo> outputBufferInfoQueue_;
 
     void ClearQueue()

@@ -24,7 +24,7 @@
 // #include "IPCKit/ipc_cparcel.h"
 
 namespace RNSkia {
-void OnSurfaceCreatedCB(OH_NativeXComponent *component, void *window) {
+void OnSurfaceCreatedCB_(OH_NativeXComponent *component, void *window) {
     if ((component == nullptr) || (window == nullptr)) {
         DLOG(ERROR) << "Callback OnSurfaceCreatedCB: component or window is null";
         return;
@@ -51,12 +51,12 @@ void OnSurfaceCreatedCB(OH_NativeXComponent *component, void *window) {
     }
 }
 
-void OnSurfaceChangedCB(OH_NativeXComponent *component, void *window) {
+void OnSurfaceChangedCB_(OH_NativeXComponent *component, void *window) {
     (void)component;
     (void)window;
 }
 
-void OnSurfaceDestroyedCB(OH_NativeXComponent *component, void *window) {
+void OnSurfaceDestroyedCB_(OH_NativeXComponent *component, void *window) {
     if ((component == nullptr) || (window == nullptr)) {
         return;
     }
@@ -139,9 +139,9 @@ bool NativeRender::Export(napi_env env, napi_value exports) {
          nullptr},
     };
     napi_define_properties(env, exports, sizeof(desc) / sizeof(desc[0]), desc);
-    callback_.OnSurfaceCreated = OnSurfaceCreatedCB;
-    callback_.OnSurfaceChanged = OnSurfaceChangedCB;
-    callback_.OnSurfaceDestroyed = OnSurfaceDestroyedCB;
+    callback_.OnSurfaceCreated = OnSurfaceCreatedCB_;
+    callback_.OnSurfaceChanged = OnSurfaceChangedCB_;
+    callback_.OnSurfaceDestroyed = OnSurfaceDestroyedCB_;
 
     napi_value exportInstance = nullptr;
     OH_NativeXComponent *nativeXComponent = nullptr;
@@ -172,7 +172,6 @@ bool NativeRender::Export(napi_env env, napi_value exports) {
         if (result) {
             _harmonyView = std::make_shared<RNSkHarmonyView<RNSkia::RNSkDomView>>(SkiaManager::getInstance().getContext());
             size_t nid = _harmonyView->getSkiaView()->getNativeId();
-            DLOG(INFO) << "liwang-------------------->_harmonyView nativeId: " << nid;
         }
     }
 

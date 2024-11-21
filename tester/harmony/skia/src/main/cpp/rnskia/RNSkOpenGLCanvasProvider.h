@@ -2,6 +2,7 @@
 #define HARMONY_RNSKOPENGLCANVASPROVIDER_H
 #include "HarmonyBufferUtils.h"
 #include "HarmonyOpenGLHelper.h"
+#include "RNSkHarmonyVideo.h"
 
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wdocumentation"
@@ -12,7 +13,7 @@
 #include "src/gpu/ganesh/gl/GrGLDefines.h"
 #include "include/gpu/ganesh/SkSurfaceGanesh.h"
 #include "RNSkView.h"
-
+#include "native_buffer/native_buffer.h"
 // #include <js_native_api.h>
 // #include <js_native_api_types.h>
 #include <native_image/native_image.h>
@@ -26,15 +27,15 @@
 #include <sys/mman.h>
 
 namespace RNSkia {
-class ThreadContextHolder {
+class ThreadContextHarmonyHolder {
 public:
     static thread_local SkiaOpenGLContext ThreadSkiaOpenGLContext;
 };
-
 class WindowSurfaceHolder {
 public:
     // 构造函数，初始化宽度和高度
     WindowSurfaceHolder(OHNativeWindow *window, int width, int height) {
+        DLOG(INFO) << "WindowSurfaceHolder creat _window: " << _window;
         _width = width;
         _height = height;
         if (_width > 0) {
@@ -47,10 +48,14 @@ public:
 
     // 析构函数，释放本地窗口
     ~WindowSurfaceHolder() {
-        DLOG(INFO) << "~WindowSurfaceHolder release _window: " << _window;
         if (_window) {
             OH_NativeWindow_DestroyNativeWindow(_window);
+            _window = nullptr;
         }
+        if (_glSurface != EGL_NO_SURFACE && SkiaOpenGLHelper::destroySurface(_glSurface)) {
+            _glSurface = EGL_NO_SURFACE;
+        }
+        DLOG(INFO) << "~WindowSurfaceHolder release _window: " << _window << " _glSurface: " << _glSurface;
     }
 
     // 获取宽度
@@ -65,13 +70,15 @@ public:
         if (_skSurface == nullptr) {
 
             // Setup OpenGL and Skia
-            if (!SkiaOpenGLHelper::createSkiaDirectContextIfNecessary(&ThreadContextHolder::ThreadSkiaOpenGLContext)) {
+            if (!SkiaOpenGLHelper::createSkiaDirectContextIfNecessary(
+                    &ThreadContextHarmonyHolder::ThreadSkiaOpenGLContext)) {
                 DLOG(INFO) << "Could not create Skia Surface from native window / surface. "
                               "Failed creating Skia Direct Context";
                 return nullptr;
             }
 
             // Now we can create a surface
+            DLOG(INFO) << "getSurface nativewindow : " << _window;
             _glSurface = SkiaOpenGLHelper::createWindowedSurface(_window);
             if (_glSurface == EGL_NO_SURFACE) {
                 DLOG(INFO) << "Could not create EGL Surface from native window / surface.";
@@ -79,7 +86,7 @@ public:
             }
 
             // Now make this one current
-            if (!SkiaOpenGLHelper::makeCurrent(&ThreadContextHolder::ThreadSkiaOpenGLContext, _glSurface)) {
+            if (!SkiaOpenGLHelper::makeCurrent(&ThreadContextHarmonyHolder::ThreadSkiaOpenGLContext, _glSurface)) {
                 DLOG(INFO) << "Could not create EGL Surface from native window / surface. Could "
                               "not set new surface as current surface.";
                 return nullptr;
@@ -105,7 +112,7 @@ public:
             auto colorType = kN32_SkColorType;
 
             auto maxSamples =
-                ThreadContextHolder::ThreadSkiaOpenGLContext.directContext->maxSurfaceSampleCountForColorType(
+                ThreadContextHarmonyHolder::ThreadSkiaOpenGLContext.directContext->maxSurfaceSampleCountForColorType(
                     colorType);
 
             if (samples > maxSamples) {
@@ -124,7 +131,7 @@ public:
 
             // Create surface object
             _skSurface = SkSurfaces::WrapBackendRenderTarget(
-                ThreadContextHolder::ThreadSkiaOpenGLContext.directContext.get(), renderTarget,
+                ThreadContextHarmonyHolder::ThreadSkiaOpenGLContext.directContext.get(), renderTarget,
                 kBottomLeft_GrSurfaceOrigin, colorType, nullptr, &props,
                 [](void *addr) {
                     auto releaseCtx = reinterpret_cast<ReleaseContext *>(addr);
@@ -174,9 +181,9 @@ public:
 
     // 更新纹理图像到OpenGL纹理
     void updateTexImage() {
-        //NativeImageAdaptor::GetInstance()->Update();
-        // OH_NativeImage_UpdateSurfaceImage(_Image);
-        //  对update绑定到对应textureId的纹理做对应的opengl后处理后，将纹理上屏
+        // NativeImageAdaptor::GetInstance()->Update();
+        //  OH_NativeImage_UpdateSurfaceImage(_Image);
+        //   对update绑定到对应textureId的纹理做对应的opengl后处理后，将纹理上屏
     }
 
     /**
@@ -195,7 +202,7 @@ public:
      * @return 如果成功则返回true
      */
     bool makeCurrent() {
-        return SkiaOpenGLHelper::makeCurrent(&ThreadContextHolder::ThreadSkiaOpenGLContext, _glSurface);
+        return SkiaOpenGLHelper::makeCurrent(&ThreadContextHarmonyHolder::ThreadSkiaOpenGLContext, _glSurface);
     }
 
     /**
@@ -204,21 +211,25 @@ public:
      */
     bool present() {
         // 刷新并提交直接上下文
-        ThreadContextHolder::ThreadSkiaOpenGLContext.directContext->flushAndSubmit();
+        ThreadContextHarmonyHolder::ThreadSkiaOpenGLContext.directContext->flushAndSubmit();
 
+        if (_glSurface == EGL_NO_SURFACE) {
+            // 处理无效表面的情况
+            return false;
+        }
         // 交换缓冲区
-        return SkiaOpenGLHelper::swapBuffers(&ThreadContextHolder::ThreadSkiaOpenGLContext, _glSurface);
+        return SkiaOpenGLHelper::swapBuffers(&ThreadContextHarmonyHolder::ThreadSkiaOpenGLContext, _glSurface);
     }
 
 private:
-    OHNativeWindow* _window;                // 本地窗口
+    OHNativeWindow *_window;                // 本地窗口
     sk_sp<SkSurface> _skSurface = nullptr;  // Skia表面
     EGLSurface _glSurface = EGL_NO_SURFACE; // OpenGL表面
-    GrGLuint _textureId;
-    GrGLuint _textureTarget;
-    OH_NativeImage *image_;
-    int _width = 0;  // 宽度
-    int _height = 0; // 高度
+                                            //     GrGLuint _textureId;
+                                            //     GrGLuint _textureTarget;
+                                            //     OH_NativeImage *image_;
+    int _width = 0;                         // 宽度
+    int _height = 0;                        // 高度
     float _widthPercent = 0.0;
 };
 
@@ -232,7 +243,8 @@ public:
      */
     static sk_sp<SkSurface> makeOffscreenSurface(int width, int height) {
         // 关联Skia和OpenGL，
-        if (!SkiaOpenGLHelper::createSkiaDirectContextIfNecessary(&ThreadContextHolder::ThreadSkiaOpenGLContext)) {
+        if (!SkiaOpenGLHelper::createSkiaDirectContextIfNecessary(
+                &ThreadContextHarmonyHolder::ThreadSkiaOpenGLContext)) {
             DLOG(INFO) << "Could not create Skia Surface from native window / surface. \n"
                        << "Failed creating Skia Direct Context\n";
             return nullptr;
@@ -241,15 +253,15 @@ public:
         auto colorType = kN32_SkColorType; //
 
         SkSurfaceProps props(0, kUnknown_SkPixelGeometry); // kUnknown_SkPixelGeometry
-        if (!SkiaOpenGLHelper::makeCurrent(&ThreadContextHolder::ThreadSkiaOpenGLContext,
-                                           ThreadContextHolder::ThreadSkiaOpenGLContext.gl1x1Surface)) {
+        if (!SkiaOpenGLHelper::makeCurrent(&ThreadContextHarmonyHolder::ThreadSkiaOpenGLContext,
+                                           ThreadContextHarmonyHolder::ThreadSkiaOpenGLContext.gl1x1Surface)) {
             DLOG(INFO) << "Could not create EGL Surface from native window / surface. Could \n"
                           "not set new surface as current surface.\n";
             return nullptr;
         }
 
         // 创建纹理
-        auto texture = ThreadContextHolder::ThreadSkiaOpenGLContext.directContext->createBackendTexture(
+        auto texture = ThreadContextHarmonyHolder::ThreadSkiaOpenGLContext.directContext->createBackendTexture(
             width, height, colorType, skgpu::Mipmapped::kNo, GrRenderable::kYes);
 
         if (!texture.isValid()) {
@@ -261,12 +273,12 @@ public:
             GrBackendTexture texture;
         };
 
-        auto releaseCtx = new ReleaseContext({&ThreadContextHolder::ThreadSkiaOpenGLContext, texture});
+        auto releaseCtx = new ReleaseContext({&ThreadContextHarmonyHolder::ThreadSkiaOpenGLContext, texture});
 
         // GrBackendTexture->SkSurface
         return SkSurfaces::WrapBackendTexture(
-            ThreadContextHolder::ThreadSkiaOpenGLContext.directContext.get(), texture, kTopLeft_GrSurfaceOrigin, 0,
-            colorType, nullptr, &props,
+            ThreadContextHarmonyHolder::ThreadSkiaOpenGLContext.directContext.get(), texture, kTopLeft_GrSurfaceOrigin,
+            0, colorType, nullptr, &props,
             [](void *addr) {
                 auto releaseCtx = reinterpret_cast<ReleaseContext *>(addr);
 
@@ -281,9 +293,9 @@ public:
      * @param requireKnownFormat 是否需要已知格式
      * @return 一个 SkImage 对象
      */
-    static sk_sp<SkImage> makeImageFromHardwareBuffer(void *buffer, bool requireKnownFormat = false) {
+    static sk_sp<SkImage> makeImageFromHardwareBuffer(void *buffer) {
         // Setup OpenGL and Skia:
-        if (!SkiaOpenGLHelper::createSkiaDirectContextIfNecessary(&ThreadContextHolder::ThreadSkiaOpenGLContext))
+        if (!SkiaOpenGLHelper::createSkiaDirectContextIfNecessary(&ThreadContextHarmonyHolder::ThreadSkiaOpenGLContext))
             [[unlikely]] {
             throw std::runtime_error("Failed to create Skia Context for this Thread!");
         }
@@ -294,38 +306,24 @@ public:
 
         OH_NativeBuffer_Config description;
         OH_NativeBuffer_GetConfig(hardwareBuffer, &description);
-        GrBackendFormat format;
-        switch (description.format) {
-        // TODO: find out if we can detect, which graphic buffers support
-        // GR_GL_TEXTURE_2D
-        case NATIVEBUFFER_PIXEL_FMT_RGBA_8888:
-            format = GrBackendFormats::MakeGL(GR_GL_RGBA8, GR_GL_TEXTURE_EXTERNAL);
-
-        case NATIVEBUFFER_PIXEL_FMT_RGB_565:
-            format = GrBackendFormats::MakeGL(GR_GL_RGB565, GR_GL_TEXTURE_EXTERNAL);
-
-        case NATIVEBUFFER_PIXEL_FMT_RGB_888:
-            format = GrBackendFormats::MakeGL(GR_GL_RGB8, GR_GL_TEXTURE_EXTERNAL);
-
-        default:
-            if (requireKnownFormat) {
-                format = GrBackendFormat();
-            } else {
-                format = GrBackendFormats::MakeGL(GR_GL_RGBA8, GR_GL_TEXTURE_EXTERNAL);
-            }
-        }
+        GrBackendFormat format = GrBackendFormats::MakeGL(GR_GL_RGBA8, GR_GL_TEXTURE_EXTERNAL);
 
         auto backendTex =
-            MakeGLBackendTexture(ThreadContextHolder::ThreadSkiaOpenGLContext.directContext.get(),
+            MakeGLBackendTexture(ThreadContextHarmonyHolder::ThreadSkiaOpenGLContext.directContext.get(),
                                  const_cast<OH_NativeBuffer *>(hardwareBuffer), description.width, description.height,
                                  &deleteImageProc, &updateImageProc, &deleteImageCtx, false, format, false);
         if (!backendTex.isValid()) {
             DLOG(INFO) << "Failed to convert HardwareBuffer to OpenGL Texture!";
             return nullptr;
         }
-        sk_sp<SkImage> image = SkImages::BorrowTextureFrom(
-            ThreadContextHolder::ThreadSkiaOpenGLContext.directContext.get(), backendTex, kTopLeft_GrSurfaceOrigin,
-            kRGBA_8888_SkColorType, kOpaque_SkAlphaType, nullptr, deleteImageProc, deleteImageCtx);
+        sk_sp<SkImage> image =
+            SkImages::BorrowTextureFrom(ThreadContextHarmonyHolder::ThreadSkiaOpenGLContext.directContext.get(),
+                                        backendTex, kTopLeft_GrSurfaceOrigin, kRGBA_8888_SkColorType,
+                                        kOpaque_SkAlphaType, nullptr, deleteImageProc, deleteImageCtx);
+        if (image) {
+            DLOG(INFO) << "makeImageFromHardwareBuffer SkImage成功 image : " << image
+                       << " thread id : " << std::this_thread::get_id();
+        }
         return image;
     }
 
@@ -346,9 +344,11 @@ class RNSkOpenGLCanvasProvider : public RNSkia::RNSkCanvasProvider,
 public:
     RNSkOpenGLCanvasProvider(std::function<void()> requestRedraw,
                              std::shared_ptr<RNSkia::RNSkPlatformContext> platformContext)
-        : RNSkCanvasProvider(requestRedraw), _platformContext(platformContext) {}
+        : RNSkCanvasProvider(requestRedraw), _platformContext(platformContext) {
+        DLOG(INFO) << "RNSkOpenGLCanvasProvider 构造函数";
+    }
 
-    ~RNSkOpenGLCanvasProvider() {}
+    ~RNSkOpenGLCanvasProvider() { DLOG(INFO) << "RNSkOpenGLCanvasProvider 析构"; }
 
     float getScaledWidth() override { return _surfaceHolder ? _surfaceHolder->getWidth() : 0; }
 
@@ -359,13 +359,15 @@ public:
             // Get the surface
             auto surface = _surfaceHolder->getSurface();
             if (surface) {
-
+                DLOG(INFO) << "renderToCanvas 当前线程: " << std::this_thread::get_id();
+                
                 // Ensure we are ready to render
                 if (!_surfaceHolder->makeCurrent()) {
                     return false;
                 }
+                    
                 _surfaceHolder->updateTexImage();
-
+                
                 // Draw into canvas using callback
                 cb(surface->getCanvas());
                 
@@ -401,7 +403,6 @@ public:
             // it comes to invalidating the surface.
             return;
         }
-
         // Recreate RenderContext surface based on size change???
         _surfaceHolder->resize(width, height);
 

@@ -71,6 +71,7 @@ void PluginManager::Export(napi_env env, napi_value exports) {
     }
 
     std::string id(idStr);
+    this->id = id;
     DLOG(INFO) << "PluginManager Export: XComponentId: " << id;
     auto context = PluginManager::GetInstance();
     if ((context != nullptr) && (nativeXComponent != nullptr)) {
@@ -78,7 +79,6 @@ void PluginManager::Export(napi_env env, napi_value exports) {
         auto render = context->GetRender(id);
         if (render != nullptr) {
             render->RegisterCallback(nativeXComponent);
-            render->Export(env, exports);
         }
     }
 }
@@ -109,5 +109,9 @@ PluginRender *PluginManager::GetRender(std::string &id) {
     }
 
     return m_pluginRenderMap[id];
+}
+
+PluginRender *PluginManager::GetRender() {
+    return GetRender(id);
 }
 } // namespace RNSkia

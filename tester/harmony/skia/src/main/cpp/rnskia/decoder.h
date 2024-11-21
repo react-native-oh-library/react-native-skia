@@ -31,6 +31,7 @@ public:
     int32_t PushInputData(CodecBufferInfo &info);
     int32_t FreeOutputData(uint32_t bufferIndex, bool render);
     int32_t Release();
+    int32_t Flush(CodecBufferInfo &info);
     
     SampleInfo Info;
     

@@ -16,15 +16,12 @@ public:
 
     void startDrawLoop();
     void stopDrawLoop();
-    
-    void runOnDrawThread(std::function<void()> task);
 
 private:
     std::function<void(double)> CallBack;
     std::chrono::steady_clock::duration interval;
     std::unique_ptr<std::thread> thread;
     std::atomic<bool> running = {false};
-    std::queue<std::function<void()>> taskQueue;
 
     void postFrameLoop();
 };

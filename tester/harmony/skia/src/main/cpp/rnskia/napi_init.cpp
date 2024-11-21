@@ -32,6 +32,7 @@ static napi_value Init(napi_env env, napi_value exports) {
     }
     napi_property_descriptor desc[] = {
         {"registerView", nullptr, RNSkia::PluginRender::RegisterView, nullptr, nullptr, nullptr, napi_default, nullptr},
+        {"unregisterView", nullptr, RNSkia::PluginRender::DropInstance, nullptr, nullptr, nullptr, napi_default, nullptr},
         {"setModeAndDebug", nullptr, RNSkia::PluginRender::SetModeAndDebug, nullptr, nullptr, nullptr, napi_default, nullptr},
         {"onSurfaceSizeChanged", nullptr, RNSkia::PluginRender::SurfaceSizeChanged, nullptr, nullptr, nullptr, napi_default, nullptr},
         {"TagGetView_s", nullptr, RNSkia::SkiaManager::TagGetView, nullptr, nullptr, nullptr, napi_default, nullptr},
