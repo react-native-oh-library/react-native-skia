@@ -37,9 +37,9 @@ private:
         DLOG(INFO) << "OpenGLResourceHolder Initialize OpenGL";
         // Initialize OpenGL
         glDisplay = eglGetDisplay(EGL_DEFAULT_DISPLAY);
+        DLOG(INFO) << "OpenGL glDisplay: "<< glDisplay;
         if (glDisplay == EGL_NO_DISPLAY) {
             DLOG(INFO) << "eglGetDisplay failed : " << glGetError();
-            // RNSkLogger::logToConsole("eglGetDisplay failed : %i", glGetError());
             return;
         }
 
@@ -65,6 +65,7 @@ private:
 
     ~OpenGLResourceHolder() {
         if (glContext != EGL_NO_CONTEXT) {
+            DLOG(INFO) << "~eglDestroyContext() glDisplay: "<<glDisplay;
             eglDestroyContext(glDisplay, glContext);
             glContext = EGL_NO_CONTEXT;
         }
@@ -73,12 +74,14 @@ private:
             eglTerminate(glDisplay);
             glDisplay = EGL_NO_DISPLAY;
         }
+
     }
     /* Explicitly disallow copying. */
     OpenGLResourceHolder(const OpenGLResourceHolder &) = delete;
     OpenGLResourceHolder &operator=(const OpenGLResourceHolder &) = delete;
 
 public:
+    
     static OpenGLResourceHolder &getInstance() {
         static OpenGLResourceHolder Instance;
         return Instance;
@@ -147,6 +150,8 @@ struct SkiaOpenGLContext {
     }
     ~SkiaOpenGLContext() {
         if (gl1x1Surface != EGL_NO_SURFACE) {
+            
+            DLOG(INFO) << "SkiaOpenGLContext glDisplay: " <<OpenGLResourceHolder::getInstance().glDisplay;
             eglDestroySurface(OpenGLResourceHolder::getInstance().glDisplay, gl1x1Surface);
             gl1x1Surface = EGL_NO_SURFACE;
         }
@@ -157,6 +162,7 @@ struct SkiaOpenGLContext {
         }
 
         if (glContext != EGL_NO_CONTEXT) {
+            DLOG(INFO) << "555555555555555555555555555555555555;";
             eglDestroyContext(OpenGLResourceHolder::getInstance().glDisplay, // Harmony支持eglDestroyContext
                               glContext);
             glContext = EGL_NO_CONTEXT;
@@ -178,9 +184,10 @@ public:
      */
     static bool makeCurrent(SkiaOpenGLContext *context, EGLSurface glSurface) {
         // We don't need to call make current if we already are current:
+        DLOG(INFO) << "eglMakeCurrent  egl context: "<<context<<" theardid: "<<std::this_thread::get_id();
         if (eglGetCurrentSurface(EGL_DRAW) != glSurface || eglGetCurrentSurface(EGL_READ) != glSurface ||
             eglGetCurrentContext() != context->glContext) {
-
+            DLOG(INFO) << "eglMakeCurrent  glDisplay: "<<OpenGLResourceHolder::getInstance().glDisplay<<" glSurface: "<<glSurface<<" context->glContext: "<<context->glContext;
             auto curr =
                 eglMakeCurrent(OpenGLResourceHolder::getInstance().glDisplay, glSurface, glSurface, context->glContext);
             // Make current!
@@ -198,7 +205,8 @@ public:
      * @return EGLSurface or EGL_NO_SURFACE if the call failed
      */
     static EGLSurface createWindowedSurface(void *window) {
-        const EGLint attribs[] = {EGL_NONE};
+        DLOG(INFO) << "createWindowedSurface;";
+        // const EGLint attribs[] = {EGL_NONE};
         EGLNativeWindowType nativeWin = static_cast<EGLNativeWindowType>(window);
         return eglCreateWindowSurface(OpenGLResourceHolder::getInstance().glDisplay,
                                       OpenGLResourceHolder::getInstance().glConfig, nativeWin, NULL);
@@ -216,6 +224,7 @@ public:
             DLOG(INFO) << "destroySurface: Could not clear selected surface;";
             return false;
         }
+
         return eglDestroySurface(OpenGLResourceHolder::getInstance().glDisplay, glSurface) == EGL_TRUE;
     }
 
@@ -231,6 +240,7 @@ public:
             return false;
         }
         DLOG(INFO) << "swapBuffers success";
+        LOG(ERROR) << "liwang c++ testlog: swapBuffers success";
         return true;
     }
 
@@ -247,7 +257,7 @@ public:
             // Create OpenGL context
             createOpenGLContext(context);
 
-            // Create attributes for a simple 1x1 pbuffer surface that we can
+            // Create attributes for a simple 1x1 pbuffer surface that we can 
             // use to activate and create Skia direct context for
             const EGLint offScreenSurfaceAttribs[] = {EGL_WIDTH, 1, EGL_HEIGHT, 1, EGL_NONE};
 
@@ -258,7 +268,7 @@ public:
                 DLOG(INFO) << "Failed creating a 1x1 pbuffer surface;";
                 return false;
             }
-
+            DLOG(INFO) << "GrGLMakeNativeInterface 111111111111111111111";
             // Activate
             if (!SkiaOpenGLHelper::makeCurrent(context, context->gl1x1Surface)) {
                 return false;

@@ -4,8 +4,8 @@
 // Node APIs are not fully supported. To solve the compilation error of the interface cannot be found,
 // please include "napi/native_api.h".
 
-#ifndef HARMONY_SVGVIEWMANAGER_H
-#define HARMONY_SVGVIEWMANAGER_H
+#ifndef HARMONY_SKIAMANAGER_H
+#define HARMONY_SKIAMANAGER_H
 
 #include "HarmonyPlatformContext.h"
 #include <memory>
@@ -27,8 +27,10 @@ public:
     void setManager(std::shared_ptr<RNSkia::RNSkManager> manager);
     std::shared_ptr<RNSkia::RNSkManager> getManager();
 
-    void setReleaseVideo(bool relv);
-    bool getReleaseVideo();
+    void setReleaseVideo(bool relv){
+	isReleaseVideo = relv;
+	}
+    bool getReleaseVideo(){return isReleaseVideo;}
     
     static void *_pixels;
     struct Options {
@@ -68,6 +70,7 @@ public:
         return nullptr;
     }
 
+
 private:
     SkiaManager() {}
 
@@ -76,7 +79,8 @@ private:
 
     std::shared_ptr<RNSkia::HarmonyPlatformContext> platformContext;
     std::shared_ptr<RNSkia::RNSkManager> rnSkManager;
-    bool releaseVideo;
+    
+    bool isReleaseVideo = false;
 };
 
 } // namespace RNSkia

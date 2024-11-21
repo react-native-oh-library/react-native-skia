@@ -31,7 +31,7 @@
     based on the presence or absence of NDEBUG, but that decision can be changed
     here.
 */
-//#define SK_DEBUG
+#define SK_DEBUG
 //#define SK_RELEASE
 
 /*  To write debug messages to a console, skia will call SkDebugf(...) following

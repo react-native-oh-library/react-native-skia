@@ -46,6 +46,11 @@ export struct SkiaDomView {
     });
   }
 
+  aboutToDisappear(): void {
+    Logger.debug(TAG, 'aboutToDisappear nativeID: ' + this.nativeID);
+    this.xComponentContext?.unregisterView(X_COMPONENT_ID + "_" + this.nativeID, this.nativeID);
+  }
+
   build() {
     XComponent({
       id: X_COMPONENT_ID + "_" + this.nativeID,

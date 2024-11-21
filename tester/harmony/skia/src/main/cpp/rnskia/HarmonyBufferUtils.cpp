@@ -1,65 +1,67 @@
 #include "HarmonyBufferUtils.h"
 #include "HarmonyOpenGLHelper.h"
 #include "native_window/external_window.h"
-#include "src/gpu/ganesh/gl/GrGLDefines.h"
+
 #include <GLES2/gl2ext.h>
-#include <sys/stat.h>
+
+#include "include/gpu/GrBackendSurface.h"
+#include "include/gpu/GrDirectContext.h"
+#include "include/gpu/ganesh/gl/GrGLBackendSurface.h"
+#include "include/gpu/gl/GrGLTypes.h"
+#include "src/gpu/ganesh/gl/GrGLDefines.h"
+#include <EGL/egl.h>
+#include <EGL/eglext.h>
+
+#include "HarmonyOpenGLHelper.h"
+
+#define PROT_CONTENT_EXT_STR "EGL_EXT_protected_content"
+#define EGL_PROTECTED_CONTENT_EXT 0x32C0
 
 namespace RNSkia {
-
-GLTextureHelper::GLTextureHelper(GrGLuint texID, EGLImageKHR image, EGLDisplay display, GrGLuint texTarget)
-    : fTexID(texID), fImage(image), fDisplay(display), fTexTarget(texTarget) {}
 
 PFNEGLDESTROYIMAGEKHRPROC eglDestroyImageKHR = (PFNEGLDESTROYIMAGEKHRPROC)eglGetProcAddress("eglDestroyImageKHR");
 
 PFNGLEGLIMAGETARGETTEXTURE2DOESPROC glEGLImageTargetTexture2DOES =
     (PFNGLEGLIMAGETARGETTEXTURE2DOESPROC)eglGetProcAddress("glEGLImageTargetTexture2DOES");
 
-GLTextureHelper::~GLTextureHelper() {
-    glDeleteTextures(1, &fTexID);
-    // eglDestroyImageKHR will remove a ref from the OH_NativeBuffer Buffer
+typedef EGLClientBuffer (*EGLGetNativeClientBufferANDROIDProc)(const struct OH_NativeBuffer *);
+typedef EGLImageKHR (*EGLCreateImageKHRProc)(EGLDisplay, EGLContext, EGLenum, EGLClientBuffer, const EGLint *);
+typedef void (*EGLImageTargetTexture2DOESProc)(EGLenum, void *);
 
-    eglDestroyImageKHR(fDisplay, fImage);
-}
+class GLTextureHelper {
+public:
+    GLTextureHelper(GrGLuint texID, EGLImageKHR image, EGLDisplay display, GrGLuint texTarget)
+        : fTexID(texID), fImage(image), fDisplay(display), fTexTarget(texTarget) {}
+
+    ~GLTextureHelper() {
+        DLOG(INFO) << "~GLTextureHelper()";
+        glDeleteTextures(1, &fTexID);
+        eglDestroyImageKHR(fDisplay, fImage);
+    }
+
+    void rebind(GrDirectContext *);
+
+private:
+    GrGLuint fTexID;
+    EGLImageKHR fImage;
+    EGLDisplay fDisplay;
+    GrGLuint fTexTarget;
+};
 
 void GLTextureHelper::rebind(GrDirectContext *dContext) {
     glBindTexture(fTexTarget, fTexID);
     GLenum status = GL_NO_ERROR;
     if ((status = glGetError()) != GL_NO_ERROR) {
-        SkDebugf("glBindTexture(%#x, %d) failed (%#x)", static_cast<int>(fTexTarget), static_cast<int>(fTexID),
-                 static_cast<int>(status));
+        DLOG(ERROR) << "glBindTexture: " << static_cast<int>(fTexTarget) << " failed: " << static_cast<int>(fTexID)
+                    << " " << static_cast<int>(status);
         return;
     }
-
     glEGLImageTargetTexture2DOES(fTexTarget, fImage);
     if ((status = glGetError()) != GL_NO_ERROR) {
-        SkDebugf("glEGLImageTargetTexture2DOES failed (%#x)", static_cast<int>(status));
+        DLOG(ERROR) << "glEGLImageTargetTexture2DOES  failed: " << static_cast<int>(status);
         return;
     }
     dContext->resetContext(kTextureBinding_GrGLBackendState);
-}
-
-GrBackendFormat GLTextureHelper::GetGLBackendFormat(GrDirectContext *dContext, uint32_t bufferFormat,
-                                                    bool requireKnownFormat) {
-    GrBackendApi backend = dContext->backend();
-    if (backend != GrBackendApi::kOpenGL) {
-        return GrBackendFormat();
-    }
-    switch (bufferFormat) {
-    case NATIVEBUFFER_PIXEL_FMT_RGBA_8888:
-        return GrBackendFormats::MakeGL(GR_GL_RGBA8, GR_GL_TEXTURE_EXTERNAL);
-    case NATIVEBUFFER_PIXEL_FMT_RGB_565:
-        return GrBackendFormats::MakeGL(GR_GL_RGB565, GR_GL_TEXTURE_EXTERNAL);
-    case NATIVEBUFFER_PIXEL_FMT_RGB_888:
-        return GrBackendFormats::MakeGL(GR_GL_RGB8, GR_GL_TEXTURE_EXTERNAL);
-    default:
-        if (requireKnownFormat) {
-            return GrBackendFormat();
-        } else {
-            return GrBackendFormats::MakeGL(GR_GL_RGBA8, GR_GL_TEXTURE_EXTERNAL);
-        }
-    }
-    SkUNREACHABLE;
 }
 
 void delete_gl_texture(void *context) {
@@ -76,21 +78,37 @@ static GrBackendTexture make_gl_backend_texture(GrDirectContext *dContext, OH_Na
                                                 int height, DeleteImageProc *deleteProc, UpdateImageProc *updateProc,
                                                 TexImageCtx *imageCtx, bool isProtectedContent,
                                                 const GrBackendFormat &backendFormat, bool isRenderable) {
+    while (GL_NO_ERROR != glGetError()) {
+    } // clear GL errors
+
+    DLOG(INFO) << "make_gl_backend_texture  enter & egl context: " << dContext<<" theardid: "<<std::this_thread::get_id();
     EGLClientBuffer clientBuffer = OH_NativeWindow_CreateNativeWindowBufferFromNativeBuffer(Buffer);
+    OH_NativeBuffer_Unreference(Buffer);
+    DLOG(INFO) << "make_gl_backend_texture  clientBuffer: " << clientBuffer;
     EGLint attribs[] = {EGL_IMAGE_PRESERVED_KHR, EGL_TRUE, isProtectedContent ? EGL_PROTECTED_CONTENT_EXT : EGL_NONE,
                         isProtectedContent ? EGL_TRUE : EGL_NONE, EGL_NONE};
-    EGLDisplay display = eglGetCurrentDisplay();
-    // eglCreateImageKHR will add a ref to the OH_NativeBuffer
 
-    PFNEGLCREATEIMAGEKHRPROC EGLCreateImageKHR = (PFNEGLCREATEIMAGEKHRPROC)eglGetProcAddress("EGLCreateImageKHR");
-    if (!EGLCreateImageKHR) {
-        DLOG(INFO) << "无法获取 EGLCreateImageKHR 函数指针";
-        return GrBackendTexture();
+    //     EGLDisplay display = OpenGLResourceHolder::getInstance().glDisplay;
+    EGLDisplay display = eglGetCurrentDisplay();
+
+    //     EGLDisplay display = eglGetDisplay(EGL_DEFAULT_DISPLAY);
+    DLOG(INFO) << "display: " << display;
+    if (GL_NO_ERROR == display) {
+        DLOG(ERROR) << "make_gl_backend_texture  eglGetCurrentDisplay: " << static_cast<int>(eglGetError());
+        //         return GrBackendTexture();
+        //         display = OpenGLResourceHolder::getInstance().glDisplay;
+        DLOG(INFO) << "display22222222: " << display;
     }
 
+    PFNEGLCREATEIMAGEKHRPROC EGLCreateImageKHR = (PFNEGLCREATEIMAGEKHRPROC)eglGetProcAddress("eglCreateImageKHR");
+    if (!EGLCreateImageKHR) {
+        DLOG(ERROR) << "无法获取 EGLCreateImageKHR 函数指针";
+        return GrBackendTexture();
+    }
     EGLImageKHR image = EGLCreateImageKHR(display, EGL_NO_CONTEXT, EGL_NATIVE_BUFFER_OHOS, clientBuffer, attribs);
+    DLOG(INFO) << "make_gl_backend_texture  image: " << image;
     if (EGL_NO_IMAGE_KHR == image) {
-        SkDebugf("Could not create EGL image, err = (%#x)", static_cast<int>(eglGetError()));
+        DLOG(ERROR) << "make_gl_backend_texture  Could not create EGL  " << static_cast<int>(eglGetError());
         return GrBackendTexture();
     }
 
@@ -101,19 +119,20 @@ static GrBackendTexture make_gl_backend_texture(GrDirectContext *dContext, OH_Na
         return GrBackendTexture();
     }
 
-    GrGLuint target = isRenderable ? GR_GL_TEXTURE_2D : GR_GL_TEXTURE_EXTERNAL;
-
+    GrGLuint target = isRenderable ? GL_TEXTURE_2D : GL_TEXTURE_EXTERNAL_OES;
+    DLOG(INFO) << "make_gl_backend_texture  target: " << target << " texID: " << texID;
     glBindTexture(target, texID);
     GLenum status = GL_NO_ERROR;
     if ((status = glGetError()) != GL_NO_ERROR) {
-        SkDebugf("glBindTexture failed (%#x)", static_cast<int>(status));
+        DLOG(ERROR) << "make_gl_backend_texture  glBindTexture failed  " << static_cast<int>(status);
         glDeleteTextures(1, &texID);
         eglDestroyImageKHR(display, image);
         return GrBackendTexture();
     }
+
     glEGLImageTargetTexture2DOES(target, image);
     if ((status = glGetError()) != GL_NO_ERROR) {
-        SkDebugf("glEGLImageTargetTexture2DOES failed (%#x)", static_cast<int>(status));
+        DLOG(ERROR) << "make_gl_backend_texture  glEGLImageTargetTexture2DOES failed " << static_cast<int>(status);
         glDeleteTextures(1, &texID);
         eglDestroyImageKHR(display, image);
         return GrBackendTexture();

@@ -18,7 +18,7 @@
 #include <ace/xcomponent/native_interface_xcomponent.h>
 #include <cstddef>
 #include <napi/native_api.h>
-#include "HarmonyPlatformContext.h"
+
 #include "napi/n_func_arg.h"
 #include <rawfile/raw_file_manager.h>
 #include <string>
@@ -26,25 +26,29 @@
 
 #include "RNSkHarmonyView.h"
 #include "RNSkPlatformContext.h"
+
 #include "SkiaManager.h"
 
 namespace RNSkia {
+
 class PluginRender {
 public:
     PluginRender(std::shared_ptr<RNSkia::RNSkPlatformContext> context);
-    ~PluginRender() {}
+    ~PluginRender() {
+        m_window = nullptr;
+    }
     static PluginRender *GetInstance(std::string &id);
+    static void Release(std::string &id);
 
     void OnSurfaceChanged(OH_NativeXComponent *component, void *window);
+    void OnTouchEvent(OH_NativeXComponent *component, void *window);
     void OnMouseEvent(OH_NativeXComponent *component, void *window);
     void OnHoverEvent(OH_NativeXComponent *component, bool isHover);
     void OnFocusEvent(OH_NativeXComponent *component, void *window);
     void OnBlurEvent(OH_NativeXComponent *component, void *window);
     void OnKeyEvent(OH_NativeXComponent *component, void *window);
     void RegisterCallback(OH_NativeXComponent *nativeXComponent);
-    void Export(napi_env env, napi_value exports);
-    
-    RNSkTouchInfo::TouchType getSKTouchType(OH_NativeXComponent_TouchEventType type);
+
 
     static napi_value RegisterView(napi_env env, napi_callback_info info) {
         DLOG(INFO) << "napi RegisterView";
@@ -71,8 +75,7 @@ public:
         std::string id(xComponentId.get());
         if (m_instance.find(id) != m_instance.end()) {
             PluginRender *instance = m_instance[id];
-            auto hctx = std::static_pointer_cast<HarmonyPlatformContext>(instance->_context);
-            hctx->runOnDrawThread(
+            instance->_context->runOnMainThread(
                 [instance = std::move(instance), nativeId = std::move(nativeId), id = std::move(id)]() {
                     auto view = instance->_harmonyView;
                     std::shared_ptr<RNSkView> rNSkView = view->getSkiaView();
@@ -85,7 +88,51 @@ public:
         }
         return nullptr;
     };
-    
+
+    static napi_value DropInstance(napi_env env, napi_callback_info info) {
+        DLOG(INFO) << "napi DropInstance";
+        // 获取参数
+        NFuncArg funcArg(env, info);
+        if (!funcArg.InitArgs(NARG_CNT::TWO)) {
+            return nullptr;
+        }
+        napi_value v1 = funcArg.GetArg(NARG_POS::FIRST);
+        NVal nValXcId(env, v1);
+        auto [v1Succ, xComponentId, nLength] = nValXcId.ToUTF8String();
+        if (!v1Succ) {
+            DLOG(ERROR) << "napi DropInstance get xComponentId fail";
+            return nullptr;
+        }
+        napi_value v2 = funcArg.GetArg(NARG_POS::SECOND);
+        NVal nValNativeId(env, v2);
+        auto [v2Succ, nativeId] = nValNativeId.ToInt32();
+        if (!v2Succ) {
+            DLOG(ERROR) << "napi DropInstance get nValNativeId fail";
+            return nullptr;
+        }
+        DLOG(INFO) << "napi DropInstance xComponentId: " << xComponentId << " nativeId: " << nativeId << " m_instance: " << m_instance.size();
+        std::string id(xComponentId.get());
+        if (m_instance.find(id) != m_instance.end()) {
+            PluginRender *instance = m_instance[id];
+            size_t nId = static_cast<size_t>(nativeId);
+            SkiaManager::getInstance().getManager()->setSkiaView(nId, nullptr);
+            SkiaManager::getInstance().getManager()->unregisterSkiaView(nId);
+            instance->_harmonyView->viewDidUnmount();
+            DLOG(INFO) << "napi DropInstance finish XComponentId: " << id
+                       << " threadId: " << std::this_thread::get_id();
+            //             instance->_context->runOnMainThread(
+            //                 [instance = std::move(instance), nativeId = std::move(nativeId), id = std::move(id)]() {
+            //                     size_t nId = static_cast<size_t>(nativeId);
+            //                     SkiaManager::getInstance().getManager()->setSkiaView(nId, nullptr);
+            //                     SkiaManager::getInstance().getManager()->unregisterSkiaView(nId);
+            //                     instance->_harmonyView->viewDidUnmount();
+            //                     DLOG(INFO) << "napi DropInstance finish XComponentId: " << id
+            //                                << " threadId: " << std::this_thread::get_id();
+            //                 });
+        }
+        return nullptr;
+    }
+
     static napi_value SetModeAndDebug(napi_env env, napi_callback_info info) {
         DLOG(INFO) << "napi SetModeAndDebug";
         // 获取参数
@@ -117,14 +164,15 @@ public:
         }
         std::string id(xComponentId.get());
         std::string modeStr(mode.get());
-        DLOG(INFO) << "napi SetModeAndDebug xComponentId: " << id << " mode: " << modeStr << " showDebug: " << showDebug;
+        DLOG(INFO) << "napi SetModeAndDebug xComponentId: " << id << " mode: " << modeStr
+                   << " showDebug: " << showDebug;
         if (m_instance.find(id) != m_instance.end()) {
             PluginRender *instance = m_instance[id];
             auto view = instance->_harmonyView;
             view->setMode(modeStr);
             view->setShowDebugInfo(showDebug);
             DLOG(INFO) << "napi SetModeAndDebug finish XComponentId: " << id
-                               << " threadId: " << std::this_thread::get_id();
+                       << " threadId: " << std::this_thread::get_id();
         }
         return nullptr;
     }
@@ -170,8 +218,7 @@ public:
         std::string id(xComponentId.get());
         if (m_instance.find(id) != m_instance.end()) {
             PluginRender *instance = m_instance[id];
-            auto hctx = std::static_pointer_cast<HarmonyPlatformContext>(instance->_context);
-            hctx->runOnDrawThread(
+            instance->_context->runOnMainThread(
                 [instance = std::move(instance), nativeId = std::move(nativeId), id = std::move(id)]() {
                     auto view = instance->_harmonyView;
                     std::shared_ptr<RNSkView> rNSkView = view->getSkiaView();
@@ -193,7 +240,6 @@ public:
 
     std::shared_ptr<RNSkBaseHarmonyView> _harmonyView;
     std::shared_ptr<RNSkia::RNSkPlatformContext> _context;
-
 
 private:
     OH_NativeXComponent_Callback m_renderCallback;

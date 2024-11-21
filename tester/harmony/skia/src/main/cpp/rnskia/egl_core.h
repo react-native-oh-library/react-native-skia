@@ -27,6 +27,12 @@ class EGLCore {
 public:
     explicit EGLCore(){};
     ~EGLCore() {}
+    
+    static EGLCore *GetInstance()
+    {
+        return &EGLCore::GLCore;
+    }
+    
     bool EglContextInit(void *window, int width, int height);
     bool CreateEnvironment();
     void Draw(int &hasDraw);
@@ -34,8 +40,12 @@ public:
     void ChangeColor(int &hasChangeColor);
     void Release();
     void UpdateSize(int width, int height);
-
+    
+    EGLSurface eglSurface_ = EGL_NO_SURFACE;
 private:
+    
+    static EGLCore GLCore;
+    
     GLuint LoadShader(GLenum type, const char *shaderSrc);
     GLuint CreateProgram(const char *vertexShader, const char *fragShader);
     GLint PrepareDraw();
@@ -50,7 +60,6 @@ private:
     EGLNativeWindowType eglWindow_;
     EGLDisplay eglDisplay_ = EGL_NO_DISPLAY;
     EGLConfig eglConfig_ = EGL_NO_CONFIG_KHR;
-    EGLSurface eglSurface_ = EGL_NO_SURFACE;
     EGLContext eglContext_ = EGL_NO_CONTEXT;
     GLuint program_;
     bool flag_ = false;

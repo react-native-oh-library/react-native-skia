@@ -5,6 +5,7 @@
 #include <vector>
 
 #include "RNSkOpenGLCanvasProvider.h"
+#include "egl_core.h"
 
 namespace RNSkia {
 
