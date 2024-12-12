@@ -19,16 +19,57 @@ namespace RNSkia {
 
 namespace jsi = facebook::jsi;
 
+constexpr int RGBA_RED_PIXEL_INDEX0 = 0;
+constexpr int RGBA_RED_PIXEL_INDEX2 = 2;
+constexpr int RGBA_BLUE_PIXEL_INDEX10 = 10;
+constexpr int RGBA_BLUE_PIXEL_INDEX12 = 12;
+
 class JsiSkColorFilterFactory : public JsiSkHostObject {
 public:
   JSI_HOST_FUNCTION(MakeMatrix) {
     auto jsiMatrix = arguments[0].asObject(runtime).asArray(runtime);
     float matrix[20];
-    for (int i = 0; i < 20; i++) {
-      if (jsiMatrix.size(runtime) > i) {
-        matrix[i] = jsiMatrix.getValueAtIndex(runtime, i).asNumber();
-      }
+    /*std::vector<std::vector<float>> correctionMatrix;
+    for (int i = 0; i < 4; ++i) {
+        std::vector<float> temp;
+        for (int j = 0; j < 5; ++j) {
+            temp.push_back(jsiMatrix.getValueAtIndex(runtime, i * 5 + j).asNumber());
+        }
+        correctionMatrix.push_back(temp);
     }
+    std::swap(correctionMatrix[0], correctionMatrix[2]);
+    int index = 0;
+    for (const auto& vec : correctionMatrix) {
+        for (float value : vec) {
+            matrix[index++] = value;
+        }
+    }*/
+    float rc0 = 0.0f;
+    float rc2 = 0.0f;
+    float bc10 = 0.0f;
+    float bc12 = 0.0f;
+    for (int i = 0; i < 20; i++) {
+        if (i == RGBA_RED_PIXEL_INDEX0) {
+            rc0 = jsiMatrix.getValueAtIndex(runtime, i).asNumber();
+        }
+        if (i == RGBA_RED_PIXEL_INDEX2) {
+            rc2 = jsiMatrix.getValueAtIndex(runtime, i).asNumber();
+        }
+        if (i == RGBA_BLUE_PIXEL_INDEX10) {
+            bc10 = jsiMatrix.getValueAtIndex(runtime, i).asNumber();
+        }
+        if (i == RGBA_BLUE_PIXEL_INDEX12) {
+            bc12 = jsiMatrix.getValueAtIndex(runtime, i).asNumber();
+        }
+        if (jsiMatrix.size(runtime) > i) {
+            matrix[i] = jsiMatrix.getValueAtIndex(runtime, i).asNumber();
+        }
+    }
+    matrix[RGBA_RED_PIXEL_INDEX0] = bc10;
+    matrix[RGBA_BLUE_PIXEL_INDEX10] = rc0;
+    matrix[RGBA_RED_PIXEL_INDEX2] = bc12;
+    matrix[RGBA_BLUE_PIXEL_INDEX12] = rc2;
+
     // Return the newly constructed object
     return jsi::Object::createFromHostObject(
         runtime, std::make_shared<JsiSkColorFilter>(
