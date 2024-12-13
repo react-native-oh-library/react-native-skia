@@ -1,11 +1,11 @@
 import type { SharedValue, FrameInfo } from "react-native-reanimated";
 import { useEffect, useMemo } from "react";
 
-import type { SkImage, Video } from "../../skia/types";
-import { Platform } from "../../Platform";
+import type { SkImage, Video } from "@shopify/react-native-skia";
+import { Platform } from "@shopify/react-native-skia/src/Platform/Platform";
 
-import Rea from "./ReanimatedProxy";
-import { useVideoLoading } from "./useVideoLoading";
+import Rea from "@shopify/react-native-skia/src/external/reanimated/ReanimatedProxy";
+import { useVideoLoading } from "@shopify/react-native-skia/src/external/reanimated/useVideoLoading";
 
 type Animated<T> = SharedValue<T> | T;
 
@@ -16,13 +16,17 @@ interface PlaybackOptions {
   volume: Animated<number>;
 }
 
+export const currentSKImageFrames: SkImage[] = [];
+
 const copyFrameOnAndroid = (currentFrame: SharedValue<SkImage | null>) => {
   "worklet";
   // on android we need to copy the texture before it's invalidated
-  if (Platform.OS === "android") {
+  if (Platform.OS === "android" || Platform.OS === "harmony") {
     const tex = currentFrame.value;
     if (tex) {
       currentFrame.value = tex.makeNonTextureImage();
+      //currentSKImageFrames.push(currentFrame.value);
+      //console.log("push OK");
       tex.dispose();
     }
   }
@@ -30,6 +34,7 @@ const copyFrameOnAndroid = (currentFrame: SharedValue<SkImage | null>) => {
 
 const setFrame = (video: Video, currentFrame: SharedValue<SkImage | null>) => {
   "worklet";
+  console.log("nextImage");
   const img = video.nextImage();
   if (img) {
     if (currentFrame.value) {
@@ -59,6 +64,7 @@ const useOption = <T>(value: Animated<T>) => {
 
 const disposeVideo = (video: Video | null) => {
   "worklet";
+
   video?.dispose();
 };
 
@@ -110,7 +116,8 @@ export const useVideo = (
       video?.setVolume(value);
     }
   );
-  Rea.useFrameCallback((frameInfo: FrameInfo) => {
+
+  Rea.useFrameCallback(async (frameInfo: FrameInfo) => {
     "worklet";
     if (!video) {
       return;
@@ -123,16 +130,22 @@ export const useVideo = (
       lastTimestamp.value = currentTimestamp;
     }
     const delta = currentTimestamp - lastTimestamp.value;
-
     const isOver = currentTime.value + delta > duration;
+
     if (isOver && looping.value) {
+      console.log("in if seek");
       seek.value = 0;
       currentTime.value = seek.value;
       lastTimestamp.value = currentTimestamp;
     }
     // On Web the framerate is uknown.
     // This could be optimized by using requestVideoFrameCallback (Chrome only)
-    if ((delta >= currentFrameDuration && !isOver) || Platform.OS === "web") {
+
+    if (
+      (delta > currentFrameDuration * 3 && !isOver) ||
+      Platform.OS === "web"
+    ) {
+      //console.log(`当前时间:${currentTime.value},时间间隔:${delta},当前帧持续时间:${currentFrameDuration}`)
       setFrame(video, currentFrame);
       currentTime.value += delta;
       lastTimestamp.value = currentTimestamp;
