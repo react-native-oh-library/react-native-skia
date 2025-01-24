@@ -4,20 +4,22 @@
   "private": true,
   "scripts": {
     "start": "hdc rport tcp:8081 tcp:8081 && react-native start",
-    "dev": "react-native bundle-harmony --dev --minify=false"
+    "pack:pkg": "cd ../react-native-skia && npm i && npm pack && cd ../tester",
+    "install:pkg": "npm run pack:pkg && npm i @react-native-oh-tpl/react-native-skia@file:../react-native-skia/react-native-oh-tpl-react-native-skia-1.3.7-0.0.4.tgz",
+    "dev": "npm uninstall @react-native-oh-tpl/react-native-skia && npm run install:pkg && react-native bundle-harmony --dev --minify=false"
   },
   "dependencies": {
     "@gorhom/portal": "^1.0.14",
-    "@react-native-oh-tpl/react-native-gesture-handler": "file:third_party/react-native-oh-tpl-react-native-gesture-handler-2.14.1-2.14.10.tgz",
-    "@react-native-oh-tpl/react-native-reanimated": "file:third_party/react-native-oh-tpl-react-native-reanimated-3.6.1.tgz",
-    "@react-native-oh-tpl/react-native-skia": "file:third_party/react-native-oh-tpl-react-native-skia-1.3.7-0.0.3.tgz",
+    "@react-native-oh-tpl/react-native-gesture-handler": "2.14.1-2.14.16",
+    "@react-native-oh-tpl/react-native-reanimated": "3.6.3",
+    "@react-native-oh-tpl/react-native-skia": "file:../react-native-skia/react-native-oh-tpl-react-native-skia-1.3.7-0.0.4.tgz",
     "chai": "4.3.7",
     "d3-scale-chromatic": "^3.0.0",
     "react": "18.2.0",
     "react-native": "0.72.5",
     "react-native-flipper-performance-plugin": "^0.4.0",
     "react-native-gesture-handler": "2.14.1",
-    "react-native-harmony": "file:./rnoh_package/react-native-harmony/rnoh-react-native-harmony-0.72.27.tgz",
+    "react-native-harmony": "npm:@react-native-oh/react-native-harmony@0.72.48",
     "react-native-reanimated": "3.6.0",
     "react-native-vector-icons": "10.0.3",
     "victory-native": "^41.1.2"
