@@ -4,8 +4,8 @@
   "description": "Please describe the basic information.",
   "main": "index.ets",
   "author": "",
-  "license": "Apache-2.0",
+  "license": "MIT",
   "dependencies": {
-    "@rnoh/react-native-openharmony": 'file:../react_native_openharmony.har'
+    "@rnoh/react-native-openharmony": '0.72.38'
   }
 }
