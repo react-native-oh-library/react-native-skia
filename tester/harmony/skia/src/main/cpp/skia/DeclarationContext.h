@@ -24,6 +24,7 @@ namespace RNSkia {
 class DeclarationContext {
 public:
   DeclarationContext() { save(); }
+  ~DeclarationContext() { restore(); }
 
   Declaration<sk_sp<SkShader>> *getShaders() { return &_shaders.top(); }
   ComposableDeclaration<sk_sp<SkImageFilter>> *getImageFilters() {
