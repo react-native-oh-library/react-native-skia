@@ -1,11 +1,11 @@
 {
   "name": "@react-native-oh-tpl/react-native-skia",
-  "version": "1.3.7-0.0.4",
+  "version": "1.3.7-0.0.5",
   "description": "Please describe the basic information.",
   "main": "index.ets",
   "author": "",
   "license": "MIT",
   "dependencies": {
-    "@rnoh/react-native-openharmony": '0.72.38'
+    "@rnoh/react-native-openharmony": '0.72.48'
   }
 }
