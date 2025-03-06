@@ -375,14 +375,17 @@ sk_sp<SkImage> HarmonyPlatformContext::takeScreenshotFromViewTag(size_t tag) {
 // 读取文件数据
 std::vector<uint8_t> HarmonyPlatformContext::ReadFileData(const std::string &sourceUri) {
     std::vector<uint8_t> buffer;
-
-    if (access(sourceUri.c_str(), F_OK) != 0) {
-        DLOG(ERROR) << "File does not exist: " << sourceUri << std::endl;
+    DLOG(INFO) << "File sourceUri: " << sourceUri << std::endl;
+    // 去掉路径前面的file://
+    std::string sourceUriObj = sourceUri.substr(7);
+    DLOG(INFO) << "File sourceUriObj: " << sourceUriObj << std::endl;
+    if (access(sourceUriObj.c_str(), F_OK) != 0) {
+        DLOG(ERROR) << "File does not exist: " << sourceUriObj << std::endl;
         return buffer;
     }
-    std::ifstream file(sourceUri, std::ios::binary | std::ios::ate);
+    std::ifstream file(sourceUriObj, std::ios::binary | std::ios::ate);
     if (!file) {
-        DLOG(ERROR) << "Failed to open file: " << sourceUri << std::endl;
+        DLOG(ERROR) << "Failed to open file: " << sourceUriObj << std::endl;
         return buffer;
     }
     std::streamsize size = file.tellg();
@@ -390,7 +393,7 @@ std::vector<uint8_t> HarmonyPlatformContext::ReadFileData(const std::string &sou
     file.seekg(0, std::ios::beg); // 回到文件头
     // 读取文件内容到buffer中
     if (!file.read(reinterpret_cast<char *>(buffer.data()), size)) {
-        DLOG(ERROR) << "Failed to read file: " << sourceUri << std::endl;
+        DLOG(ERROR) << "Failed to read file: " << sourceUriObj << std::endl;
         buffer.clear();
     }
     return buffer;
