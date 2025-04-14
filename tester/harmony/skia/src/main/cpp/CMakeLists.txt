@@ -153,6 +153,7 @@ target_link_libraries(
     ${EGL-lib} ${GLES-lib} ${hilog-lib} ${libace-lib} ${libnapi-lib} ${libuv-lib}
 
     libhilog_ndk.z.so
+    libnative_display_manager.so
     librawfile.z.so
     libnative_drawing.so
     libpixelmap_ndk.z.so

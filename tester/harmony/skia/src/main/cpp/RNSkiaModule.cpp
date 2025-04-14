@@ -9,6 +9,7 @@
 #include "SkiaManager.h"
 #include <fstream>
 #include "RNOH/RNInstance.h"
+#include <window_manager/oh_display_manager.h>
 
 using namespace facebook;
 using namespace react;
@@ -17,7 +18,9 @@ namespace rnoh {
 
 bool RNSkiaModule::install(jsi::Runtime &rt) {
     DLOG(INFO) << "RNSkiaModule::install";
-    auto pixelDensity = 3.25;
+    float pixelDensity = 3.25;
+    OH_NativeDisplayManager_GetDefaultDisplayDensityPixels(&pixelDensity);
+    DLOG(INFO)<<"DensityPixels==" << pixelDensity;
 
     platformContext = std::make_shared<RNSkia::HarmonyPlatformContext>(&rt, jsInvoker_, pixelDensity);
     if (!m_ctx.instance.expired()) {
