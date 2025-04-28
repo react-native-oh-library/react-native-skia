@@ -27,7 +27,9 @@ export class RNSkiaModule extends TurboModule {
 
   public TagGetView(tag: number): void {
     try {
-      let pixelmap = componentSnapshot.getSync(tag+'');
+      let obj = JSON.parse(JSON.stringify(this.ctx.rnInstance.getNativeNodeIdByTag(tag)));
+      let id = obj.ok;
+      let pixelmap = componentSnapshot.getSync(id);
       let originImageInfo = pixelmap.getImageInfoSync();
       let dstX = originImageInfo.size.width;
       let dstY = originImageInfo.size.height;
