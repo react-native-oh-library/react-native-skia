@@ -1,6 +1,6 @@
 # @react-native-oh-tpl/react-native-skia
 
-This project is based on [react-native-skia](https://github.com/Shopify/react-native-skia)
+This project is based on [react-native-skia v1.3.8](https://github.com/Shopify/react-native-skia/releases/tag/v1.3.8)
 
 ## Documentation
 
