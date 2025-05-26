@@ -207,7 +207,7 @@ void HarmonyPlatformContext::performStreamOperation(const std::string &sourceUri
                 buffer = ReadFileData(sourceUri);
             } else if (scheme == "asset") {
                 buffer = ReadAssetsData(sourceUri);
-            } else if (scheme == "http" || "https") {
+            } else if (scheme == "http" || scheme == "https") {
                 buffer = PerformHTTPRequest(sourceUri);
             } else {
                 DLOG(ERROR) << "performStreamOperation The URL is invalid (scheme is 'file || http || https')";
