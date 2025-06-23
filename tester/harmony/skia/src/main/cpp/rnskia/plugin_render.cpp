@@ -21,17 +21,17 @@
 
 
 namespace RNSkia {
-std::unordered_map<std::string, PluginRender *> PluginRender::m_instance;
-
+std::unordered_map<std::string,std::shared_ptr<PluginRender>>PluginRender::m_instance;
 PluginRender::PluginRender(std::shared_ptr<RNSkia::RNSkPlatformContext> context)
 {
     _context = context;
     _harmonyView = std::make_shared<RNSkHarmonyView<RNSkia::RNSkDomView>>(context);
 }
 
-PluginRender *PluginRender::GetInstance(std::string &id) {
+
+std::shared_ptr<PluginRender>PluginRender::GetInstance(std::string &id) {
     if (m_instance.find(id) == m_instance.end()) {
-        PluginRender *instance = new PluginRender(SkiaManager::getInstance().getContext());
+        auto instance = std::make_shared<PluginRender>(SkiaManager::getInstance().getContext());
         m_instance[id] = instance;
         return instance;
     } else {
@@ -126,11 +126,10 @@ void OnSurfaceDestroyedCB(OH_NativeXComponent *component, void *window) {
  */
 void PluginRender::Release(std::string &id)
 {
-    PluginRender *render = PluginRender::GetInstance(id);
+    auto render = PluginRender::GetInstance(id);
     if (render != nullptr) {
         m_instance.erase(m_instance.find(id));
     }
-    delete render;
 }
 
 void DispatchTouchEventCB(OH_NativeXComponent *component, void *window) {
@@ -148,7 +147,7 @@ void DispatchTouchEventCB(OH_NativeXComponent *component, void *window) {
     }
 
     std::string id(idStr);
-    PluginRender *render = PluginRender::GetInstance(id);
+    auto render = PluginRender::GetInstance(id);
     if (render != nullptr) {
         render->OnTouchEvent(component, window);
     }
@@ -242,7 +241,7 @@ void PluginRender::OnSurfaceChanged(OH_NativeXComponent *component, void *window
     }
 
     std::string id(idStr);
-    PluginRender *render = PluginRender::GetInstance(id);
+    auto render = PluginRender::GetInstance(id);
     double offsetX;
     double offsetY;
     OH_NativeXComponent_GetXComponentOffset(component, window, &offsetX, &offsetY);
@@ -275,7 +274,7 @@ void PluginRender::OnTouchEvent(OH_NativeXComponent *component, void *window) {
     OH_NativeXComponent_GetTouchPointTiltY(component, 0, &tiltY);
 
     std::string id(idStr);
-    PluginRender *render = PluginRender::GetInstance(id);
+    auto render = PluginRender::GetInstance(id);
     RNSkTouchInfo info;
     std::vector<RNSkTouchInfo> touches;
     if (render != nullptr && touchEvent.type == OH_NativeXComponent_TouchEventType::OH_NATIVEXCOMPONENT_UP) {

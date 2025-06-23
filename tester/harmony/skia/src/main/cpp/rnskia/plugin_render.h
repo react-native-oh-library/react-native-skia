@@ -29,7 +29,7 @@ public:
     ~PluginRender() {
         m_window = nullptr;
     }
-    static PluginRender *GetInstance(std::string &id);
+    static std::shared_ptr<PluginRender> GetInstance(std::string &id);
     static void Release(std::string &id);
 
     void OnSurfaceChanged(OH_NativeXComponent *component, void *window);
@@ -66,7 +66,7 @@ public:
         DLOG(INFO) << "napi RegisterView xComponentId: " << xComponentId << " nativeId: " << nativeId;
         std::string id(xComponentId.get());
         if (m_instance.find(id) != m_instance.end()) {
-            PluginRender *instance = m_instance[id];
+            auto instance = m_instance[id];
             instance->_context->runOnMainThread(
                 [instance = std::move(instance), nativeId = std::move(nativeId), id = std::move(id)]() {
                     auto view = instance->_harmonyView;
@@ -105,7 +105,7 @@ public:
         DLOG(INFO) << "napi DropInstance xComponentId: " << xComponentId << " nativeId: " << nativeId << " m_instance: " << m_instance.size();
         std::string id(xComponentId.get());
         if (m_instance.find(id) != m_instance.end()) {
-            PluginRender *instance = m_instance[id];
+            auto instance = m_instance[id];
             size_t nId = static_cast<size_t>(nativeId);
             SkiaManager::getInstance().getManager()->setSkiaView(nId, nullptr);
             SkiaManager::getInstance().getManager()->unregisterSkiaView(nId);
@@ -159,7 +159,7 @@ public:
         DLOG(INFO) << "napi SetModeAndDebug xComponentId: " << id << " mode: " << modeStr
                    << " showDebug: " << showDebug;
         if (m_instance.find(id) != m_instance.end()) {
-            PluginRender *instance = m_instance[id];
+            auto instance = m_instance[id];
             auto view = instance->_harmonyView;
             view->setMode(modeStr);
             view->setShowDebugInfo(showDebug);
@@ -209,7 +209,7 @@ public:
                    << " width: " << width << " height: " << height;
         std::string id(xComponentId.get());
         if (m_instance.find(id) != m_instance.end()) {
-            PluginRender *instance = m_instance[id];
+            auto instance = m_instance[id];
             instance->_context->runOnMainThread(
                 [instance = std::move(instance), nativeId = std::move(nativeId), id = std::move(id)]() {
                     auto view = instance->_harmonyView;
@@ -225,7 +225,7 @@ public:
     }
 
 public:
-    static std::unordered_map<std::string, PluginRender *> m_instance;
+    static std::unordered_map<std::string, std::shared_ptr<PluginRender>> m_instance;
     OHNativeWindow *m_window;
     uint64_t m_width;
     uint64_t m_height;

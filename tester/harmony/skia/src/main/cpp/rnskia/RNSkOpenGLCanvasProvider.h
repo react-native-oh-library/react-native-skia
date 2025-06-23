@@ -52,14 +52,22 @@ public:
                    << " _widthPercent: " << _widthPercent;
     }
 
+    void dispose() { 
+        if(_skSurface) { 
+            _skSurface.reset();  
+            _glSurface = EGL_NO_SURFACE;
+        }
+        if(_window) { 
+            OH_NativeWindow_DestroyNativeWindow(_window);
+            _window = nullptr;
+        }
+    }
+
     // 析构函数，释放本地窗口
     ~WindowSurfaceHolder() {
         if (_window) {
             OH_NativeWindow_DestroyNativeWindow(_window);
             _window = nullptr;
-        }
-        if (_glSurface != EGL_NO_SURFACE && SkiaOpenGLHelper::destroySurface(_glSurface)) {
-            _glSurface = EGL_NO_SURFACE;
         }
         DLOG(INFO) << "~WindowSurfaceHolder release _window: " << _window << " _glSurface: " << _glSurface;
     }
@@ -400,7 +408,15 @@ public:
     void surfaceDestroyed() {
         // destroy the renderer (a unique pointer so the dtor will be called
         // immediately.)
-        _surfaceHolder = nullptr;
+        auto holder = std::move(_surfaceHolder);
+        if(!holder)
+            return;
+        auto sharedHolder = std::shared_ptr<WindowSurfaceHolder>(holder.release());
+        _platformContext->runOnMainThread(
+            [sharedHolder](){
+                sharedHolder->dispose();
+            }
+        );
     }
 
     void surfaceSizeChanged(int width, int height) {

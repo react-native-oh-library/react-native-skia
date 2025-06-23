@@ -24,8 +24,10 @@ public:
     static PluginManager *GetInstance() { return &PluginManager::m_pluginManager; }
 
     void SetNativeXComponent(std::string &id, OH_NativeXComponent *nativeXComponent);
-    PluginRender *GetRender(std::string &id);
-    PluginRender *GetRender();
+
+    std::shared_ptr<PluginRender>GetRender(std::string &id);
+    std::shared_ptr<PluginRender>GetRender();
+    
     void Export(napi_env env, napi_value exports);
     
     OHNativeWindow *m_window;
@@ -34,7 +36,7 @@ private:
     static PluginManager m_pluginManager;
 
     std::unordered_map<std::string, OH_NativeXComponent *> m_nativeXComponentMap;
-    std::unordered_map<std::string, PluginRender *> m_pluginRenderMap;
+    std::unordered_map<std::string,std::shared_ptr<PluginRender>>m_pluginRenderMap;
     std::string id;
 };
 } // namespace RNSkia
