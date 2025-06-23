@@ -26,13 +26,6 @@ PluginManager::~PluginManager() {
         }
     }
     m_nativeXComponentMap.clear();
-
-    for (auto iter = m_pluginRenderMap.begin(); iter != m_pluginRenderMap.end(); ++iter) {
-        if (iter->second != nullptr) {
-            delete iter->second;
-            iter->second = nullptr;
-        }
-    }
     m_pluginRenderMap.clear();
 }
 
@@ -86,23 +79,25 @@ void PluginManager::SetNativeXComponent(std::string &id, OH_NativeXComponent *na
 
     if (m_nativeXComponentMap[id] != nativeXComponent) {
         OH_NativeXComponent *tmp = m_nativeXComponentMap[id];
-        delete tmp;
-        tmp = nullptr;
         m_nativeXComponentMap[id] = nativeXComponent;
     }
 }
 
-PluginRender *PluginManager::GetRender(std::string &id) {
+
+std::shared_ptr<PluginRender>PluginManager::GetRender(std::string &id) {
     if (m_pluginRenderMap.find(id) == m_pluginRenderMap.end()) {
-        PluginRender *instance = PluginRender::GetInstance(id);
+        auto instance = PluginRender::GetInstance(id);
+
         m_pluginRenderMap[id] = instance;
-        return instance;
+        
+        return m_pluginRenderMap[id];
     }
 
     return m_pluginRenderMap[id];
 }
 
-PluginRender *PluginManager::GetRender() {
+
+std::shared_ptr<PluginRender>PluginManager::GetRender(){
     return GetRender(id);
 }
 } // namespace RNSkia
