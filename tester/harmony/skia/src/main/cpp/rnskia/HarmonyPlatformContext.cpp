@@ -430,9 +430,6 @@ std::vector<uint8_t> HarmonyPlatformContext::PerformHTTPRequest(const std::strin
             (questionMarkPos != std::string::npos) ? sourceUri.substr(0, questionMarkPos) : sourceUri;
         std::size_t thirdSlashPos =
             pathWithParams.find('/', pathWithParams.find('/', pathWithParams.find('/') + 1) + 1);
-        if (thirdSlashPos != std::string::npos) {
-            return ReadAssetsData(pathWithParams.substr(thirdSlashPos + 1));
-        }
     }
     std::vector<uint8_t> buffer;
     reinterpret_cast<char *>(buffer.data());

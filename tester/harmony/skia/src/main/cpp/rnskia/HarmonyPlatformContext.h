@@ -33,8 +33,6 @@ struct WriteData {
 
 class HarmonyPlatformContext : public RNSkPlatformContext {
 public:
-    friend class rnoh::ArkTSTurboModule::Context;
-    friend rnoh::ArkTSTurboModule::Context rnoh::ArkTSTurboModule::getContext();
     HarmonyPlatformContext(jsi::Runtime *runtime, std::shared_ptr<react::CallInvoker> callInvoker, float pixelDensity);
 
     ~HarmonyPlatformContext() override;

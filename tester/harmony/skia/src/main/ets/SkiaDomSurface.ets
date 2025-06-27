@@ -24,7 +24,6 @@ import {
 
 } from '@rnoh/react-native-openharmony';
 
-import { TouchDispatcher } from '@rnoh/react-native-openharmony/src/main/ets/RNOH/TouchDispatcher';
 import { I18nManagerTurboModule } from '@rnoh/react-native-openharmony/src/main/ets/RNOHCorePackage/turboModules/I18nManagerTurboModule';
 
 interface SkiaDomViewState {}
@@ -71,7 +70,6 @@ export struct SkiaDomSurface {
   @State private shouldStartSurface: boolean = false;
   private surfaceHandle!: SurfaceHandle;
   private cleanUpCallbacks: (() => void)[] = [];
-  private touchDispatcher!: TouchDispatcher;
   private shouldStopSurface: boolean = false;
   private initialProps!: SurfaceProps;
   private logger!: RNOHLogger
@@ -101,7 +99,6 @@ export struct SkiaDomSurface {
     }
     const tag = this.surfaceHandle.getTag();
     this.onUpdateComponent(this.ctx.rnInstance.descriptorRegistry.getDescriptor(tag))
-    this.touchDispatcher = new TouchDispatcher(tag, this.ctx.rnInstance, this.ctx.logger)
     this.cleanUpCallbacks.push(this.ctx.descriptorRegistry.subscribeToDescriptorChanges(
       tag,
       (newDescriptor) => this.onUpdateComponent(newDescriptor)
@@ -171,7 +168,6 @@ export struct SkiaDomSurface {
   handleTouch(event: TouchEvent) {
     if (this.ctx.rnInstance.getArchitecture() === "ARK_TS") {
       this.logger.clone("handleTouch").debug()
-      this.touchDispatcher.handleTouchEvent(event)
     }
   }
 

@@ -22,12 +22,8 @@ public:
 
     SkiaDomViewProps(const PropsParserContext &context, const SkiaDomViewProps &sourceProps, const RawProps &rawProps)
         : ViewProps(context, sourceProps, rawProps),
-          mode(CoreFeatures::enablePropIteratorSetter
-                   ? sourceProps.mode
-                   : convertRawProp(context, rawProps, "mode", sourceProps.mode, {})),
-          debug(CoreFeatures::enablePropIteratorSetter
-                    ? sourceProps.debug
-                    : convertRawProp(context, rawProps, "debug", sourceProps.debug, {true})) {}
+          mode(sourceProps.mode),
+          debug(sourceProps.debug) {}
 
     std::string mode{};
     bool debug{true};
