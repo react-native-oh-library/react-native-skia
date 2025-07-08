@@ -91,13 +91,13 @@ public:
     std::lock_guard<std::mutex> lock(_mutex);
     auto info = getEnsuredViewInfo(nativeId);
     if (info->view != nullptr) {
-      _platformContext->runOnJavascriptThread(
+      _platformContext->runOnMainThread(
         [info = std::move(info)]() {
           if (info->view != nullptr) {
             info->view->requestRedraw();
           }
         }
-      )
+      );
     }
     return jsi::Value::undefined();
   }
