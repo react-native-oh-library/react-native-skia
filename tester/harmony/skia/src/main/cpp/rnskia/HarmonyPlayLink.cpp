@@ -16,17 +16,26 @@ PlayLink::PlayLink(std::function<void(double)> CallBack, double interval_ms)
 void PlayLink::startDrawLoop() {
     if (!running) {
         running = true;
+        if (thread && thread->joinable()) {
+            thread->join();
+        }
         thread = std::make_unique<std::thread>(&PlayLink::postFrameLoop, this);
     }
+}
+
+PlayLink::~PlayLink() {
+    stopDrawLoop();
 }
 
 void PlayLink::stopDrawLoop() {
     if (running) {
         running = false;
-        if (thread->joinable()) {
-            thread->join();
+       if (thread && thread->joinable()) {
+            thread->detach(); // 等待线程完成
         }
-        thread.reset(); // 线程销毁OK
+        if (thread) {
+            thread.reset();
+        }
     }
 }
 // 在后台线程上创建循环

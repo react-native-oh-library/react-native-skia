@@ -36,7 +36,7 @@ private:
     static PluginManager m_pluginManager;
 
     std::unordered_map<std::string, OH_NativeXComponent *> m_nativeXComponentMap;
-    std::unordered_map<std::string,std::shared_ptr<PluginRender>>m_pluginRenderMap;
+    std::unordered_map<std::string,std::weak_ptr<PluginRender>>m_pluginRenderMap;
     std::string id;
 };
 } // namespace RNSkia
