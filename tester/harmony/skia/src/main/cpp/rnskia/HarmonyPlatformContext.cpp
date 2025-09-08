@@ -218,7 +218,7 @@ void HarmonyPlatformContext::performStreamOperation(const std::string &sourceUri
                 uint8_t *uint8Ptr = buffer.data();
                 // 将 uint8_t* 转换为 char*
                 char *charPtr = reinterpret_cast<char *>(uint8Ptr);
-                charPtr[length] = '\0';
+                //charPtr[length] = '\0';
 
                 // 使用SkData::MakeFromCopy创建SkData
                 sk_sp<SkData> skData = SkData::MakeWithCopy(charPtr, length);

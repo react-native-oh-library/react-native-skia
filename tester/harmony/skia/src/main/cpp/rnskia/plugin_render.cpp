@@ -124,12 +124,10 @@ void OnSurfaceDestroyedCB(OH_NativeXComponent *component, void *window) {
  * 释放相关环境资源方法
  * @param id
  */
-void PluginRender::Release(std::string &id)
-{
-    auto render = PluginRender::GetInstance(id);
-    if (render != nullptr) {
-        m_instance.erase(m_instance.find(id));
-    }
+void PluginRender::Release(std::string& id) {
+  auto it = m_instance.find(id);
+  if (it != m_instance.end()) 
+    m_instance.erase(it);
 }
 
 void DispatchTouchEventCB(OH_NativeXComponent *component, void *window) {

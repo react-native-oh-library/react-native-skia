@@ -18,7 +18,7 @@ namespace RNSkia {
 class PlayLink {
 public:
     PlayLink(std::function<void(double)> CallBack, double interval_ms = 16.667);
-    ~PlayLink() {}
+    ~PlayLink();
 
     void startDrawLoop();
     void stopDrawLoop();

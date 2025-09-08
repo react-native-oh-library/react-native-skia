@@ -84,16 +84,19 @@ void PluginManager::SetNativeXComponent(std::string &id, OH_NativeXComponent *na
 }
 
 
-std::shared_ptr<PluginRender>PluginManager::GetRender(std::string &id) {
-    if (m_pluginRenderMap.find(id) == m_pluginRenderMap.end()) {
-        auto instance = PluginRender::GetInstance(id);
+std::shared_ptr<PluginRender> PluginManager::GetRender( std::string& id) {
 
-        m_pluginRenderMap[id] = instance;
-        
-        return m_pluginRenderMap[id];
+    auto it = m_pluginRenderMap.find(id);
+    if (it != m_pluginRenderMap.end()) {
+      if (auto sp = it->second.lock()) {
+        return sp;
+      }
+      m_pluginRenderMap.erase(it);
     }
 
-    return m_pluginRenderMap[id];
+  auto sp = PluginRender::GetInstance(id);
+  m_pluginRenderMap[id] = sp;
+  return sp;
 }
 
 
