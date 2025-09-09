@@ -1,6 +1,6 @@
-# @react-native-oh-tpl/react-native-skia
+# @react-native-ohos/react-native-skia
 
-This project is based on [react-native-skia v1.3.7](https://github.com/Shopify/react-native-skia/releases/tag/v1.3.7)
+This project is based on [react-native-skia@1.3.7](https://github.com/Shopify/react-native-skia/releases/tag/v1.3.7)
 
 ## Documentation
 
@@ -11,3 +11,4 @@ This project is based on [react-native-skia v1.3.7](https://github.com/Shopify/r
 ## License
 
 This library is licensed under [The MIT License (MIT)](https://github.com/Shopify/react-native-skia/blob/main/LICENSE.md)
+

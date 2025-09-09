@@ -1,3 +1,4 @@
+
 # OSX
 #
 .DS_Store
@@ -7,7 +8,7 @@
 node_modules/
 npm-debug.log
 yarn-error.log
-.eslintcache
+  
 
 # Xcode
 #
@@ -28,26 +29,23 @@ DerivedData
 *.ipa
 *.xcuserstate
 project.xcworkspace
+      
 
 # Android/IntelliJ
+#
 build/
 .idea
 .gradle
 local.properties
 *.iml
-.cxx
-# Legacy Eclipse Settings
-.settings/
-
-# Externals
-libs
-package/cpp/skia/
 
 # BUCK
 buck-out/
 \.buckd/
 *.keystore
 
-# Build
-dist
-package/lib
+# Editor config
+.vscode
+
+# eslintcache
+.eslintcache
