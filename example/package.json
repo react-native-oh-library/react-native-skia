@@ -8,7 +8,7 @@
     "start": "hdc rport tcp:8081 tcp:8081 && react-native start",
     "codegen": "react-native codegen-harmony --rnoh-module-path ./harmony/entry/oh_modules/@rnoh/react-native-openharmony",
     "pack:pkg": "cd ../ && npm pack && cd ./example",
-    "install:pkg": "npm uninstall @react-native-ohos/react-native-skia && npm run pack:pkg && npm i @react-native-ohos/react-native-skia@file:../react-native-ohos-react-native-skia-1.3.7.tgz",
+    "install:pkg": "npm uninstall @react-native-ohos/react-native-skia && npm run pack:pkg && npm i @react-native-ohos/react-native-skia@file:../react-native-ohos-react-native-skia-1.3.8-rc.1.tgz",
     "dev": "npm run codegen && react-native bundle-harmony --dev --minify=false",
     "prod": "npm run codegen && react-native bundle-harmony --dev=false --minify=true",
     "postinstall": "node ./scripts/create-build-profile",
@@ -17,7 +17,7 @@
   "dependencies": {
     "@gorhom/portal": "^1.0.14",
     "@react-native-ohos/react-native-reanimated": "file:../packages/react-native-ohos-react-native-reanimated-3.18.0.tgz",
-    "@react-native-ohos/react-native-skia": "file:../react-native-ohos-react-native-skia-1.3.7.tgz",
+    "@react-native-ohos/react-native-skia": "file:../react-native-ohos-react-native-skia-1.3.8-rc.1.tgz",
     "@rnoh/testerino": "file:../packages/rnoh-testerino-0.0.12.tgz",
     "react": "18.3.1",
     "react-native": "0.77.1",
