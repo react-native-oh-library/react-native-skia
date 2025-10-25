@@ -31,7 +31,7 @@ void PlayLink::stopDrawLoop() {
     if (running) {
         running = false;
        if (thread && thread->joinable()) {
-            thread->detach(); // 等待线程完成
+            thread->join(); // 等待线程完成
         }
         if (thread) {
             thread.reset();

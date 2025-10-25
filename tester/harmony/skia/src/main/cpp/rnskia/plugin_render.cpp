@@ -47,8 +47,6 @@ void OnSurfaceCreatedCB(OH_NativeXComponent *component, void *window)
         DLOG(ERROR) << "Callback OnSurfaceCreatedCB: component or window is null";
         return;
     }
-    
-    
     char idStr[OH_XCOMPONENT_ID_LEN_MAX + 1] = {'\0'};
     uint64_t idSize = OH_XCOMPONENT_ID_LEN_MAX + 1;
     if (OH_NativeXComponent_GetXComponentId(component, idStr, &idSize) != OH_NATIVEXCOMPONENT_RESULT_SUCCESS) {
@@ -97,6 +95,7 @@ void OnSurfaceChangedCB(OH_NativeXComponent *component, void *window) {
 }
 
 void OnSurfaceDestroyedCB(OH_NativeXComponent *component, void *window) {
+    
     DLOG(INFO) << "Callback OnSurfaceDestroyedCB";
     if ((component == nullptr) || (window == nullptr)) {
         DLOG(ERROR) << "Callback OnSurfaceDestroyedCB: component or window is null";
@@ -115,6 +114,10 @@ void OnSurfaceDestroyedCB(OH_NativeXComponent *component, void *window) {
     if (render != nullptr) {
         SkiaManager::getInstance().setReleaseVideo(true);
         render->_harmonyView->surfaceDestroyed();
+        render->m_surfaceAttached = false;
+        render->m_width = 0;
+        render->m_height = 0;
+        render->m_window = nullptr;
         PluginRender::Release(id);
         DLOG(INFO) << "Callback OnSurfaceDestroyedCB finish id: " << id;
     }

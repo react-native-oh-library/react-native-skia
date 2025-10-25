@@ -33,6 +33,7 @@
 #include <sys/mman.h>
 
 namespace RNSkia {
+
 class ThreadContextHarmonyHolder {
 public:
     static thread_local SkiaOpenGLContext ThreadSkiaOpenGLContext;
@@ -53,10 +54,16 @@ public:
     }
 
     void dispose() { 
-        if(_skSurface) { 
-            _skSurface.reset();  
+        
+      if (_skSurface) {
+            SkiaOpenGLHelper::createSkiaDirectContextIfNecessary(
+            &ThreadContextHarmonyHolder::ThreadSkiaOpenGLContext);
+            SkiaOpenGLHelper::makeCurrent(
+    &ThreadContextHarmonyHolder::ThreadSkiaOpenGLContext, _glSurface);
+            _skSurface.reset();       // 这行会触发你 wrap 时的释放回调
             _glSurface = EGL_NO_SURFACE;
-        }
+   }
+        
         if(_window) { 
             OH_NativeWindow_DestroyNativeWindow(_window);
             _window = nullptr;
@@ -65,6 +72,7 @@ public:
 
     // 析构函数，释放本地窗口
     ~WindowSurfaceHolder() {
+
         if (_window) {
             OH_NativeWindow_DestroyNativeWindow(_window);
             _window = nullptr;
@@ -82,7 +90,7 @@ public:
      */
     sk_sp<SkSurface> getSurface() {
         if (_skSurface == nullptr) {
-
+            
             // Setup OpenGL and Skia
             if (!SkiaOpenGLHelper::createSkiaDirectContextIfNecessary(
                     &ThreadContextHarmonyHolder::ThreadSkiaOpenGLContext)) {
@@ -231,7 +239,6 @@ public:
             // 处理无效表面的情况
             return false;
         }
-        // 交换缓冲区
         return SkiaOpenGLHelper::swapBuffers(&ThreadContextHarmonyHolder::ThreadSkiaOpenGLContext, _glSurface);
     }
 
@@ -353,6 +360,8 @@ public:
     }
 };
 
+ 
+
 class RNSkOpenGLCanvasProvider : public RNSkia::RNSkCanvasProvider,
                                  public std::enable_shared_from_this<RNSkOpenGLCanvasProvider> {
 public:
@@ -369,6 +378,9 @@ public:
     float getScaledHeight() override { return _surfaceHolder ? _surfaceHolder->getHeight() : 0; }
 
     bool renderToCanvas(const std::function<void(SkCanvas *)> &cb) {
+        
+        if (disposed_.load(std::memory_order_acquire)) return false;
+        
         if (_surfaceHolder != nullptr && cb != nullptr) {
             // Get the surface
             auto surface = _surfaceHolder->getSurface();
@@ -385,7 +397,6 @@ public:
                 // Draw into canvas using callback
                 cb(surface->getCanvas());
                 
-                // Swap buffers and show on screen
                 return _surfaceHolder->present();
 
             } else {
@@ -396,6 +407,23 @@ public:
 
         return false;
     }
+    
+    inline void runOnPlatformThreadSync(std::function<void()> fn) {
+        
+    std::mutex m;
+    std::condition_variable cv;
+    bool done = false;
+    _platformContext->runOnMainThread([&](){
+      fn(); 
+      { std::lock_guard<std::mutex> lk(m); done = true;
+            }
+                      
+      cv.notify_one();
+    });
+
+    std::unique_lock<std::mutex> lk(m);
+    cv.wait(lk, [&]{ return done; }); // 等入队任务在平台线程执行完
+  }
 
     void surfaceAvailable(OHNativeWindow *surface, int width, int height) {
         // Create renderer!
@@ -408,18 +436,29 @@ public:
     void surfaceDestroyed() {
         // destroy the renderer (a unique pointer so the dtor will be called
         // immediately.)
+        
+        if (disposed_.exchange(true)) return;
         auto holder = std::move(_surfaceHolder);
+        
         if(!holder)
             return;
-        auto sharedHolder = std::shared_ptr<WindowSurfaceHolder>(holder.release());
-        _platformContext->runOnMainThread(
-            [sharedHolder](){
+        
+        auto sharedHolder = std::shared_ptr<WindowSurfaceHolder>(std::move(holder));
+        
+        runOnPlatformThreadSync(
+
+        [sharedHolder](){
                 sharedHolder->dispose();
             }
         );
+        
     }
 
     void surfaceSizeChanged(int width, int height) {
+        
+        if (!_surfaceHolder) {
+            return; // 尚未 attach，无需 resize，等 attach 后会有一次 redraw
+        }
         if (width == 0 && height == 0) {
             // Setting width/height to zero is nothing we need to care about when
             // it comes to invalidating the surface.
@@ -436,6 +475,7 @@ public:
 private:
     std::unique_ptr<WindowSurfaceHolder> _surfaceHolder = nullptr;
     std::shared_ptr<RNSkPlatformContext> _platformContext;
+    std::atomic<bool> disposed_{false};
 };
 
 

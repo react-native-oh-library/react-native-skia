@@ -73,9 +73,17 @@ public:
                     std::shared_ptr<RNSkView> rNSkView = view->getSkiaView();
                     size_t nId = static_cast<size_t>(nativeId);
                     SkiaManager::getInstance().getManager()->registerSkiaView(nId, rNSkView);
-                    view->surfaceAvailable(instance->m_window, 1, 1);
-                    DLOG(INFO) << "napi RegisterView finish XComponentId: " << id
-                               << " threadId: " << std::this_thread::get_id();
+                    DLOG(INFO) << "napi RegisterViewSize finish instance->m_width = "<<instance->m_width<<"instance->m_height="<<instance->m_height;
+                    int w = static_cast<int>(instance->m_width);
+                    int h = static_cast<int>(instance->m_height);
+                     if (instance->m_window && w >= 2 && h >= 2 && !instance->m_surfaceAttached) {
+                        // ① 用真实尺寸创建 surface（避免 1×1 首帧）
+                        view->surfaceAvailable(instance->m_window, w, h);
+                        instance->m_surfaceAttached = true;
+                       // ② 视图注册完成后，补一次尺寸变更=强制请求下一帧
+                    
+                     }
+                     view->surfaceSizeChanged(w, h);
                 });
         }
         return nullptr;
@@ -112,15 +120,6 @@ public:
             instance->_harmonyView->viewDidUnmount();
             DLOG(INFO) << "napi DropInstance finish XComponentId: " << id
                        << " threadId: " << std::this_thread::get_id();
-            //             instance->_context->runOnMainThread(
-            //                 [instance = std::move(instance), nativeId = std::move(nativeId), id = std::move(id)]() {
-            //                     size_t nId = static_cast<size_t>(nativeId);
-            //                     SkiaManager::getInstance().getManager()->setSkiaView(nId, nullptr);
-            //                     SkiaManager::getInstance().getManager()->unregisterSkiaView(nId);
-            //                     instance->_harmonyView->viewDidUnmount();
-            //                     DLOG(INFO) << "napi DropInstance finish XComponentId: " << id
-            //                                << " threadId: " << std::this_thread::get_id();
-            //                 });
         }
         return nullptr;
     }
@@ -210,12 +209,28 @@ public:
         std::string id(xComponentId.get());
         if (m_instance.find(id) != m_instance.end()) {
             auto instance = m_instance[id];
+            
+            const float scale = instance->_context ? instance->_context->getPixelDensity() : 1.0f;
+            const int wpx = static_cast<int>(std::lround(width  * scale));
+           const int hpx = static_cast<int>(std::lround(height * scale));
+            
             instance->_context->runOnMainThread(
-                [instance = std::move(instance), nativeId = std::move(nativeId), id = std::move(id)]() {
+                [instance = std::move(instance), nativeId = std::move(nativeId), id = std::move(id),wpx,hpx]() {
+                
                     auto view = instance->_harmonyView;
                     std::shared_ptr<RNSkView> rNSkView = view->getSkiaView();
                     size_t nId = static_cast<size_t>(nativeId);
                     SkiaManager::getInstance().getManager()->registerSkiaView(nId, rNSkView);
+
+                    instance->m_width  = static_cast<uint64_t>(wpx);
+                    instance->m_height = static_cast<uint64_t>(hpx);
+                    if (!instance->m_surfaceAttached) {
+                      // ① 用真实尺寸创建 surface（避免 1×1 首帧）
+                       view->surfaceAvailable(instance->m_window, instance->m_width, instance->m_height);
+                        instance->m_surfaceAttached = true;
+                     }
+                    // 用这次 JS 传入的 width/height，而不是旧的 instance->m_width/height
+                    DLOG(INFO) << "napi Surface SizeChangedSize finish instance->m_width = "<<instance->m_width<<"instance->m_height="<<instance->m_height;
                     view->surfaceSizeChanged(instance->m_width, instance->m_height);
                     DLOG(INFO) << "napi SurfaceSizeChanged finish XComponentId: " << id
                                << " threadId: " << std::this_thread::get_id();
@@ -229,6 +244,7 @@ public:
     OHNativeWindow *m_window;
     uint64_t m_width;
     uint64_t m_height;
+    bool m_surfaceAttached = false;
 
     std::shared_ptr<RNSkBaseHarmonyView> _harmonyView;
     std::shared_ptr<RNSkia::RNSkPlatformContext> _context;
