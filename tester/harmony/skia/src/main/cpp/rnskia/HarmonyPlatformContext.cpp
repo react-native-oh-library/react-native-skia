@@ -39,11 +39,8 @@ thread_local SkiaOpenGLContext ThreadContextHarmonyHolder::ThreadSkiaOpenGLConte
 HarmonyPlatformContext::HarmonyPlatformContext(jsi::Runtime *runtime, std::shared_ptr<react::CallInvoker> callInvoker,
                                                float pixelDensity)
     : RNSkPlatformContext(runtime, callInvoker, pixelDensity), drawLoopActive(false),
-      playLink(std::make_unique<PlayLink>([this](double deltaTime) {
-        runOnMainThread([this](){
-            notifyDrawLoop(false);
-        });
-      })) {
+      playLink(std::make_unique<PlayLink>(
+          [this](double deltaTime) { runOnMainThread([this]() { notifyDrawLoop(false); }); })) {
     mainThread = std::thread(&HarmonyPlatformContext::runTaskOnMainThread, this);
     _runtime = runtime;
 }
@@ -107,31 +104,34 @@ void HarmonyPlatformContext::runOnMainThread(std::function<void()> task) {
 
 // 从本地缓冲区（native buffer）转为Skia的SkImage对象
 sk_sp<SkImage> HarmonyPlatformContext::makeImageFromNativeBuffer(void *buffer) {
-//     OH_NativeBuffer *nativeBuffer = static_cast<OH_NativeBuffer *>(buffer);
-//
-//     DeleteImageProc deleteImageProc = nullptr;
-//     UpdateImageProc updateImageProc = nullptr;
-//     TexImageCtx deleteImageCtx = nullptr;
-//
-//     OH_NativeBuffer_Config config;
-//     if(nativeBuffer) {
-//         OH_NativeBuffer_GetConfig(nativeBuffer, &config);
-//     }
-//     DLOG(INFO) << "HarmonyPlatformContext config.width: "<<config.width<<" config.height: " <<config.height;
-//     GrBackendFormat format = GrBackendFormats::MakeGL(GR_GL_RGBA8, GR_GL_TEXTURE_EXTERNAL);
-//
-//     auto backendTex = MakeGLBackendTexture(ThreadContextHarmonyHolder::ThreadSkiaOpenGLContext.directContext.get(),
-//                                            nativeBuffer, config.width, config.height,
-//                                            &deleteImageProc, &updateImageProc, 
-//                                             &deleteImageCtx,false, format, false);
-//     if (!backendTex.isValid()) {
-//         DLOG(INFO) << "HarmonyPlatformContext OpenGL Texture 转换失败";
-//         return nullptr;
-//     }
-//
-//     sk_sp<SkImage> image = SkImages::BorrowTextureFrom(ThreadContextHarmonyHolder::ThreadSkiaOpenGLContext.directContext.get(),
-//                                                        backendTex, kTopLeft_GrSurfaceOrigin, kRGB_565_SkColorType,
-//                                                        kOpaque_SkAlphaType, nullptr, deleteImageProc, deleteImageCtx);
+    //     OH_NativeBuffer *nativeBuffer = static_cast<OH_NativeBuffer *>(buffer);
+    //
+    //     DeleteImageProc deleteImageProc = nullptr;
+    //     UpdateImageProc updateImageProc = nullptr;
+    //     TexImageCtx deleteImageCtx = nullptr;
+    //
+    //     OH_NativeBuffer_Config config;
+    //     if(nativeBuffer) {
+    //         OH_NativeBuffer_GetConfig(nativeBuffer, &config);
+    //     }
+    //     DLOG(INFO) << "HarmonyPlatformContext config.width: "<<config.width<<" config.height: " <<config.height;
+    //     GrBackendFormat format = GrBackendFormats::MakeGL(GR_GL_RGBA8, GR_GL_TEXTURE_EXTERNAL);
+    //
+    //     auto backendTex =
+    //     MakeGLBackendTexture(ThreadContextHarmonyHolder::ThreadSkiaOpenGLContext.directContext.get(),
+    //                                            nativeBuffer, config.width, config.height,
+    //                                            &deleteImageProc, &updateImageProc,
+    //                                             &deleteImageCtx,false, format, false);
+    //     if (!backendTex.isValid()) {
+    //         DLOG(INFO) << "HarmonyPlatformContext OpenGL Texture 转换失败";
+    //         return nullptr;
+    //     }
+    //
+    //     sk_sp<SkImage> image =
+    //     SkImages::BorrowTextureFrom(ThreadContextHarmonyHolder::ThreadSkiaOpenGLContext.directContext.get(),
+    //                                                        backendTex, kTopLeft_GrSurfaceOrigin,
+    //                                                        kRGB_565_SkColorType, kOpaque_SkAlphaType, nullptr,
+    //                                                        deleteImageProc, deleteImageCtx);
     return SkiaOpenGLSurfaceFactory::makeImageFromHardwareBuffer(buffer);
 }
 
@@ -182,8 +182,7 @@ void HarmonyPlatformContext::releaseNativeBuffer(uint64_t pointer) {
     }
 }
 
-std::shared_ptr<RNSkVideo> HarmonyPlatformContext::createVideo(const std::string &url)
-{
+std::shared_ptr<RNSkVideo> HarmonyPlatformContext::createVideo(const std::string &url) {
     return std::make_shared<RNSkHarmonyVideo>(url, this, nativeResourceManager);
 }
 
@@ -218,7 +217,7 @@ void HarmonyPlatformContext::performStreamOperation(const std::string &sourceUri
                 uint8_t *uint8Ptr = buffer.data();
                 // 将 uint8_t* 转换为 char*
                 char *charPtr = reinterpret_cast<char *>(uint8Ptr);
-                //charPtr[length] = '\0';
+                // charPtr[length] = '\0';
 
                 // 使用SkData::MakeFromCopy创建SkData
                 sk_sp<SkData> skData = SkData::MakeWithCopy(charPtr, length);
@@ -244,16 +243,16 @@ sk_sp<SkSurface> HarmonyPlatformContext::makeOffscreenSurface(int width, int hei
     // 关联Skia和OpenGL，
     if (!SkiaOpenGLHelper::createSkiaDirectContextIfNecessary(&ThreadContextHarmonyHolder::ThreadSkiaOpenGLContext)) {
         DLOG(ERROR) << "Could not create Skia Surface from native window / surface."
-                   << "Failed creating Skia Direct Context\n";
+                    << "Failed creating Skia Direct Context\n";
         return nullptr;
     }
 
-    auto colorType = kN32_SkColorType; //
+    auto colorType = kN32_SkColorType;                 //
     SkSurfaceProps props(0, kUnknown_SkPixelGeometry); // kUnknown_SkPixelGeometry
     if (!SkiaOpenGLHelper::makeCurrent(&ThreadContextHarmonyHolder::ThreadSkiaOpenGLContext,
                                        ThreadContextHarmonyHolder::ThreadSkiaOpenGLContext.gl1x1Surface)) {
         DLOG(ERROR) << "Could not create EGL Surface from native window / surface. Could "
-                      "not set new surface as current surface.\n";
+                       "not set new surface as current surface.\n";
         return nullptr;
     }
 
@@ -281,15 +280,13 @@ sk_sp<SkSurface> HarmonyPlatformContext::makeOffscreenSurface(int width, int hei
             auto releaseCtx = reinterpret_cast<ReleaseContext *>(addr);
 
             releaseCtx->context->directContext->deleteBackendTexture(releaseCtx->texture);
-        
+
             DLOG(INFO) << "makeOffscreenSurface RELEASE";
         },
         releaseCtx);
 }
 
-sk_sp<SkFontMgr> HarmonyPlatformContext::createFontMgr() {
-    return SkFontMgr_New_OHOS();
-}
+sk_sp<SkFontMgr> HarmonyPlatformContext::createFontMgr() { return SkFontMgr_New_OHOS(); }
 static SkAlphaType alpha_type(int32_t flags) {
     switch (flags) {
     case 1:
@@ -423,6 +420,7 @@ std::vector<uint8_t> HarmonyPlatformContext::ReadAssetsData(const std::string &s
 }
 
 std::vector<uint8_t> HarmonyPlatformContext::PerformHTTPRequest(const std::string &sourceUri) {
+    std::vector<uint8_t> bufferAssets;
     std::string Prefixes = "http://localhost";
     if (sourceUri.find(Prefixes) == 0) {
         std::size_t questionMarkPos = sourceUri.find('?');
@@ -431,7 +429,10 @@ std::vector<uint8_t> HarmonyPlatformContext::PerformHTTPRequest(const std::strin
         std::size_t thirdSlashPos =
             pathWithParams.find('/', pathWithParams.find('/', pathWithParams.find('/') + 1) + 1);
         if (thirdSlashPos != std::string::npos) {
-            return ReadAssetsData(pathWithParams.substr(thirdSlashPos + 1));
+            bufferAssets = ReadAssetsData(pathWithParams.substr(thirdSlashPos + 1));
+        }
+        if (!bufferAssets.empty()) {
+            return bufferAssets;
         }
     }
     std::vector<uint8_t> buffer;
