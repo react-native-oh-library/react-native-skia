@@ -10,19 +10,31 @@
 #include "include/core/SkAlphaType.h"
 #include "include/core/SkBlendMode.h"
 #include "include/core/SkColorFilter.h"
-#include "include/private/SkColorData.h"
-#include "src/base/SkArenaAlloc.h"
-#include "src/core/SkColorSpacePriv.h"
 #include "src/core/SkColorSpaceXformSteps.h"
 #include "src/core/SkEffectPriv.h"
 #include "src/core/SkRasterPipeline.h"
-#include "src/core/SkRasterPipelineOpContexts.h"
 #include "src/core/SkRasterPipelineOpList.h"
 #include "src/shaders/SkLocalMatrixShader.h"
 
-#include <cstring>
+#include <atomic>
 
 class SkWriteBuffer;
+
+namespace {
+
+// The 32-bit shader ID counter is not expected to wrap. In the unlikely event that it does, we
+// assume that the associated shaders will be sufficiently temporally separated such that shaders
+// with the same recycled IDs are no longer in use.
+uint32_t next_unique_id() {
+    static std::atomic<uint32_t> gNextUniqueID{SK_InvalidUniqueID + 1};
+    uint32_t id = SK_InvalidUniqueID;
+    do {
+        id = gNextUniqueID.fetch_add(1, std::memory_order_relaxed);
+    } while (id == SK_InvalidUniqueID);
+    return id;
+}
+
+} // anonymous namespace
 
 namespace SkShaders {
 MatrixRec::MatrixRec(const SkMatrix& ctm) : fCTM(ctm) {}
@@ -32,10 +44,11 @@ std::optional<MatrixRec> MatrixRec::apply(const SkStageRec& rec, const SkMatrix&
     if (!fCTMApplied) {
         total = SkMatrix::Concat(fCTM, total);
     }
-    if (!total.invert(&total)) {
+    if (auto inv = total.invert()) {
+        total = SkMatrix::Concat(postInv, *inv);
+    } else {
         return {};
     }
-    total = SkMatrix::Concat(postInv, total);
     if (!fCTMApplied) {
         rec.fPipeline->append(SkRasterPipelineOp::seed_shader);
     }
@@ -50,11 +63,11 @@ std::optional<MatrixRec> MatrixRec::apply(const SkStageRec& rec, const SkMatrix&
 
 std::tuple<SkMatrix, bool> MatrixRec::applyForFragmentProcessor(const SkMatrix& postInv) const {
     SkASSERT(!fCTMApplied);
-    SkMatrix total;
-    if (!fPendingLocalMatrix.invert(&total)) {
+    if (auto total = fPendingLocalMatrix.invert()) {
+        return {SkMatrix::Concat(postInv, *total), true};
+    } else {
         return {SkMatrix::I(), false};
     }
-    return {SkMatrix::Concat(postInv, total), true};
 }
 
 MatrixRec MatrixRec::applied() const {
@@ -79,19 +92,19 @@ MatrixRec MatrixRec::concat(const SkMatrix& m) const {
 
 ///////////////////////////////////////////////////////////////////////////////////////
 
-SkShaderBase::SkShaderBase() = default;
+SkShaderBase::SkShaderBase() : fUniqueID(next_unique_id()) {}
 
 SkShaderBase::~SkShaderBase() = default;
 
 void SkShaderBase::flatten(SkWriteBuffer& buffer) const { this->INHERITED::flatten(buffer); }
 
-bool SkShaderBase::asLuminanceColor(SkColor* colorPtr) const {
-    SkColor storage;
+bool SkShaderBase::asLuminanceColor(SkColor4f* colorPtr) const {
+    SkColor4f storage;
     if (nullptr == colorPtr) {
         colorPtr = &storage;
     }
     if (this->onAsLuminanceColor(colorPtr)) {
-        *colorPtr = SkColorSetA(*colorPtr, 0xFF);  // we only return opaque
+        colorPtr->fA = 1.0f;  // we only return opaque
         return true;
     }
     return false;
@@ -101,7 +114,7 @@ SkShaderBase::Context* SkShaderBase::makeContext(const ContextRec& rec, SkArenaA
 #ifdef SK_ENABLE_LEGACY_SHADERCONTEXT
     // We always fall back to raster pipeline when perspective is present.
     auto totalMatrix = rec.fMatrixRec.totalMatrix();
-    if (totalMatrix.hasPerspective() || !totalMatrix.invert(nullptr)) {
+    if (totalMatrix.hasPerspective() || !totalMatrix.invert()) {
         return nullptr;
     }
 
@@ -116,10 +129,6 @@ SkShaderBase::Context::Context(const SkShaderBase& shader, const ContextRec& rec
     // We should never use a context with perspective.
     SkASSERT(!rec.fMatrixRec.totalMatrix().hasPerspective());
 
-    // Because the context parameters must be valid at this point, we know that the matrix is
-    // invertible.
-    SkAssertResult(rec.fMatrixRec.totalInverse(&fTotalInverse));
-
     fPaintAlpha = rec.fPaintAlpha;
 }
 
@@ -130,50 +139,13 @@ bool SkShaderBase::ContextRec::isLegacyCompatible(SkColorSpace* shaderColorSpace
     // always premul (or opaque).  (And those "or opaque" caveats won't make any difference here.)
     SkAlphaType shaderAT = kPremul_SkAlphaType, dstAT = kPremul_SkAlphaType;
     return 0 ==
-           SkColorSpaceXformSteps{shaderColorSpace, shaderAT, fDstColorSpace, dstAT}.flags.mask();
+           SkColorSpaceXformSteps{shaderColorSpace, shaderAT, fDstColorSpace, dstAT}.fFlags.mask();
 }
 
 sk_sp<SkShader> SkShaderBase::makeAsALocalMatrixShader(SkMatrix*) const { return nullptr; }
 
 bool SkShaderBase::appendRootStages(const SkStageRec& rec, const SkMatrix& ctm) const {
     return this->appendStages(rec, SkShaders::MatrixRec(ctm));
-}
-
-bool SkShaderBase::appendStages(const SkStageRec& rec, const SkShaders::MatrixRec& mRec) const {
-    // SkShader::Context::shadeSpan() handles the paint opacity internally,
-    // but SkRasterPipelineBlitter applies it as a separate stage.
-    // We skip the internal shadeSpan() step by forcing the alpha to be opaque.
-    ContextRec cr(SK_AlphaOPAQUE, mRec, rec.fDstColorType, sk_srgb_singleton(), rec.fSurfaceProps);
-
-    struct CallbackCtx : SkRasterPipeline_CallbackCtx {
-        sk_sp<const SkShader> shader;
-        Context* ctx;
-    };
-    auto cb = rec.fAlloc->make<CallbackCtx>();
-    cb->shader = sk_ref_sp(this);
-    cb->ctx = as_SB(this)->makeContext(cr, rec.fAlloc);
-    cb->fn = [](SkRasterPipeline_CallbackCtx* self, int active_pixels) {
-        auto c = (CallbackCtx*)self;
-        int x = (int)c->rgba[0], y = (int)c->rgba[1];
-        SkPMColor tmp[SkRasterPipeline_kMaxStride_highp];
-        c->ctx->shadeSpan(x, y, tmp, active_pixels);
-
-        for (int i = 0; i < active_pixels; i++) {
-            auto rgba_4f = SkPMColor4f::FromPMColor(tmp[i]);
-            memcpy(c->rgba + 4 * i, rgba_4f.vec(), 4 * sizeof(float));
-        }
-    };
-
-    if (cb->ctx) {
-        rec.fPipeline->append(SkRasterPipelineOp::seed_shader);
-        rec.fPipeline->append(SkRasterPipelineOp::callback, cb);
-        rec.fAlloc
-                ->make<SkColorSpaceXformSteps>(
-                        sk_srgb_singleton(), kPremul_SkAlphaType, rec.fDstCS, kPremul_SkAlphaType)
-                ->apply(rec.fPipeline);
-        return true;
-    }
-    return false;
 }
 
 sk_sp<SkShader> SkShaderBase::makeWithCTM(const SkMatrix& postM) const {

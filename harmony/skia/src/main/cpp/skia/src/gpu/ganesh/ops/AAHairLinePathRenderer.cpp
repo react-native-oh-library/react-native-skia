@@ -4,34 +4,79 @@
  * Use of this source code is governed by a BSD-style license that can be
  * found in the LICENSE file.
  */
-
 #include "src/gpu/ganesh/ops/AAHairLinePathRenderer.h"
 
+#include "include/core/SkMatrix.h"
+#include "include/core/SkPaint.h"
+#include "include/core/SkPath.h"
 #include "include/core/SkPoint3.h"
+#include "include/core/SkRect.h"
+#include "include/core/SkRefCnt.h"
+#include "include/core/SkScalar.h"
+#include "include/core/SkSpan.h"
+#include "include/core/SkString.h"
+#include "include/core/SkStrokeRec.h"
+#include "include/gpu/ganesh/GrRecordingContext.h"
+#include "include/private/base/SkAlignedStorage.h"
+#include "include/private/base/SkAssert.h"
+#include "include/private/base/SkDebug.h"
 #include "include/private/base/SkFloatingPoint.h"
-#include "include/private/base/SkTemplates.h"
+#include "include/private/base/SkMacros.h"
+#include "include/private/base/SkMath.h"
+#include "include/private/base/SkOnce.h"
+#include "include/private/base/SkPoint_impl.h"
+#include "include/private/base/SkTArray.h"
+#include "include/private/gpu/ganesh/GrTypesPriv.h"
+#include "src/base/SkSafeMath.h"
+#include "src/core/SkColorData.h"
 #include "src/core/SkGeometry.h"
 #include "src/core/SkMatrixPriv.h"
 #include "src/core/SkPointPriv.h"
-#include "src/core/SkRectPriv.h"
-#include "src/core/SkStroke.h"
+#include "src/gpu/ResourceKey.h"
+#include "src/gpu/ganesh/GrAppliedClip.h"
 #include "src/gpu/ganesh/GrAuditTrail.h"
 #include "src/gpu/ganesh/GrBuffer.h"
 #include "src/gpu/ganesh/GrCaps.h"
+#include "src/gpu/ganesh/GrColor.h"
 #include "src/gpu/ganesh/GrDefaultGeoProcFactory.h"
 #include "src/gpu/ganesh/GrDrawOpTest.h"
+#include "src/gpu/ganesh/GrGeometryProcessor.h"
+#include "src/gpu/ganesh/GrMeshDrawTarget.h"
 #include "src/gpu/ganesh/GrOpFlushState.h"
-#include "src/gpu/ganesh/GrProcessor.h"
+#include "src/gpu/ganesh/GrPaint.h"
+#include "src/gpu/ganesh/GrProcessorAnalysis.h"
+#include "src/gpu/ganesh/GrProcessorSet.h"
 #include "src/gpu/ganesh/GrProgramInfo.h"
+#include "src/gpu/ganesh/GrRecordingContextPriv.h"
+#include "src/gpu/ganesh/GrRenderTargetProxy.h"
 #include "src/gpu/ganesh/GrResourceProvider.h"
+#include "src/gpu/ganesh/GrShaderCaps.h"
+#include "src/gpu/ganesh/GrSimpleMesh.h"
 #include "src/gpu/ganesh/GrStyle.h"
+#include "src/gpu/ganesh/GrSurfaceProxyView.h"
+#include "src/gpu/ganesh/GrTestUtils.h"
 #include "src/gpu/ganesh/GrUtil.h"
 #include "src/gpu/ganesh/SurfaceDrawContext.h"
 #include "src/gpu/ganesh/effects/GrBezierEffect.h"
 #include "src/gpu/ganesh/geometry/GrPathUtils.h"
 #include "src/gpu/ganesh/geometry/GrStyledShape.h"
 #include "src/gpu/ganesh/ops/GrMeshDrawOp.h"
+#include "src/gpu/ganesh/ops/GrOp.h"
+#include "src/gpu/ganesh/ops/GrSimpleMeshDrawOpHelper.h"
 #include "src/gpu/ganesh/ops/GrSimpleMeshDrawOpHelperWithStencil.h"
+
+#include <algorithm>
+#include <array>
+#include <cstdint>
+#include <cstring>
+#include <utility>
+
+class GrDstProxyView;
+class GrPipeline;
+class SkArenaAlloc;
+class SkRandom;
+enum class GrXferBarrierFlags;
+struct GrUserStencilSettings;
 
 using namespace skia_private;
 
@@ -266,12 +311,7 @@ int gather_lines_and_quads(const SkPath& path,
                            PtArray* conics,
                            IntArray* quadSubdivCnts,
                            FloatArray* conicWeights) {
-    SkPath::Iter iter(path, false);
-
     int totalQuadCount = 0;
-    SkRect bounds;
-    SkIRect ibounds;
-
     bool persp = m.hasPerspective();
 
     // Whenever a degenerate, zero-length contour is encountered, this code will insert a
@@ -281,19 +321,18 @@ int gather_lines_and_quads(const SkPath& path,
     bool seenZeroLengthVerb = false;
     SkPoint zeroVerbPt;
 
+    auto safeIBounds = [](SkSpan<const SkPoint> pts) {
+        return SkRect::BoundsOrEmpty(pts).makeOutset(1, 1).roundOut();
+    };
+
     // Adds a quad that has already been chopped to the list and checks for quads that are close to
     // lines. Also does a bounding box check. It takes points that are in src space and device
     // space. The src points are only required if the view matrix has perspective.
     auto addChoppedQuad = [&](const SkPoint srcPts[3], const SkPoint devPts[4],
                               bool isContourStart) {
-        SkRect bounds;
-        SkIRect ibounds;
-        bounds.setBounds(devPts, 3);
-        bounds.outset(SK_Scalar1, SK_Scalar1);
-        bounds.roundOut(&ibounds);
         // We only need the src space space pts when not in perspective.
         SkASSERT(srcPts || !persp);
-        if (SkIRect::Intersects(devClipBounds, ibounds)) {
+        if (SkIRect::Intersects(devClipBounds, safeIBounds({devPts, 3}))) {
             int subdiv = num_quad_subdivs(devPts);
             SkASSERT(subdiv >= -1);
             if (-1 == subdiv) {
@@ -319,20 +358,36 @@ int gather_lines_and_quads(const SkPath& path,
         }
     };
 
+    // common code for handline lines
+    auto handleLineVerb = [&](SkSpan<const SkPoint> pathPts) {
+        SkPoint devPts[2];
+        m.mapPoints(devPts, pathPts);
+        if (SkIRect::Intersects(devClipBounds, safeIBounds({devPts, 2}))) {
+            SkPoint* pts = lines->push_back_n(2);
+            pts[0] = devPts[0];
+            pts[1] = devPts[1];
+            if (verbsInContour == 0 && pts[0] == pts[1]) {
+                seenZeroLengthVerb = true;
+                zeroVerbPt = pts[0];
+            }
+        }
+        verbsInContour++;
+    };
+
     // Applies the view matrix to quad src points and calls the above helper.
     auto addSrcChoppedQuad = [&](const SkPoint srcSpaceQuadPts[3], bool isContourStart) {
         SkPoint devPts[3];
-        m.mapPoints(devPts, srcSpaceQuadPts, 3);
+        m.mapPoints(devPts, {srcSpaceQuadPts, 3});
         addChoppedQuad(srcSpaceQuadPts, devPts, isContourStart);
     };
 
     SkPoint pathPts[4] = {{0, 0}, {0, 0}, {0, 0}, {0, 0}};
-    for (;;) {
-        SkPath::Verb verb = iter.next(pathPts);
-        switch (verb) {
-            case SkPath::kConic_Verb:
+    for (auto iter = path.iter(); auto rec = iter.next();) {
+        std::copy(rec->fPoints.begin(), rec->fPoints.end(), pathPts);
+        switch (rec->fVerb) {
+            case SkPathVerb::kConic:
                 if (convertConicsToQuads) {
-                    SkScalar weight = iter.conicWeight();
+                    SkScalar weight = rec->conicWeight();
                     SkAutoConicToQuads converter;
                     const SkPoint* quadPts = converter.computeQuads(pathPts, weight, 0.25f);
                     for (int i = 0; i < converter.countQuads(); ++i) {
@@ -343,15 +398,12 @@ int gather_lines_and_quads(const SkPath& path,
                     // We chop the conics to create tighter clipping to hide error
                     // that appears near max curvature of very thin conics. Thin
                     // hyperbolas with high weight still show error.
-                    int conicCnt = chop_conic(pathPts, dst, iter.conicWeight());
+                    int conicCnt = chop_conic(pathPts, dst, rec->conicWeight());
                     for (int i = 0; i < conicCnt; ++i) {
                         SkPoint devPts[4];
                         SkPoint* chopPnts = dst[i].fPts;
-                        m.mapPoints(devPts, chopPnts, 3);
-                        bounds.setBounds(devPts, 3);
-                        bounds.outset(SK_Scalar1, SK_Scalar1);
-                        bounds.roundOut(&ibounds);
-                        if (SkIRect::Intersects(devClipBounds, ibounds)) {
+                        m.mapPoints({devPts, 3}, {chopPnts, 3});
+                        if (SkIRect::Intersects(devClipBounds, safeIBounds({devPts, 3}))) {
                             if (is_degen_quad_or_conic(devPts)) {
                                 SkPoint* pts = lines->push_back_n(4);
                                 pts[0] = devPts[0];
@@ -377,7 +429,7 @@ int gather_lines_and_quads(const SkPath& path,
                 }
                 verbsInContour++;
                 break;
-            case SkPath::kMove_Verb:
+            case SkPathVerb::kMove:
                 // New contour (and last one was unclosed). If it was just a zero length drawing
                 // operation, and we're supposed to draw caps, then add a tiny line.
                 if (seenZeroLengthVerb && verbsInContour == 1 && capLength > 0) {
@@ -388,25 +440,10 @@ int gather_lines_and_quads(const SkPath& path,
                 verbsInContour = 0;
                 seenZeroLengthVerb = false;
                 break;
-            case SkPath::kLine_Verb: {
-                SkPoint devPts[2];
-                m.mapPoints(devPts, pathPts, 2);
-                bounds.setBounds(devPts, 2);
-                bounds.outset(SK_Scalar1, SK_Scalar1);
-                bounds.roundOut(&ibounds);
-                if (SkIRect::Intersects(devClipBounds, ibounds)) {
-                    SkPoint* pts = lines->push_back_n(2);
-                    pts[0] = devPts[0];
-                    pts[1] = devPts[1];
-                    if (verbsInContour == 0 && pts[0] == pts[1]) {
-                        seenZeroLengthVerb = true;
-                        zeroVerbPt = pts[0];
-                    }
-                }
-                verbsInContour++;
+            case SkPathVerb::kLine:
+                handleLineVerb({pathPts, 2});
                 break;
-            }
-            case SkPath::kQuad_Verb: {
+            case SkPathVerb::kQuad: {
                 SkPoint choppedPts[5];
                 // Chopping the quad helps when the quad is either degenerate or nearly degenerate.
                 // When it is degenerate it allows the approximation with lines to work since the
@@ -420,13 +457,10 @@ int gather_lines_and_quads(const SkPath& path,
                 verbsInContour++;
                 break;
             }
-            case SkPath::kCubic_Verb: {
+            case SkPathVerb::kCubic: {
                 SkPoint devPts[4];
-                m.mapPoints(devPts, pathPts, 4);
-                bounds.setBounds(devPts, 4);
-                bounds.outset(SK_Scalar1, SK_Scalar1);
-                bounds.roundOut(&ibounds);
-                if (SkIRect::Intersects(devClipBounds, ibounds)) {
+                m.mapPoints(devPts, {pathPts, 4});
+                if (SkIRect::Intersects(devClipBounds, safeIBounds({devPts, 4}))) {
                     PREALLOC_PTARRAY(32) q;
                     // We convert cubics to quadratics (for now).
                     // In perspective have to do conversion in src space.
@@ -448,7 +482,10 @@ int gather_lines_and_quads(const SkPath& path,
                 verbsInContour++;
                 break;
             }
-            case SkPath::kClose_Verb:
+            case SkPathVerb::kClose:
+                if (pathPts[0] != pathPts[1]) {
+                    handleLineVerb({pathPts, 2});
+                }
                 // Contour is closed, so we don't need to grow the starting line, unless it's
                 // *just* a zero length subpath. (SVG Spec 11.4, 'stroke').
                 if (capLength > 0) {
@@ -459,12 +496,9 @@ int gather_lines_and_quads(const SkPath& path,
                     } else if (verbsInContour == 0) {
                         // Contour was (moveTo, close). Add a line.
                         SkPoint devPts[2];
-                        m.mapPoints(devPts, pathPts, 1);
+                        m.mapPoints({devPts, 1}, {pathPts, 1});
                         devPts[1] = devPts[0];
-                        bounds.setBounds(devPts, 2);
-                        bounds.outset(SK_Scalar1, SK_Scalar1);
-                        bounds.roundOut(&ibounds);
-                        if (SkIRect::Intersects(devClipBounds, ibounds)) {
+                        if (SkIRect::Intersects(devClipBounds, safeIBounds({devPts, 2}))) {
                             SkPoint* pts = lines->push_back_n(2);
                             pts[0] = SkPoint::Make(devPts[0].fX - capLength, devPts[0].fY);
                             pts[1] = SkPoint::Make(devPts[1].fX + capLength, devPts[1].fY);
@@ -472,17 +506,16 @@ int gather_lines_and_quads(const SkPath& path,
                     }
                 }
                 break;
-            case SkPath::kDone_Verb:
-                if (seenZeroLengthVerb && verbsInContour == 1 && capLength > 0) {
-                    // Path ended with a dangling (moveTo, line|quad|etc). If the final verb is
-                    // degenerate, we need to draw a line.
-                    SkPoint* pts = lines->push_back_n(2);
-                    pts[0] = SkPoint::Make(zeroVerbPt.fX - capLength, zeroVerbPt.fY);
-                    pts[1] = SkPoint::Make(zeroVerbPt.fX + capLength, zeroVerbPt.fY);
-                }
-                return totalQuadCount;
         }
     }
+    if (seenZeroLengthVerb && verbsInContour == 1 && capLength > 0) {
+        // Path ended with a dangling (moveTo, line|quad|etc). If the final verb is
+        // degenerate, we need to draw a line.
+        SkPoint* pts = lines->push_back_n(2);
+        pts[0] = SkPoint::Make(zeroVerbPt.fX - capLength, zeroVerbPt.fY);
+        pts[1] = SkPoint::Make(zeroVerbPt.fX + capLength, zeroVerbPt.fY);
+    }
+    return totalQuadCount;
 }
 
 struct LineVertex {
@@ -514,7 +547,7 @@ void intersect_lines(const SkPoint& ptA, const SkVector& normA,
 
     SkScalar wInv = normA.fX * normB.fY - normA.fY * normB.fX;
     wInv = sk_ieee_float_divide(1.0f, wInv);
-    if (!SkScalarIsFinite(wInv)) {
+    if (!SkIsFinite(wInv)) {
         // lines are parallel, pick the point in between
         *result = (ptA + ptB)*SK_ScalarHalf;
         *result += normA;
@@ -544,9 +577,9 @@ bool bloat_quad(const SkPoint qpts[3],
     SkPoint c = qpts[2];
 
     if (toDevice) {
-        toDevice->mapPoints(&a, 1);
-        toDevice->mapPoints(&b, 1);
-        toDevice->mapPoints(&c, 1);
+        a = toDevice->mapPoint(a);
+        b = toDevice->mapPoint(b);
+        c = toDevice->mapPoint(c);
     }
     // make a new poly where we replace a and c by a 1-pixel wide edges orthog
     // to edges ab and bc:
@@ -643,7 +676,8 @@ void set_conic_coeffs(const SkPoint p[3],
 
     for (int i = 0; i < kQuadNumVertices; ++i) {
         const SkPoint3 pt3 = {verts[i].fPos.x(), verts[i].fPos.y(), 1.f};
-        klm.mapHomogeneousPoints((SkPoint3* ) verts[i].fConic.fKLM, &pt3, 1);
+        klm.mapHomogeneousPoints({(SkPoint3* ) verts[i].fConic.fKLM, 1},
+                                 {&pt3, 1});
     }
 }
 
@@ -932,7 +966,7 @@ private:
         return CombineResult::kMerged;
     }
 
-#if defined(GR_TEST_UTILS)
+#if defined(GPU_TEST_UTILS)
     SkString onDumpInfo() const override {
         return SkStringPrintf("Color: 0x%08x Coverage: 0x%02x, Count: %d\n%s",
                               fColor.toBytes_RGBA(), fCoverage, fPaths.size(),
@@ -963,7 +997,7 @@ private:
     using INHERITED = GrMeshDrawOp;
 };
 
-GR_MAKE_BITFIELD_CLASS_OPS(AAHairlineOp::Program)
+SK_MAKE_BITFIELD_CLASS_OPS(AAHairlineOp::Program)
 
 void AAHairlineOp::makeLineProgramInfo(const GrCaps& caps, SkArenaAlloc* arena,
                                        const GrPipeline* pipeline,
@@ -1087,15 +1121,15 @@ void AAHairlineOp::onCreateProgramInfo(const GrCaps* caps,
                                        GrXferBarrierFlags renderPassXferBarriers,
                                        GrLoadOp colorLoadOp) {
     // Setup the viewmatrix and localmatrix for the GrGeometryProcessor.
-    SkMatrix invert;
-    if (!this->viewMatrix().invert(&invert)) {
+    auto inverse = this->viewMatrix().invert();
+    if (!inverse) {
         return;
     }
 
     // we will transform to identity space if the viewmatrix does not have perspective
     bool hasPerspective = this->viewMatrix().hasPerspective();
     const SkMatrix* geometryProcessorViewM = &SkMatrix::I();
-    const SkMatrix* geometryProcessorLocalM = &invert;
+    const SkMatrix* geometryProcessorLocalM = &inverse.value();
     if (hasPerspective) {
         geometryProcessorViewM = &this->viewMatrix();
         geometryProcessorLocalM = &SkMatrix::I();
@@ -1131,7 +1165,7 @@ void AAHairlineOp::onPrePrepareDraws(GrRecordingContext* context,
     SkArenaAlloc* arena = context->priv().recordTimeAllocator();
     const GrCaps* caps = context->priv().caps();
 
-    // http://skbug.com/12201 -- DDL does not yet support DMSAA.
+    // skbug.com/40043298 -- DDL does not yet support DMSAA.
     bool usesMSAASurface = writeView.asRenderTargetProxy()->numSamples() > 1;
 
     // This is equivalent to a GrOpFlushState::detachAppliedClip
@@ -1150,8 +1184,8 @@ void AAHairlineOp::onPrePrepareDraws(GrRecordingContext* context,
 
 void AAHairlineOp::onPrepareDraws(GrMeshDrawTarget* target) {
     // Setup the viewmatrix and localmatrix for the GrGeometryProcessor.
-    SkMatrix invert;
-    if (!this->viewMatrix().invert(&invert)) {
+    auto inverse = this->viewMatrix().invert();
+    if (!inverse) {
         return;
     }
 
@@ -1160,7 +1194,7 @@ void AAHairlineOp::onPrepareDraws(GrMeshDrawTarget* target) {
     const SkMatrix* toSrc = nullptr;
     if (this->viewMatrix().hasPerspective()) {
         toDevice = &this->viewMatrix();
-        toSrc = &invert;
+        toSrc = &inverse.value();
     }
 
     SkDEBUGCODE(Program predictedPrograms = this->predictPrograms(&target->caps()));
@@ -1176,16 +1210,28 @@ void AAHairlineOp::onPrepareDraws(GrMeshDrawTarget* target) {
 
     int instanceCount = fPaths.size();
     bool convertConicsToQuads = !target->caps().shaderCaps()->fFloatIs32Bits;
-    for (int i = 0; i < instanceCount; i++) {
+    SkSafeMath safeMath;
+    for (int i = 0; i < instanceCount && safeMath.ok(); i++) {
         const PathData& args = fPaths[i];
-        quadCount += gather_lines_and_quads(args.fPath, args.fViewMatrix, args.fDevClipBounds,
-                                            args.fCapLength, convertConicsToQuads, &lines, &quads,
-                                            &conics, &qSubdivs, &cWeights);
+        quadCount = safeMath.addInt(quadCount,
+                                    gather_lines_and_quads(args.fPath,
+                                                           args.fViewMatrix,
+                                                           args.fDevClipBounds,
+                                                           args.fCapLength,
+                                                           convertConicsToQuads,
+                                                           &lines,
+                                                           &quads,
+                                                           &conics,
+                                                           &qSubdivs,
+                                                           &cWeights));
     }
 
     int lineCount = lines.size() / 2;
     int conicCount = conics.size() / 3;
-    int quadAndConicCount = conicCount + quadCount;
+    int quadAndConicCount = safeMath.addInt(conicCount, quadCount);
+    if (!safeMath.ok()) {
+        return;
+    }
 
     static constexpr int kMaxLines = SK_MaxS32 / kLineSegNumVertices;
     static constexpr int kMaxQuadsAndConics = SK_MaxS32 / kQuadNumVertices;
@@ -1293,7 +1339,7 @@ void AAHairlineOp::onExecute(GrOpFlushState* flushState, const SkRect& chainBoun
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////
 
-#if defined(GR_TEST_UTILS)
+#if defined(GPU_TEST_UTILS)
 
 GR_DRAW_OP_TEST_DEFINE(AAHairlineOp) {
     SkMatrix viewMatrix = GrTest::TestMatrix(random);
@@ -1339,8 +1385,7 @@ bool AAHairLinePathRenderer::onDrawPath(const DrawPathArgs& args) {
                               "AAHairlinePathRenderer::onDrawPath");
     SkASSERT(args.fSurfaceDrawContext->numSamples() <= 1);
 
-    SkPath path;
-    args.fShape->asPath(&path);
+    SkPath path = args.fShape->asPath();
     GrOp::Owner op =
             AAHairlineOp::Make(args.fContext, std::move(args.fPaint), *args.fViewMatrix, path,
                                args.fShape->style(), *args.fClipConservativeBounds,

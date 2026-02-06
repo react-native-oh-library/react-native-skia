@@ -40,8 +40,8 @@ int SurfaceThread::message_callback(int /* fd */, int /* events */, void* data) 
 
     switch (message.fType) {
         case kInitialize: {
-            skwindow::DisplayParams params;
-            auto winctx = skwindow::MakeGLForAndroid(message.fNativeWindow, params);
+            auto winctx = skwindow::MakeGLForAndroid(message.fNativeWindow,
+                                                     skwindow::DisplayParamsBuilder().detach());
             if (!winctx) {
                 break;
             }
@@ -81,10 +81,13 @@ void* SurfaceThread::pthread_main(void* arg) {
                surfaceThread->message_callback, surfaceThread);
 
     while (surfaceThread->fRunning) {
-        const int ident = ALooper_pollAll(0, nullptr, nullptr, nullptr);
+        int ident = ALOOPER_POLL_CALLBACK;
+        while (ident == ALOOPER_POLL_CALLBACK) {
+            ident = ALooper_pollOnce(0, nullptr, nullptr, nullptr);
+        }
 
         if (ident >= 0) {
-            SkDebugf("Unhandled ALooper_pollAll ident=%d !", ident);
+            SkDebugf("Unhandled ALooper_pollOnce ident=%d !", ident);
         }
     }
     return nullptr;

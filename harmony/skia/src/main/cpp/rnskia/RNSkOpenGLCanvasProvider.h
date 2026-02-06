@@ -14,10 +14,10 @@
 #pragma clang diagnostic ignored "-Wdocumentation"
 #pragma clang diagnostic pop
 
-#include "include/gpu/ganesh/SkImageGanesh.h"
-#include "include/gpu/ganesh/gl/GrGLBackendSurface.h"
-#include "src/gpu/ganesh/gl/GrGLDefines.h"
-#include "include/gpu/ganesh/SkSurfaceGanesh.h"
+#include "gpu/ganesh/SkImageGanesh.h"
+#include "gpu/ganesh/gl/GrGLBackendSurface.h"
+#include "gpu/ganesh/gl/GrGLDefines.h"
+#include "gpu/ganesh/SkSurfaceGanesh.h"
 #include "RNSkView.h"
 #include "native_buffer/native_buffer.h"
 // #include <js_native_api.h>
@@ -26,7 +26,6 @@
 #include <ace/xcomponent/native_interface_xcomponent.h>
 #include <native_window/external_window.h>
 #include "native_drawing/drawing_surface.h"
-#endif // HARMONY_RNSKOPENGLCANVASPROVIDER_H
 #pragma once
 
 #include <memory>
@@ -37,10 +36,23 @@ class ThreadContextHarmonyHolder {
 public:
     static thread_local SkiaOpenGLContext ThreadSkiaOpenGLContext;
 };
+
+static sk_sp<SkColorSpace> createP3ColorSpace() {
+        SkColorSpacePrimaries p3Primaries = {
+            0.680f, 0.320f,  // R_x, R_y
+            0.265f, 0.690f,  // G_x, G_y
+            0.150f, 0.060f,  // B_x, B_y
+            0.3127f, 0.3290f // W_x, W_y (D65)
+        };
+        skcms_Matrix3x3 toXYZD50;
+        p3Primaries.toXYZD50(&toXYZD50);
+        return SkColorSpace::MakeRGB(SkNamedTransferFn::kSRGB, toXYZD50);
+}
+
 class WindowSurfaceHolder {
 public:
     // 构造函数，初始化宽度和高度
-    WindowSurfaceHolder(OHNativeWindow *window, int width, int height) {
+    WindowSurfaceHolder(OHNativeWindow *window, int width, int height, bool isP3ColorSpace) {
         DLOG(INFO) << "WindowSurfaceHolder creat _window: " << _window;
         _width = width;
         _height = height;
@@ -48,6 +60,7 @@ public:
             _widthPercent = 0.5 * _height / _width;
         }
         _window = window;
+        _isP3ColorSpace = isP3ColorSpace;
         DLOG(INFO) << "WindowSurfaceHolder init _width: " << _width << " _height: " << _height
                    << " _widthPercent: " << _widthPercent;
     }
@@ -143,10 +156,11 @@ public:
 
             auto releaseCtx = new ReleaseContext({_glSurface});
 
+            
             // Create surface object
             _skSurface = SkSurfaces::WrapBackendRenderTarget(
                 ThreadContextHarmonyHolder::ThreadSkiaOpenGLContext.directContext.get(), renderTarget,
-                kBottomLeft_GrSurfaceOrigin, colorType, nullptr, &props,
+                kBottomLeft_GrSurfaceOrigin, colorType, _isP3ColorSpace ? createP3ColorSpace():nullptr, &props,
                 [](void *addr) {
                     auto releaseCtx = reinterpret_cast<ReleaseContext *>(addr);
                     SkiaOpenGLHelper::destroySurface(releaseCtx->glSurface);
@@ -191,13 +205,6 @@ public:
         if (result == -1) {
             // munmap failed
         }
-    }
-
-    // 更新纹理图像到OpenGL纹理
-    void updateTexImage() {
-        // NativeImageAdaptor::GetInstance()->Update();
-        //  OH_NativeImage_UpdateSurfaceImage(_Image);
-        //   对update绑定到对应textureId的纹理做对应的opengl后处理后，将纹理上屏
     }
 
     /**
@@ -245,6 +252,7 @@ private:
     int _width = 0;                         // 宽度
     int _height = 0;                        // 高度
     float _widthPercent = 0.0;
+    bool _isP3ColorSpace = false;
 };
 
 class SkiaOpenGLSurfaceFactory {
@@ -348,8 +356,8 @@ public:
      * @param window 来自 Surface 的窗口
      * @return 一个 Surface 持有者
      */
-    static std::unique_ptr<WindowSurfaceHolder> makeWindowedSurface(OHNativeWindow *window, int width, int height) {
-        return std::make_unique<WindowSurfaceHolder>(window, width, height);
+    static std::unique_ptr<WindowSurfaceHolder> makeWindowedSurface(OHNativeWindow *window, int width, int height, bool isP3ColorSpace) {
+        return std::make_unique<WindowSurfaceHolder>(window, width, height, isP3ColorSpace);
     }
 };
 
@@ -364,28 +372,27 @@ public:
 
     ~RNSkOpenGLCanvasProvider() { DLOG(INFO) << "RNSkOpenGLCanvasProvider 析构"; }
 
-    float getScaledWidth() override { return _surfaceHolder ? _surfaceHolder->getWidth() : 0; }
+   int getWidth() override { return _surfaceHolder ? _surfaceHolder->getWidth() : 0; }
 
-    float getScaledHeight() override { return _surfaceHolder ? _surfaceHolder->getHeight() : 0; }
-
+   int getHeight() override { return _surfaceHolder ? _surfaceHolder->getHeight() : 0; }
+    
     bool renderToCanvas(const std::function<void(SkCanvas *)> &cb) {
         if (_surfaceHolder != nullptr && cb != nullptr) {
             // Get the surface
             auto surface = _surfaceHolder->getSurface();
             if (surface) {
-                DLOG(INFO) << "renderToCanvas 当前线程: " << std::this_thread::get_id();
+                DLOG(INFO) << "renderToCanvas 当前线程: " << std::this_thread::get_id() << " canvas " << surface->getCanvas() << " draw text";
                 
                 // Ensure we are ready to render
                 if (!_surfaceHolder->makeCurrent()) {
                     return false;
                 }
-                    
-                _surfaceHolder->updateTexImage();
-                
                 // Draw into canvas using callback
                 cb(surface->getCanvas());
-                
                 // Swap buffers and show on screen
+                if (_surfaceHolder == nullptr) {
+                    return false;
+                }
                 return _surfaceHolder->present();
 
             } else {
@@ -397,15 +404,16 @@ public:
         return false;
     }
 
-    void surfaceAvailable(OHNativeWindow *surface, int width, int height) {
+    void surfaceAvailable(OHNativeWindow *surface, int width, int height, bool isP3ColorSpace) {
         // Create renderer!
-        _surfaceHolder = SkiaOpenGLSurfaceFactory::makeWindowedSurface(surface, width, height);
+        _surfaceHolder = SkiaOpenGLSurfaceFactory::makeWindowedSurface(surface, width, height, isP3ColorSpace);
 
         // Post redraw request to ensure we paint in the next draw cycle.
         _requestRedraw();
     }
 
     void surfaceDestroyed() {
+        DLOG(INFO) << "surfaceDestroyed 当前线程: " << std::this_thread::get_id();
         // destroy the renderer (a unique pointer so the dtor will be called
         // immediately.)
         auto holder = std::move(_surfaceHolder);
@@ -427,8 +435,7 @@ public:
         }
         // Recreate RenderContext surface based on size change???
         _surfaceHolder->resize(width, height);
-
-        // Redraw after size change
+//        // Redraw after size change
         _requestRedraw();
     }
 
@@ -440,3 +447,5 @@ private:
 
 
 } // namespace RNSkia
+
+#endif // HARMONY_RNSKOPENGLCANVASPROVIDER_H

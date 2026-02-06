@@ -15,7 +15,6 @@ public:
     std::unique_ptr<TurboModuleFactoryDelegate> createTurboModuleFactoryDelegate() override;
     std::vector<facebook::react::ComponentDescriptorProvider> createComponentDescriptorProviders() override;
     ComponentJSIBinderByString createComponentJSIBinderByName() override;
-    ComponentNapiBinderByString createComponentNapiBinderByName() override;
 };
 
 } // namespace rnoh

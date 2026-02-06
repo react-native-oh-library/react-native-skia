@@ -9,13 +9,30 @@
 
 #include "include/core/SkMatrix.h"
 #include "include/core/SkPath.h"
+#include "include/core/SkRect.h"
 #include "include/core/SkRegion.h"
+#include "include/gpu/ganesh/GrRecordingContext.h"
+#include "include/private/base/SkAssert.h"
+#include "include/private/gpu/ganesh/GrTypesPriv.h"
+#include "src/base/SkTLazy.h"
+#include "src/gpu/ganesh/GrClip.h"
+#include "src/gpu/ganesh/GrDrawingManager.h"
+#include "src/gpu/ganesh/GrFixedClip.h"
+#include "src/gpu/ganesh/GrPaint.h"
 #include "src/gpu/ganesh/GrRecordingContextPriv.h"
 #include "src/gpu/ganesh/GrStencilSettings.h"
+#include "src/gpu/ganesh/GrStyle.h"
+#include "src/gpu/ganesh/GrUserStencilSettings.h"
+#include "src/gpu/ganesh/GrWindowRectangles.h"
+#include "src/gpu/ganesh/GrWindowRectsState.h"
+#include "src/gpu/ganesh/PathRenderer.h"
+#include "src/gpu/ganesh/PathRendererChain.h"
 #include "src/gpu/ganesh/SurfaceDrawContext.h"
 #include "src/gpu/ganesh/effects/GrDisableColorXP.h"
 #include "src/gpu/ganesh/geometry/GrShape.h"
 #include "src/gpu/ganesh/geometry/GrStyledShape.h"
+
+#include <utility>
 
 namespace {
 
@@ -479,9 +496,7 @@ bool StencilMaskHelper::drawShape(const GrShape& shape,
         this->drawRect(shape.rect(), matrix, op, aa);
         return true;
     } else {
-        SkPath p;
-        shape.asPath(&p);
-        return this->drawPath(p, matrix, op, aa);
+        return this->drawPath(shape.asPath(), matrix, op, aa);
     }
 }
 

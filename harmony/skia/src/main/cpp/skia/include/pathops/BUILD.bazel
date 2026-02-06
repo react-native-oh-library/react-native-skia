@@ -1,16 +1,22 @@
-load("//bazel:skia_rules.bzl", "exports_files_legacy", "skia_filegroup")
+load("//bazel:skia_rules.bzl", "generate_cpp_files_for_headers", "skia_filegroup")
+
+package(
+    default_applicable_licenses = ["//:license"],
+)
 
 licenses(["notice"])
 
-exports_files_legacy()
+PUBLIC_HEADERS = ["SkPathOps.h"]
 
 skia_filegroup(
     name = "public_hdrs",
-    srcs = [
-        "SkPathOps.h",
-    ],
+    srcs = PUBLIC_HEADERS,
     visibility = [
-        "//include:__pkg__",
         "//src/pathops:__pkg__",
     ],
+)
+
+generate_cpp_files_for_headers(
+    name = "headers_to_compile",
+    headers = PUBLIC_HEADERS,
 )

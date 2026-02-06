@@ -11,6 +11,7 @@
 // #include "securec.h"
 #include <string.h>
 #include "include/private/base/SkOnce.h"
+#include "glog/logging.h"
 
 #ifdef SK_BUILD_FONT_MGR_FOR_OHOS
 #include <parameters.h>
@@ -250,6 +251,8 @@ int HmSymbolConfig_OHOS::CheckConfigFile(const char* fname, Json::Value& root)
 
 int HmSymbolConfig_OHOS::ParseConfigOfHmSymbol(const char* fname, SkString fontDir)
 {
+        DLOG(INFO) << "SkFontMgr_OHOS ParseConfigOfHmSymbol"; 
+
     std::lock_guard<std::mutex> lock(hmSymbolMut_);
     if (GetInit()) {
         return NO_ERROR;

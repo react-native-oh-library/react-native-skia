@@ -11,21 +11,30 @@
 #include "include/core/SkMatrix.h"
 #include "include/core/SkRect.h"
 #include "include/core/SkString.h"
-#include "src/gpu/ganesh/GrGpuResource.h"
-#include "src/gpu/ganesh/GrMemoryPool.h"
-#include "src/gpu/ganesh/GrTracing.h"
-#include "src/gpu/ganesh/GrXferProcessor.h"
+#include "include/core/SkTypes.h"
+#include "include/private/base/SkDebug.h"
+#include "include/private/base/SkNoncopyable.h"
+#include "include/private/base/SkTo.h"
+#include "include/private/gpu/ganesh/GrTypesPriv.h"
+#include "src/core/SkColorData.h"
+#include "src/gpu/ganesh/GrSurfaceProxy.h"
+
 #include <atomic>
+#include <cstddef>
+#include <cstdint>
+#include <memory>
 #include <new>
+#include <utility>
 
 class GrAppliedClip;
 class GrCaps;
 class GrDstProxyView;
 class GrOpFlushState;
-class GrOpsRenderPass;
 class GrPaint;
 class GrRecordingContext;
 class GrSurfaceProxyView;
+class SkArenaAlloc;
+enum class GrXferBarrierFlags;
 
 /**
  * GrOp is the base class for all Ganesh deferred GPU operations. To facilitate reordering and to
@@ -63,7 +72,7 @@ class GrSurfaceProxyView;
 // A helper macro to generate a class static id
 #define DEFINE_OP_CLASS_ID \
     static uint32_t ClassID() { \
-        static uint32_t kClassID = GenOpClassID(); \
+        static const uint32_t kClassID = GenOpClassID(); \
         return kClassID; \
     }
 
@@ -172,29 +181,19 @@ public:
      */
     void prePrepare(GrRecordingContext* context, const GrSurfaceProxyView& dstView,
                     GrAppliedClip* clip, const GrDstProxyView& dstProxyView,
-                    GrXferBarrierFlags renderPassXferBarriers, GrLoadOp colorLoadOp) {
-        TRACE_EVENT0_ALWAYS("skia.gpu", TRACE_STR_STATIC(name()));
-        this->onPrePrepare(context, dstView, clip, dstProxyView, renderPassXferBarriers,
-                           colorLoadOp);
-    }
+                    GrXferBarrierFlags renderPassXferBarriers, GrLoadOp colorLoadOp);
 
     /**
      * Called prior to executing. The op should perform any resource creation or data transfers
      * necessary before execute() is called.
      */
-    void prepare(GrOpFlushState* state) {
-        TRACE_EVENT0_ALWAYS("skia.gpu", TRACE_STR_STATIC(name()));
-        this->onPrepare(state);
-    }
+    void prepare(GrOpFlushState* state);
 
     /** Issues the op's commands to GrGpu. */
-    void execute(GrOpFlushState* state, const SkRect& chainBounds) {
-        TRACE_EVENT0_ALWAYS("skia.gpu", TRACE_STR_STATIC(name()));
-        this->onExecute(state, chainBounds);
-    }
+    void execute(GrOpFlushState* state, const SkRect& chainBounds);
 
     /** Used for spewing information about ops when debugging. */
-#if defined(GR_TEST_UTILS)
+#if defined(GPU_TEST_UTILS)
     virtual SkString dumpInfo() const final {
         return SkStringPrintf("%s\nOpBounds: [L: %.2f, T: %.2f, R: %.2f, B: %.2f]",
                               this->onDumpInfo().c_str(), fBounds.fLeft, fBounds.fTop,
@@ -249,7 +248,7 @@ public:
      * chain or null if this was already a tail.
      */
     GrOp::Owner cutChain();
-    SkDEBUGCODE(void validateChain(GrOp* expectedTail = nullptr) const);
+    SkDEBUGCODE(void validateChain(GrOp* expectedTail = nullptr) const;)
 
 #ifdef SK_DEBUG
     virtual void validate() const {}
@@ -317,7 +316,7 @@ private:
     // If this op is chained then chainBounds is the union of the bounds of all ops in the chain.
     // Otherwise, this op's bounds.
     virtual void onExecute(GrOpFlushState*, const SkRect& chainBounds) = 0;
-#if defined(GR_TEST_UTILS)
+#if defined(GPU_TEST_UTILS)
     virtual SkString onDumpInfo() const { return SkString(); }
 #endif
 
@@ -336,9 +335,7 @@ private:
         fBoundsFlags |= (IsHairline ::kYes == zeroArea) ? kZeroArea_BoundsFlag : 0;
     }
 
-    enum {
-        kIllegalOpID = 0,
-    };
+    static constexpr uint16_t kIllegalOpID = 0;
 
     enum BoundsFlags {
         kAABloat_BoundsFlag                     = 0x1,

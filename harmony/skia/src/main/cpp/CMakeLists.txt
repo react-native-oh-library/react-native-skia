@@ -8,73 +8,96 @@ add_definitions(-DOHOS_PLATFORM)
 add_subdirectory("./json" ./jsoncpp)
 
 set (PACKAGE_NAME "rnoh_skia")
-set (SKIA_LIB "skia")
-set (SKIA_SVG_LIB "svg")
-set (SKIA_SKSHAPER_LIB "skshaper")
-set (SKIA_SKPARAGRAPH_LIB "skparagraph")
-set (SKIA_SKUNICODE_LIB "skunicode")
+#set (SKIA_LIB "skia")
+#set (SKIA_SVG_LIB "svg")
+#set (SKIA_SKSHAPER_LIB "skshaper")
+#set (SKIA_SKPARAGRAPH_LIB "skparagraph")
+#set (SKIA_SKUNICODE_LIB "skunicode")
 
 file(GLOB rnoh_skia_SRC CONFIGURE_DEPENDS
     *.cpp
     ./napi/*.cpp
-
-    ./skia/*.cpp
-    ./skia/third_party/*.cpp
+    ./api/*.cpp
+    ./jsi/*.cpp
+    ./api/third_party/*.cpp
     ./skia_ohos/*.cpp
     ./rnskia/*.cpp
+    ./rnskia/origin/*.cpp
+    ./skia/src/core/SkPath_editing.cpp
+    ./skia/src/core/SkPath_pathref.cpp
     ./skia/src/ports/SkFontHost_FreeType.cpp
     ./skia/src/core/SkScalerContext.cpp
     ./skia/src/core/SkTypeface.cpp
     ./skia/src/ports/SkFontHost_FreeType_common.cpp
+    ./skia/src/core/SkDraw.cpp
     )
 add_library(${PACKAGE_NAME} SHARED ${rnoh_skia_SRC})
 
 target_include_directories(${PACKAGE_NAME} PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 target_include_directories(${PACKAGE_NAME} PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/skia)
-target_include_directories(${PACKAGE_NAME} PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/skia/include/)
-target_include_directories(${PACKAGE_NAME} PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/skia/src/)
+target_include_directories(${PACKAGE_NAME} PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/skia/src)
+target_include_directories(${PACKAGE_NAME} PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/skia/include)
 target_include_directories(${PACKAGE_NAME} PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/rnskia)
+target_include_directories(${PACKAGE_NAME} PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/napi)
 target_include_directories(${PACKAGE_NAME} PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
 target_include_directories(${PACKAGE_NAME} PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/freetype)
-target_include_directories(${PACKAGE_NAME} PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/src)
-target_include_directories(${PACKAGE_NAME} PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/skia_ohos/)
+target_include_directories(${PACKAGE_NAME} PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/rnskia/origin)
+target_include_directories(${PACKAGE_NAME} PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/skia_ohos)
+target_include_directories(${PACKAGE_NAME} PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/jsi)
+target_include_directories(${PACKAGE_NAME} PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/api)
+target_include_directories(${PACKAGE_NAME} PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/utils)
 target_include_directories(${PACKAGE_NAME} PUBLIC ${HMOS_SDK_NATIVE}/sysroot/usr/include)
 
 target_link_directories(${PACKAGE_NAME} PUBLIC ${HMOS_SDK_NATIVE}/sysroot/usr/lib/aarch64-linux-ohos)
-target_link_libraries(${PACKAGE_NAME} PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/lib/libthird_party__harfbuzz.a)
-target_link_libraries(${PACKAGE_NAME} PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/lib/libthird_party__expat.a)
-target_link_libraries(${PACKAGE_NAME} PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/lib/libthird_party__freetype2.a)
-target_link_libraries(${PACKAGE_NAME} PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/lib/libthird_party__icu.a)
-target_link_libraries(${PACKAGE_NAME} PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/lib/libthird_party__libjpeg-turbo_libjpeg.a)
-target_link_libraries(${PACKAGE_NAME} PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/lib/libthird_party__libpng.a)
-target_link_libraries(${PACKAGE_NAME} PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/lib/libthird_party__libwebp.a)
-target_link_libraries(${PACKAGE_NAME} PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/lib/libthird_party__libwebp_libwebp_sse41.a)
-target_link_libraries(${PACKAGE_NAME} PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/lib/libthird_party__wuffs.a)
-target_link_libraries(${PACKAGE_NAME} PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/lib/libthird_party__zlib.a)
-target_link_libraries(${PACKAGE_NAME} PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/lib/libthird_party__zlib_compression_utils_portable.a)
+target_link_libraries(${PACKAGE_NAME} PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/skia/lib/libthird_party__harfbuzz.a)
+target_link_libraries(${PACKAGE_NAME} PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/skia/lib/libthird_party__expat.a)
+target_link_libraries(${PACKAGE_NAME} PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/skia/lib/libthird_party__freetype2.a)
+target_link_libraries(${PACKAGE_NAME} PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/skia/lib/libthird_party__icu.a)
+target_link_libraries(${PACKAGE_NAME} PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/skia/lib/libthird_party__libjpeg-turbo_libjpeg.a)
+target_link_libraries(${PACKAGE_NAME} PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/skia/lib/libthird_party__libjpeg-turbo_libjpeg12.a)
+target_link_libraries(${PACKAGE_NAME} PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/skia/lib/libthird_party__libjpeg-turbo_libjpeg16.a)
+target_link_libraries(${PACKAGE_NAME} PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/skia/lib/libthird_party__libpng.a)
+target_link_libraries(${PACKAGE_NAME} PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/skia/lib/libthird_party__libwebp.a)
+target_link_libraries(${PACKAGE_NAME} PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/skia/lib/libthird_party__libwebp_libwebp_sse41.a)
+target_link_libraries(${PACKAGE_NAME} PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/skia/lib/libthird_party__wuffs.a)
+target_link_libraries(${PACKAGE_NAME} PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/skia/lib/libthird_party__zlib.a)
+target_link_libraries(${PACKAGE_NAME} PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/skia/lib/libthird_party__zlib_compression_utils_portable.a)
 
-target_link_libraries(${PACKAGE_NAME} PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/lib/libmodules__skcms.a)
-target_link_libraries(${PACKAGE_NAME} PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/lib/libmodules__bentleyottmann.a)
-target_link_libraries(${PACKAGE_NAME} PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/lib/libmodules__skottie.a)
-target_link_libraries(${PACKAGE_NAME} PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/lib/libmodules__skresources.a)
-target_link_libraries(${PACKAGE_NAME} PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/lib/libmodules__sksg.a)
-#target_link_libraries(${PACKAGE_NAME} PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/lib/libpathkit.a)
+target_link_libraries(${PACKAGE_NAME} PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/skia/lib/libmodules__skcms.a)
+target_link_libraries(${PACKAGE_NAME} PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/skia/lib/libmodules__bentleyottmann.a)
+target_link_libraries(${PACKAGE_NAME} PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/skia/lib/libmodules__skottie.a)
+target_link_libraries(${PACKAGE_NAME} PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/skia/lib/libmodules__skresources.a)
+target_link_libraries(${PACKAGE_NAME} PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/skia/lib/libmodules__sksg.a)
+target_link_libraries(${PACKAGE_NAME} PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/skia/lib/libmodules__skunicode_skunicode_core.a)
+target_link_libraries(${PACKAGE_NAME} PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/skia/lib/libmodules__skunicode_skunicode_icu.a)
+target_link_libraries(${PACKAGE_NAME} PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/skia/lib/libmodules__jsonreader.a)
+target_link_libraries(${PACKAGE_NAME} PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/skia/lib/libskia.a)
+target_link_libraries(${PACKAGE_NAME} PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/skia/lib/libmodules__svg.a)
+target_link_libraries(${PACKAGE_NAME} PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/skia/lib/libmodules__skshaper.a)
+target_link_libraries(${PACKAGE_NAME} PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/skia/lib/libmodules__skparagraph.a)
+target_link_libraries(${PACKAGE_NAME} PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/skia/lib/libpathkit.a)
+#target_link_libraries(${PACKAGE_NAME} PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/skia/lib/libthird_party__externals__spirv-tools_spvtools.a)
+#target_link_libraries(${PACKAGE_NAME} PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/skia/lib/libthird_party__externals__spirv-tools_spvtools_link.a)
+#target_link_libraries(${PACKAGE_NAME} PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/skia/lib/libthird_party__externals__spirv-tools_spvtools_opt.a)
+#target_link_libraries(${PACKAGE_NAME} PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/skia/lib/libthird_party__externals__spirv-tools_spvtools_reduce.a)
+#target_link_libraries(${PACKAGE_NAME} PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/skia/lib/libthird_party__externals__spirv-tools_spvtools_val.a)
+#target_link_libraries(${PACKAGE_NAME} PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/skia/lib/libpathkit.a)
 
-set (SKIA_LIBS_PATH "${CMAKE_CURRENT_SOURCE_DIR}/lib")
-add_library(skia STATIC IMPORTED)
-set_property(TARGET skia PROPERTY IMPORTED_LOCATION "${SKIA_LIBS_PATH}/libskia.a")
+#set (SKIA_LIBS_PATH "${CMAKE_CURRENT_SOURCE_DIR}/skia/lib")
+#add_library(skia STATIC IMPORTED)
+#set_property(TARGET skia PROPERTY IMPORTED_LOCATION "${SKIA_LIBS_PATH}/libskia.a")
+#
+#add_library(svg STATIC IMPORTED)
+#set_property(TARGET svg PROPERTY IMPORTED_LOCATION "${SKIA_LIBS_PATH}/libmodules__svg.a")
+#
+#add_library(skshaper STATIC IMPORTED)
+#set_property(TARGET skshaper PROPERTY IMPORTED_LOCATION "${SKIA_LIBS_PATH}/libmodules__skshaper.a")
+#
+#add_library(skparagraph STATIC IMPORTED)
+#set_property(TARGET skparagraph PROPERTY IMPORTED_LOCATION "${SKIA_LIBS_PATH}/libmodules__skparagraph.a")
 
-add_library(svg STATIC IMPORTED)
-set_property(TARGET svg PROPERTY IMPORTED_LOCATION "${SKIA_LIBS_PATH}/libmodules__svg.a")
-
-add_library(skshaper STATIC IMPORTED)
-set_property(TARGET skshaper PROPERTY IMPORTED_LOCATION "${SKIA_LIBS_PATH}/libmodules__skshaper.a")
-
-add_library(skparagraph STATIC IMPORTED)
-set_property(TARGET skparagraph PROPERTY IMPORTED_LOCATION "${SKIA_LIBS_PATH}/libmodules__skparagraph.a")
-
-add_library(skunicode STATIC IMPORTED)
-set_property(TARGET skunicode PROPERTY IMPORTED_LOCATION "${SKIA_LIBS_PATH}/libmodules__skunicode.a")
+#add_library(skunicode STATIC IMPORTED)
+#set_property(TARGET skunicode PROPERTY IMPORTED_LOCATION "${SKIA_LIBS_PATH}/libmodules__skunicode.a")
 
 find_library(
     # Sets the name of the path variable.
@@ -127,11 +150,11 @@ find_library(
 target_link_libraries(
     ${PACKAGE_NAME}
     PUBLIC
-    ${SKIA_SVG_LIB}
-    ${SKIA_SKSHAPER_LIB}
-    ${SKIA_SKPARAGRAPH_LIB}
-    ${SKIA_SKUNICODE_LIB}
-    ${SKIA_LIB}
+#    ${SKIA_SVG_LIB}
+#    ${SKIA_SKSHAPER_LIB}
+#    ${SKIA_SKPARAGRAPH_LIB}
+#    ${SKIA_SKUNICODE_LIB}
+#    ${SKIA_LIB}
     jsoncpp
 
     libnative_image.so

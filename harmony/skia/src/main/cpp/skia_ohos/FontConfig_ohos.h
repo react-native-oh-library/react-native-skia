@@ -11,12 +11,12 @@
 #include <vector>
 #include <mutex>
 #include "ports/SkTypeface_FreeType.h"
-#include "src/core/SkFontDescriptor.h"
+#include "core/SkFontDescriptor.h"
 #include "include/core/SkFontStyle.h"
 #include "include/core/SkStream.h"
 #include "include/core/SkString.h"
 #include "include/core/SkTypes.h"
-#include "src/core/SkTHash.h"
+#include "core/SkTHash.h"
 
 #include "FontInfo_ohos.h"
 #include "SkTypeface_ohos.h"

@@ -8,10 +8,11 @@
 #ifndef SkArenaAlloc_DEFINED
 #define SkArenaAlloc_DEFINED
 
+#include "include/private/base/SkASAN.h"
 #include "include/private/base/SkAssert.h"
+#include "include/private/base/SkSpan_impl.h"
 #include "include/private/base/SkTFitsIn.h"
 #include "include/private/base/SkTo.h"
-#include "src/base/SkASAN.h"
 
 #include <algorithm>
 #include <array>
@@ -20,7 +21,7 @@
 #include <cstring>
 #include <limits>
 #include <new>
-#include <type_traits>
+#include <type_traits>  // IWYU pragma: keep
 #include <utility>
 
 // We found allocating strictly doubling amounts of memory from the heap left too
@@ -196,6 +197,19 @@ public:
         return array;
     }
 
+    template <typename T>
+    T* makeArrayCopy(SkSpan<const T> toCopy) {
+        T* array = this->allocUninitializedArray<T>(toCopy.size());
+        if constexpr (std::is_trivially_copyable<T>::value) {
+            memcpy(array, toCopy.data(), toCopy.size_bytes());
+        } else {
+            for (size_t i = 0; i < toCopy.size(); ++i) {
+                new (&array[i]) T(toCopy[i]);
+            }
+        }
+        return array;
+    }
+
     // Only use makeBytesAlignedTo if none of the typed variants are practical to use.
     void* makeBytesAlignedTo(size_t size, size_t align) {
         AssertRelease(SkTFitsIn<uint32_t>(size));
@@ -254,6 +268,7 @@ private:
 
     template <typename T>
     T* allocUninitializedArray(size_t countZ) {
+        static_assert(!std::has_virtual_destructor<T>::value, "Can't make an array of objects which have a vtable");
         AssertRelease(SkTFitsIn<uint32_t>(countZ));
         uint32_t count = SkToU32(countZ);
 

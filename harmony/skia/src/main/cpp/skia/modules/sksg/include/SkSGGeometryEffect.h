@@ -8,14 +8,26 @@
 #ifndef SkSGGeometryEffect_DEFINED
 #define SkSGGeometryEffect_DEFINED
 
-#include "modules/sksg/include/SkSGGeometryNode.h"
-
 #include "include/core/SkPaint.h"
 #include "include/core/SkPath.h"
+#include "include/core/SkPathTypes.h"
+#include "include/core/SkRect.h"
+#include "include/core/SkRefCnt.h"
+#include "include/core/SkScalar.h"
 #include "include/effects/SkTrimPathEffect.h"
+#include "modules/sksg/include/SkSGGeometryNode.h"
+#include "modules/sksg/include/SkSGNode.h"
 #include "modules/sksg/include/SkSGTransform.h"
 
+#include <utility>
+#include <vector>
+
+class SkCanvas;
+class SkMatrix;
+struct SkPoint;
+
 namespace sksg {
+class InvalidationController;
 
 /**
  * Base class for geometry effects.
@@ -32,7 +44,7 @@ protected:
     SkRect onRevalidate(InvalidationController*, const SkMatrix&) final;
     SkPath onAsPath() const final;
 
-    virtual SkPath onRevalidateEffect(const sk_sp<GeometryNode>&) = 0;
+    virtual SkPath onRevalidateEffect(const sk_sp<GeometryNode>&, const SkMatrix&) = 0;
 
 private:
     const sk_sp<GeometryNode> fChild;
@@ -57,7 +69,7 @@ public:
 private:
     explicit TrimEffect(sk_sp<GeometryNode> child) : INHERITED(std::move(child)) {}
 
-    SkPath onRevalidateEffect(const sk_sp<GeometryNode>&) override;
+    SkPath onRevalidateEffect(const sk_sp<GeometryNode>&, const SkMatrix&) override;
 
     SkScalar               fStart = 0,
                            fStop  = 1;
@@ -85,9 +97,34 @@ public:
 private:
     GeometryTransform(sk_sp<GeometryNode>, sk_sp<Transform>);
 
-    SkPath onRevalidateEffect(const sk_sp<GeometryNode>&) override;
+    SkPath onRevalidateEffect(const sk_sp<GeometryNode>&, const SkMatrix&) override;
 
     const sk_sp<Transform> fTransform;
+
+    using INHERITED = GeometryEffect;
+};
+
+/**
+ * Overrides the child geometry fill type.
+ */
+class FillTypeOverride final : public GeometryEffect {
+public:
+    static sk_sp<FillTypeOverride> Make(sk_sp<GeometryNode> child, SkPathFillType ft) {
+        return child ? sk_sp<FillTypeOverride>(new FillTypeOverride(std::move(child), ft))
+                     : nullptr;
+    }
+
+    SG_ATTRIBUTE(FillType, SkPathFillType, fFillType)
+
+private:
+    FillTypeOverride(sk_sp<GeometryNode> child, SkPathFillType ft)
+        : INHERITED(std::move(child))
+        , fFillType(ft)
+    {}
+
+    SkPath onRevalidateEffect(const sk_sp<GeometryNode>&, const SkMatrix&) override;
+
+    SkPathFillType fFillType = SkPathFillType::kDefault;
 
     using INHERITED = GeometryEffect;
 };
@@ -111,7 +148,7 @@ public:
 private:
     explicit DashEffect(sk_sp<GeometryNode> child) : INHERITED(std::move(child)) {}
 
-    SkPath onRevalidateEffect(const sk_sp<GeometryNode>&) override;
+    SkPath onRevalidateEffect(const sk_sp<GeometryNode>&, const SkMatrix&) override;
 
     std::vector<float> fIntervals;
     float              fPhase = 0;
@@ -133,7 +170,7 @@ public:
 private:
     explicit RoundEffect(sk_sp<GeometryNode> child) : INHERITED(std::move(child)) {}
 
-    SkPath onRevalidateEffect(const sk_sp<GeometryNode>&) override;
+    SkPath onRevalidateEffect(const sk_sp<GeometryNode>&, const SkMatrix&) override;
 
     SkScalar fRadius = 0;
 
@@ -156,7 +193,7 @@ public:
 private:
     explicit OffsetEffect(sk_sp<GeometryNode> child) : INHERITED(std::move(child)) {}
 
-    SkPath onRevalidateEffect(const sk_sp<GeometryNode>&) override;
+    SkPath onRevalidateEffect(const sk_sp<GeometryNode>&, const SkMatrix&) override;
 
     SkScalar fOffset     = 0,
              fMiterLimit = 4;

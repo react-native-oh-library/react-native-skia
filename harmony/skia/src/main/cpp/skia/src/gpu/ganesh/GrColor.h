@@ -5,17 +5,14 @@
  * Use of this source code is governed by a BSD-style license that can be
  * found in the LICENSE file.
  */
-
-
-
 #ifndef GrColor_DEFINED
 #define GrColor_DEFINED
 
 #include "include/core/SkColor.h"
-#include "include/core/SkColorPriv.h"
-#include "include/gpu/GrTypes.h"
-#include "include/private/SkColorData.h"
+#include "include/gpu/ganesh/GrTypes.h"
 #include "src/base/SkHalf.h"
+#include "src/core/SkColorData.h"
+#include "src/core/SkColorPriv.h"
 #include "src/gpu/BufferWriter.h"
 
 /**

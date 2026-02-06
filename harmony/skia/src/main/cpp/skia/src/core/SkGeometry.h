@@ -8,9 +8,12 @@
 #ifndef SkGeometry_DEFINED
 #define SkGeometry_DEFINED
 
+#include "include/core/SkPathTypes.h"
 #include "include/core/SkPoint.h"
 #include "include/core/SkScalar.h"
+#include "include/core/SkSpan.h"
 #include "include/core/SkTypes.h"
+#include "include/private/base/SkFloatingPoint.h"
 #include "src/base/SkVx.h"
 
 #include <cstring>
@@ -317,11 +320,6 @@ SkCubicType SkClassifyCubic(const SkPoint p[4], double t[2] = nullptr, double s[
 
 ///////////////////////////////////////////////////////////////////////////////
 
-enum SkRotationDirection {
-    kCW_SkRotationDirection,
-    kCCW_SkRotationDirection
-};
-
 struct SkConic {
     SkConic() {}
     SkConic(const SkPoint& p0, const SkPoint& p1, const SkPoint& p2, SkScalar w) {
@@ -348,12 +346,12 @@ struct SkConic {
     }
 
     void setW(SkScalar w) {
-        if (SkScalarIsFinite(w)) {
+        if (SkIsFinite(w)) {
             SkASSERT(w > 0);
         }
 
         // Guard against bad weights by forcing them to 1.
-        fW = w > 0 && SkScalarIsFinite(w) ? w : 1;
+        fW = w > 0 && SkIsFinite(w) ? w : 1;
     }
 
     /**
@@ -409,7 +407,7 @@ struct SkConic {
     enum {
         kMaxConicsForArc = 5
     };
-    static int BuildUnitArc(const SkVector& start, const SkVector& stop, SkRotationDirection,
+    static int BuildUnitArc(const SkVector& start, const SkVector& stop, SkPathDirection,
                             const SkMatrix*, SkConic conics[kMaxConicsForArc]);
 };
 
@@ -437,7 +435,7 @@ struct SkQuadCoeff {
         fA = P2 - times_2(P1) + fC;
     }
 
-    skvx::float2 eval(const skvx::float2& tt) {
+    skvx::float2 eval(const skvx::float2& tt) const {
         return (fA * tt + fB) * tt + fC;
     }
 
@@ -463,7 +461,7 @@ struct SkConicCoeff {
         fDenom.fA = 0 - fDenom.fB;
     }
 
-    skvx::float2 eval(SkScalar t) {
+    skvx::float2 eval(SkScalar t) const {
         skvx::float2 tt(t);
         skvx::float2 numer = fNumer.eval(tt);
         skvx::float2 denom = fDenom.eval(tt);
@@ -487,7 +485,7 @@ struct SkCubicCoeff {
         fD = P0;
     }
 
-    skvx::float2 eval(const skvx::float2& t) {
+    skvx::float2 eval(const skvx::float2& t) const {
         return ((fA * t + fB) * t + fC) * t + fD;
     }
 
@@ -528,11 +526,14 @@ public:
         return pts;
     }
 
-    const SkPoint* computeQuads(const SkPoint pts[3], SkScalar weight,
-                                SkScalar tol) {
+    const SkPoint* computeQuads(SkSpan<const SkPoint> pts, SkScalar weight, SkScalar tol) {
         SkConic conic;
-        conic.set(pts, weight);
+        conic.set(pts.data(), weight);
         return computeQuads(conic, tol);
+    }
+
+    const SkPoint* computeQuads(const SkPoint pts[3], SkScalar weight, SkScalar tol) {
+        return this->computeQuads({pts, 3}, weight, tol);
     }
 
     int countQuads() const { return fQuadCount; }

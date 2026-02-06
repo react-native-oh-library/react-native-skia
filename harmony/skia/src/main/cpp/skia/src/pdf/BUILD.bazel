@@ -1,9 +1,10 @@
-load("//bazel:flags.bzl", "bool_flag", "selects")
-load("//bazel:skia_rules.bzl", "exports_files_legacy", "skia_cc_deps", "skia_filegroup", "split_srcs_and_hdrs")
+load("//bazel:skia_rules.bzl", "skia_cc_library", "split_srcs_and_hdrs")
+
+package(
+    default_applicable_licenses = ["//:license"],
+)
 
 licenses(["notice"])
-
-exports_files_legacy()
 
 PDF_FILES = [
     "SkBitmapKey.h",
@@ -55,68 +56,55 @@ PDF_FILES = [
 ]
 
 split_srcs_and_hdrs(
-    name = "pdf",
+    name = "_pdf",
     files = PDF_FILES,
 )
 
-#TODO: remove after Chromium no longer references this.
-skia_filegroup(
-    name = "jpeg_info_libjpeg",
-    srcs = ["SkJpegInfo_libjpegturbo.cpp"],
-)
-
-#TODO: remove after Chromium no longer references this.
-skia_filegroup(
-    name = "jpeg_info_none",
-    srcs = ["SkJpegInfo_none.cpp"],
-)
-
-skia_filegroup(
-    name = "srcs",
+skia_cc_library(
+    name = "pdf",
     srcs = [
-        ":pdf_srcs",
+        ":_pdf_hdrs",
+        ":_pdf_srcs",
     ],
-    visibility = ["//src:__pkg__"],
-)
-
-skia_filegroup(
-    name = "private_hdrs",
-    srcs = [
-        ":pdf_hdrs",
+    hdrs = [
+        "//include/docs:pdf_hdrs",
     ],
-    visibility = ["//src:__pkg__"],
-)
-
-bool_flag(
-    name = "enable_pdf_backend",
-    default = False,
-)
-
-bool_flag(
-    name = "enable_pdf_subset_harfbuzz",
-    default = True,  # This defaults it to be on if icu and harfbuzz are on
-)
-
-selects.config_setting_group(
-    name = "uses_harfbuzz",
-    match_all = [
-        "//bazel/common_config_settings:use_icu_true",
-        "//bazel/common_config_settings:use_harfbuzz_true",
-        ":enable_pdf_subset_harfbuzz_true",
-    ],
-)
-
-# TODO(kjlubick) sfntly support
-
-skia_cc_deps(
-    name = "deps",
-    visibility = ["//src:__pkg__"],
+    features = ["layering_check"],
+    local_defines = ["SK_PDF_USE_HARFBUZZ_SUBSET"],
+    visibility = ["//:__pkg__"],
     deps = [
-        "@zlib_skia//:zlib",
-        #"//src/codec:jpeg_decode",
-        #"//src/encode:jpeg_encode",
-    ] + select({
-        ":uses_harfbuzz": ["@harfbuzz"],
-        "//conditions:default": [],
-    }),
+        "//:core",
+        "//src/base",
+        "//:pathops",
+        "//src/codec:codec_support_priv",
+        "//src/encode:icc_support",
+        "//src/core:core_priv",
+        "//src/utils:clip_stack_utils",
+        "//src/utils:float_to_decimal",
+        "//modules/skcms",
+        "@zlib",
+        # TODO(kjlubick) Remove this dependency after migrating clients
+        ":jpeg_helpers",
+    ] +
+    # We have this harfbuzz dependency all by itself because we need to turn this into a
+    # select statement when rolling into G3.
+    [
+        "@harfbuzz",
+    ],
+)
+
+skia_cc_library(
+    name = "jpeg_helpers",
+    hdrs = [
+        "//include/docs:pdf_hdrs",
+        "//include/docs:pdf_jpeg_hdrs",
+    ],
+    features = ["layering_check"],
+    visibility = ["//:__pkg__"],
+    deps = [
+        "//:core",
+        "//:jpeg_decode_codec",
+        "//:jpeg_encode_codec",
+        "//src/base",
+    ],
 )

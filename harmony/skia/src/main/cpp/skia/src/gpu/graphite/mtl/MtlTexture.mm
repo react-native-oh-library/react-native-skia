@@ -8,10 +8,11 @@
 #include "src/gpu/graphite/mtl/MtlTexture.h"
 
 #include "include/gpu/MutableTextureState.h"
+#include "include/gpu/graphite/TextureInfo.h"
 #include "include/gpu/graphite/mtl/MtlGraphiteTypes.h"
-#include "include/private/gpu/graphite/MtlGraphiteTypesPriv.h"
 #include "src/core/SkMipmap.h"
 #include "src/gpu/graphite/mtl/MtlCaps.h"
+#include "src/gpu/graphite/mtl/MtlGraphiteUtils.h"
 #include "src/gpu/graphite/mtl/MtlSharedContext.h"
 #include "src/gpu/mtl/MtlUtilsPriv.h"
 
@@ -26,84 +27,66 @@ sk_cfp<id<MTLTexture>> MtlTexture::MakeMtlTexture(const MtlSharedContext* shared
         return nullptr;
     }
 
-    const MtlTextureSpec& mtlSpec = info.mtlTextureSpec();
-    SkASSERT(!mtlSpec.fFramebufferOnly);
+    const auto& mtlInfo = TextureInfoPriv::Get<MtlTextureInfo>(info);
+    SkASSERT(!mtlInfo.fFramebufferOnly);
 
-    if (mtlSpec.fUsage & MTLTextureUsageShaderRead && !caps->isTexturable(info)) {
+    if (mtlInfo.fUsage & MTLTextureUsageShaderRead && !caps->isTexturable(info)) {
         return nullptr;
     }
 
-    if (mtlSpec.fUsage & MTLTextureUsageRenderTarget &&
-        !(caps->isRenderable(info) || MtlFormatIsDepthOrStencil((MTLPixelFormat)mtlSpec.fFormat))) {
+    if (mtlInfo.fUsage & MTLTextureUsageRenderTarget && !caps->isRenderable(info)) {
         return nullptr;
     }
 
-    if (mtlSpec.fUsage & MTLTextureUsageShaderWrite && !caps->isStorage(info)) {
+    if (mtlInfo.fUsage & MTLTextureUsageShaderWrite && !caps->isStorage(info)) {
         return nullptr;
     }
 
     int numMipLevels = 1;
     if (info.mipmapped() == Mipmapped::kYes) {
-        numMipLevels = SkMipmap::ComputeLevelCount(dimensions.width(), dimensions.height()) + 1;
+        numMipLevels = SkMipmap::ComputeLevelCount(dimensions) + 1;
     }
 
     sk_cfp<MTLTextureDescriptor*> desc([[MTLTextureDescriptor alloc] init]);
     (*desc).textureType = (info.numSamples() > 1) ? MTLTextureType2DMultisample : MTLTextureType2D;
-    (*desc).pixelFormat = (MTLPixelFormat)mtlSpec.fFormat;
+    (*desc).pixelFormat = mtlInfo.fFormat;
     (*desc).width = dimensions.width();
     (*desc).height = dimensions.height();
     (*desc).depth = 1;
     (*desc).mipmapLevelCount = numMipLevels;
     (*desc).sampleCount = info.numSamples();
     (*desc).arrayLength = 1;
-    (*desc).usage = mtlSpec.fUsage;
-    (*desc).storageMode = (MTLStorageMode)mtlSpec.fStorageMode;
+    (*desc).usage = mtlInfo.fUsage;
+    (*desc).storageMode = mtlInfo.fStorageMode;
 
     sk_cfp<id<MTLTexture>> texture([sharedContext->device() newTextureWithDescriptor:desc.get()]);
-#ifdef SK_ENABLE_MTL_DEBUG_INFO
-    if (mtlSpec.fUsage & MTLTextureUsageRenderTarget) {
-        if (MtlFormatIsDepthOrStencil((MTLPixelFormat)mtlSpec.fFormat)) {
-            (*texture).label = @"DepthStencil";
-        } else {
-            if (info.numSamples() > 1) {
-                if (mtlSpec.fUsage & MTLTextureUsageShaderRead) {
-                    (*texture).label = @"MSAA SampledTexture-ColorAttachment";
-                } else {
-                    (*texture).label = @"MSAA ColorAttachment";
-                }
-            } else {
-                if (mtlSpec.fUsage & MTLTextureUsageShaderRead) {
-                    (*texture).label = @"SampledTexture-ColorAttachment";
-                } else {
-                    (*texture).label = @"ColorAttachment";
-                }
-            }
-        }
-    } else if (mtlSpec.fUsage & MTLTextureUsageShaderWrite) {
-        SkASSERT(mtlSpec.fUsage & MTLTextureUsageShaderRead);
-        (*texture).label = @"StorageTexture";
-    } else {
-        SkASSERT(mtlSpec.fUsage & MTLTextureUsageShaderRead);
-        (*texture).label = @"SampledTexture";
-    }
-#endif
-
     return texture;
+}
+
+static bool has_transient_usage(const TextureInfo& info) {
+    if (@available(macOS 11.0, iOS 10.0, tvOS 10.0, *)) {
+        const auto& mtlInfo = TextureInfoPriv::Get<MtlTextureInfo>(info);
+        return mtlInfo.fStorageMode == MTLStorageModeMemoryless;
+    }
+    return false;
 }
 
 MtlTexture::MtlTexture(const MtlSharedContext* sharedContext,
                        SkISize dimensions,
                        const TextureInfo& info,
                        sk_cfp<id<MTLTexture>> texture,
-                       Ownership ownership,
-                       skgpu::Budgeted budgeted)
-        : Texture(sharedContext, dimensions, info, /*mutableState=*/nullptr, ownership, budgeted)
+                       Ownership ownership)
+        : Texture(sharedContext,
+                  dimensions,
+                  info,
+                  /*isTransient=*/has_transient_usage(info),
+                  /*mutableState=*/nullptr,
+                  ownership)
         , fTexture(std::move(texture)) {}
 
 sk_sp<Texture> MtlTexture::Make(const MtlSharedContext* sharedContext,
                                 SkISize dimensions,
-                                const TextureInfo& info,
-                                skgpu::Budgeted budgeted) {
+                                const TextureInfo& info) {
     sk_cfp<id<MTLTexture>> texture = MakeMtlTexture(sharedContext, dimensions, info);
     if (!texture) {
         return nullptr;
@@ -112,8 +95,7 @@ sk_sp<Texture> MtlTexture::Make(const MtlSharedContext* sharedContext,
                                          dimensions,
                                          info,
                                          std::move(texture),
-                                         Ownership::kOwned,
-                                         budgeted));
+                                         Ownership::kOwned));
 }
 
 sk_sp<Texture> MtlTexture::MakeWrapped(const MtlSharedContext* sharedContext,
@@ -124,13 +106,20 @@ sk_sp<Texture> MtlTexture::MakeWrapped(const MtlSharedContext* sharedContext,
                                          dimensions,
                                          info,
                                          std::move(texture),
-                                         Ownership::kWrapped,
-                                         skgpu::Budgeted::kNo));
+                                         Ownership::kWrapped));
 }
 
 void MtlTexture::freeGpuData() {
     fTexture.reset();
 }
 
-} // namespace skgpu::graphite
 
+void MtlTexture::setBackendLabel(char const* label) {
+    SkASSERT(label);
+#ifdef SK_ENABLE_MTL_DEBUG_INFO
+    NSString* labelStr = @(label);
+    this->mtlTexture().label = labelStr;
+#endif
+}
+
+} // namespace skgpu::graphite

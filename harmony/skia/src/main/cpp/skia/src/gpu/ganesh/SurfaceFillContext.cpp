@@ -7,26 +7,37 @@
 
 #include "src/gpu/ganesh/SurfaceFillContext.h"
 
+#include "include/core/SkBlendMode.h"
+#include "include/gpu/ganesh/GrRecordingContext.h"
+#include "include/private/base/SingleOwner.h"
+#include "include/private/base/SkAssert.h"
+#include "include/private/base/SkPoint_impl.h"
+#include "include/private/gpu/ganesh/GrTypesPriv.h"
+#include "src/core/SkTraceEvent.h"
+#include "src/gpu/Swizzle.h"
+#include "src/gpu/ganesh/GrAppliedClip.h"
+#include "src/gpu/ganesh/GrAuditTrail.h"
 #include "src/gpu/ganesh/GrCaps.h"
+#include "src/gpu/ganesh/GrDrawingManager.h"
+#include "src/gpu/ganesh/GrDstProxyView.h"
+#include "src/gpu/ganesh/GrPaint.h"
+#include "src/gpu/ganesh/GrProcessorSet.h"
+#include "src/gpu/ganesh/GrRecordingContextPriv.h"
+#include "src/gpu/ganesh/GrRenderTask.h"
+#include "src/gpu/ganesh/GrScissorState.h"
+#include "src/gpu/ganesh/GrTextureResolveManager.h"
+#include "src/gpu/ganesh/GrTracing.h"
 #include "src/gpu/ganesh/effects/GrMatrixEffect.h"
 #include "src/gpu/ganesh/effects/GrTextureEffect.h"
 #include "src/gpu/ganesh/geometry/GrRect.h"
 #include "src/gpu/ganesh/ops/ClearOp.h"
 #include "src/gpu/ganesh/ops/FillRectOp.h"
+#include "src/gpu/ganesh/ops/GrDrawOp.h"
+
+#include <cstdint>
 
 #define ASSERT_SINGLE_OWNER        SKGPU_ASSERT_SINGLE_OWNER(this->singleOwner())
 #define RETURN_IF_ABANDONED        if (fContext->abandoned()) { return; }
-
-class AutoCheckFlush {
-public:
-    AutoCheckFlush(GrDrawingManager* drawingManager) : fDrawingManager(drawingManager) {
-        SkASSERT(fDrawingManager);
-    }
-    ~AutoCheckFlush() { fDrawingManager->flushIfNecessary(); }
-
-private:
-    GrDrawingManager* fDrawingManager;
-};
 
 namespace skgpu::ganesh {
 
@@ -65,8 +76,6 @@ void SurfaceFillContext::discard() {
     SkDEBUGCODE(this->validate();)
     GR_CREATE_TRACE_MARKER_CONTEXT("SurfaceFillContext", "discard", fContext);
 
-    AutoCheckFlush acf(this->drawingManager());
-
     this->getOpsTask()->discard();
 }
 
@@ -75,8 +84,6 @@ void SurfaceFillContext::resolveMSAA() {
     RETURN_IF_ABANDONED
     SkDEBUGCODE(this->validate();)
     GR_CREATE_TRACE_MARKER_CONTEXT("SurfaceFillContext", "resolveMSAA", fContext);
-
-    AutoCheckFlush acf(this->drawingManager());
 
     this->drawingManager()->newTextureResolveRenderTask(this->asSurfaceProxyRef(),
                                                         GrSurfaceProxy::ResolveFlags::kMSAA,
@@ -89,8 +96,6 @@ void SurfaceFillContext::fillRectWithFP(const SkIRect& dstRect,
     RETURN_IF_ABANDONED
     SkDEBUGCODE(this->validate();)
     GR_CREATE_TRACE_MARKER_CONTEXT("SurfaceFillContext", "fillRectWithFP", fContext);
-
-    AutoCheckFlush acf(this->drawingManager());
 
     GrPaint paint;
     paint.setColorFragmentProcessor(std::move(fp));

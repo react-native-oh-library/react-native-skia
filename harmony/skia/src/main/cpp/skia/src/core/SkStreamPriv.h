@@ -10,6 +10,9 @@
 
 #include "include/core/SkRefCnt.h"
 #include "include/core/SkStream.h"
+#include "src/base/SkEndian.h"
+
+#include <cstdint>
 
 class SkData;
 
@@ -39,6 +42,48 @@ public:
 private:
     size_t fBytesWritten = 0;
 };
+
+/**
+ * Helper functions to read and write big-endian values to a stream.
+ */
+inline bool SkWStreamWriteU16BE(SkWStream* s, uint16_t value) {
+    value = SkEndian_SwapBE16(value);
+    return s->write(&value, sizeof(value));
+}
+
+inline bool SkWStreamWriteU32BE(SkWStream* s, uint32_t value) {
+    value = SkEndian_SwapBE32(value);
+    return s->write(&value, sizeof(value));
+}
+
+inline bool SkWStreamWriteS32BE(SkWStream* s, int32_t value) {
+    value = SkEndian_SwapBE32(value);
+    return s->write(&value, sizeof(value));
+}
+
+inline bool SkStreamReadU16BE(SkStream* s, uint16_t* value) {
+    if (!s->readU16(value)) {
+        return false;
+    }
+    *value = SkEndian_SwapBE16(*value);
+    return true;
+}
+
+inline bool SkStreamReadU32BE(SkStream* s, uint32_t* value) {
+    if (!s->readU32(value)) {
+        return false;
+    }
+    *value = SkEndian_SwapBE32(*value);
+    return true;
+}
+
+inline bool SkStreamReadS32BE(SkStream* s, int32_t* value) {
+    if (!s->readS32(value)) {
+        return false;
+    }
+    *value = SkEndian_SwapBE32(*value);
+    return true;
+}
 
 // If the stream supports identifying the current position and total length, this returns
 // true if there are not enough bytes in the stream to fulfill a read of the given length.

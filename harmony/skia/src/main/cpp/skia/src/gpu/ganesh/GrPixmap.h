@@ -10,7 +10,21 @@
 
 #include "include/core/SkData.h"
 #include "include/core/SkPixmap.h"
+#include "include/core/SkPoint.h"
+#include "include/core/SkRect.h"
+#include "include/core/SkRefCnt.h"
+#include "include/core/SkSize.h"
+#include "include/private/base/SkTLogic.h"
+#include "include/private/base/SkTo.h"
 #include "src/gpu/ganesh/GrImageInfo.h"
+
+#include <cstddef>
+#include <utility>
+
+class GrColorInfo;
+class SkColorSpace;
+enum SkAlphaType : int;
+enum class GrColorType;
 
 template <typename T, typename DERIVED> class GrPixmapBase {
 public:
@@ -68,7 +82,7 @@ protected:
     }
 
     GrPixmapBase(GrImageInfo info, sk_sp<SkData> storage, size_t rowBytes)
-            : GrPixmapBase(std::move(info), const_cast<void*>(storage->data()), rowBytes) {
+            : GrPixmapBase(std::move(info), storage->writable_data(), rowBytes) {
         fPixelStorage = std::move(storage);
     }
 

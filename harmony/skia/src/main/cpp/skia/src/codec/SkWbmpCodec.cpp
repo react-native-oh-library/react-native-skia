@@ -97,6 +97,9 @@ static bool read_header(SkStream* stream, SkISize* size) {
 }
 
 bool SkWbmpCodec::onRewind() {
+    if (!this->rewindStream()) {
+        return false;
+    }
     return read_header(this->stream(), nullptr);
 }
 
@@ -118,7 +121,7 @@ SkEncodedImageFormat SkWbmpCodec::onGetEncodedFormat() const {
 
 bool SkWbmpCodec::conversionSupported(const SkImageInfo& dst, bool srcIsOpaque,
                                       bool /*needsColorXform*/) {
-    return valid_color_type(dst) && valid_alpha(dst.alphaType(), srcIsOpaque);
+    return valid_color_type(dst) && SkCodecPriv::ValidAlpha(dst.alphaType(), srcIsOpaque);
 }
 
 SkCodec::Result SkWbmpCodec::onGetPixels(const SkImageInfo& info,

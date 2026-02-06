@@ -7,8 +7,21 @@
 
 #include "src/gpu/ganesh/vk/GrVkSampler.h"
 
+#include "include/core/SkSamplingOptions.h"
+#include "include/gpu/GpuTypes.h"
+#include "include/gpu/vk/VulkanTypes.h"
+#include "include/private/base/SkTo.h"
+#include "src/gpu/ganesh/GrSamplerState.h"
+#include "src/gpu/ganesh/vk/GrVkCaps.h"
 #include "src/gpu/ganesh/vk/GrVkGpu.h"
+#include "src/gpu/ganesh/vk/GrVkResourceProvider.h"
 #include "src/gpu/ganesh/vk/GrVkSamplerYcbcrConversion.h"
+#include "src/gpu/ganesh/vk/GrVkUtil.h"
+
+#include <string.h>
+#include <algorithm>
+#include <atomic>
+#include <optional>
 
 static VkSamplerAddressMode wrap_mode_to_vk_sampler_address(GrSamplerState::WrapMode wrapMode) {
     switch (wrapMode) {
@@ -36,8 +49,9 @@ static VkSamplerMipmapMode mipmap_mode_to_vk_sampler_mipmap_mode(GrSamplerState:
     SkUNREACHABLE;
 }
 
-GrVkSampler* GrVkSampler::Create(GrVkGpu* gpu, GrSamplerState samplerState,
-                                 const GrVkYcbcrConversionInfo& ycbcrInfo) {
+GrVkSampler* GrVkSampler::Create(GrVkGpu* gpu,
+                                 GrSamplerState samplerState,
+                                 const skgpu::VulkanYcbcrConversionInfo& ycbcrInfo) {
     static VkFilter vkMinFilterModes[] = {
         VK_FILTER_NEAREST,
         VK_FILTER_LINEAR,
@@ -95,14 +109,12 @@ GrVkSampler* GrVkSampler::Create(GrVkGpu* gpu, GrSamplerState samplerState,
         createInfo.pNext = &conversionInfo;
 
         VkFormatFeatureFlags flags = ycbcrInfo.fFormatFeatures;
-        if (!SkToBool(flags & VK_FORMAT_FEATURE_SAMPLED_IMAGE_YCBCR_CONVERSION_LINEAR_FILTER_BIT)) {
+        if (ycbcrConversion->requiredFilter().has_value()) {
+            createInfo.magFilter = ycbcrConversion->requiredFilter().value();
+            createInfo.minFilter = ycbcrConversion->requiredFilter().value();
+        } else if (!SkToBool(flags & VK_FORMAT_FEATURE_SAMPLED_IMAGE_FILTER_LINEAR_BIT)) {
             createInfo.magFilter = VK_FILTER_NEAREST;
             createInfo.minFilter = VK_FILTER_NEAREST;
-        } else if (
-                !(flags &
-                  VK_FORMAT_FEATURE_SAMPLED_IMAGE_YCBCR_CONVERSION_SEPARATE_RECONSTRUCTION_FILTER_BIT)) {
-            createInfo.magFilter = ycbcrInfo.fChromaFilter;
-            createInfo.minFilter = ycbcrInfo.fChromaFilter;
         }
 
         // Required values when using ycbcr conversion
@@ -133,9 +145,18 @@ void GrVkSampler::freeGPUData() const {
 }
 
 GrVkSampler::Key GrVkSampler::GenerateKey(GrSamplerState samplerState,
-                                          const GrVkYcbcrConversionInfo& ycbcrInfo) {
+                                          const skgpu::VulkanYcbcrConversionInfo& ycbcrInfo) {
     // In VK the max aniso value is specified in addition to min/mag/mip filters and the
     // driver is encouraged to consider the other filter settings when doing aniso.
     return {samplerState.asKey(/*anisoIsOrthogonal=*/true),
             GrVkSamplerYcbcrConversion::GenerateKey(ycbcrInfo)};
+}
+
+ uint32_t GrVkSampler::GenID() {
+    static std::atomic<uint32_t> nextID{1};
+    uint32_t id;
+    do {
+        id = nextID++;
+    } while (id == SK_InvalidUniqueID);
+    return id;
 }

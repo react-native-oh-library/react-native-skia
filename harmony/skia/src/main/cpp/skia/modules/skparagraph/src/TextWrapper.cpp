@@ -288,7 +288,7 @@ void TextWrapper::breakTextIntoLines(ParagraphImpl* parent,
     auto maxLines = parent->paragraphStyle().getMaxLines();
     auto align = parent->paragraphStyle().effective_align();
     auto unlimitedLines = maxLines == std::numeric_limits<size_t>::max();
-    auto endlessLine = !SkScalarIsFinite(maxWidth);
+    auto endlessLine = !SkIsFinite(maxWidth);
     auto hasEllipsis = parent->paragraphStyle().ellipsized();
 
     auto disableFirstAscent = parent->paragraphStyle().getTextHeightBehavior() & TextHeightBehavior::kDisableFirstAscent;
@@ -296,9 +296,9 @@ void TextWrapper::breakTextIntoLines(ParagraphImpl* parent,
     bool firstLine = true; // We only interested in fist line if we have to disable the first ascent
 
     SkScalar softLineMaxIntrinsicWidth = 0;
-    fEndLine = TextStretch(span.begin(), span.begin(), parent->strutForceHeight());
-    auto end = span.end() - 1;
-    auto start = span.begin();
+    fEndLine = TextStretch(span.data(), span.data(), parent->strutForceHeight());
+    auto start = span.data();
+    auto end = start + span.size() - 1;
     InternalLineMetrics maxRunMetrics;
     bool needEllipsis = false;
     while (fEndLine.endCluster() != end) {

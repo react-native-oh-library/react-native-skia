@@ -9,12 +9,13 @@
 
 
 #include "core/SkFontMgr.h"
-#include "include/core/SkFontStyle.h"
-#include "include/core/SkStream.h"
+#include "core/SkFontStyle.h"
+#include "core/SkStream.h"
 
 #include "FontInfo_ohos.h"
 #include "ports/SkTypeface_FreeType.h"
-
+#include "ports/SkFontHost_FreeType_common.h"
+#include "ports/SkFontScanner_FreeType_priv.h"
 /*!
  * \brief The implementation of SkTypeface for ohos platform
  */

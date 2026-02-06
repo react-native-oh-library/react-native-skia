@@ -7,9 +7,9 @@
 
 #include "src/gpu/ganesh/effects/GrCoverageSetOpXP.h"
 
-#include "include/private/SkColorData.h"
 #include "include/private/base/SkAssert.h"
 #include "src/base/SkRandom.h"
+#include "src/core/SkColorData.h"
 #include "src/gpu/Blend.h"
 #include "src/gpu/KeyBuilder.h"
 #include "src/gpu/ganesh/GrXferProcessor.h"
@@ -184,7 +184,7 @@ sk_sp<const GrXferProcessor> GrCoverageSetOpXPFactory::makeXferProcessor(
 
 GR_DEFINE_XP_FACTORY_TEST(GrCoverageSetOpXPFactory)
 
-#if defined(GR_TEST_UTILS)
+#if defined(GPU_TEST_UTILS)
 const GrXPFactory* GrCoverageSetOpXPFactory::TestGet(GrProcessorTestData* d) {
     SkRegion::Op regionOp = SkRegion::Op(d->fRandom->nextULessThan(SkRegion::kLastOp + 1));
     bool invertCoverage = d->fRandom->nextBool();

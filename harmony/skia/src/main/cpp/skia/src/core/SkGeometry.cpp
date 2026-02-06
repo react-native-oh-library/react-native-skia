@@ -10,6 +10,7 @@
 #include "include/core/SkMatrix.h"
 #include "include/core/SkPoint3.h"
 #include "include/core/SkRect.h"
+#include "include/core/SkScalar.h"
 #include "include/private/base/SkDebug.h"
 #include "include/private/base/SkFloatingPoint.h"
 #include "include/private/base/SkTPin.h"
@@ -63,7 +64,7 @@ int valid_unit_divide(SkScalar numer, SkScalar denom, SkScalar* ratio) {
     }
 
     SkScalar r = numer / denom;
-    if (SkScalarIsNaN(r)) {
+    if (SkIsNaN(r)) {
         return 0;
     }
     SkASSERTF(r >= 0 && r < SK_Scalar1, "numer %f, denom %f, r %f", numer, denom, r);
@@ -107,7 +108,7 @@ int SkFindUnitQuadRoots(SkScalar A, SkScalar B, SkScalar C, SkScalar roots[2]) {
     }
     dr = sqrt(dr);
     SkScalar R = SkDoubleToScalar(dr);
-    if (!SkScalarIsFinite(R)) {
+    if (!SkIsFinite(R)) {
         return return_check_zero(0);
     }
 
@@ -359,7 +360,7 @@ SkScalar SkFindQuadMaxCurvature(const SkPoint src[3]) {
         return 1;
     }
     SkScalar t = numer / denom;
-    SkASSERT((0 <= t && t < 1) || SkScalarIsNaN(t));
+    SkASSERT((0 <= t && t < 1) || SkIsNaN(t));
     return t;
 }
 
@@ -1321,7 +1322,7 @@ bool SkConic::chopAt(SkScalar t, SkConic dst[2]) const {
     dst[1].fW = tmp2[2].fZ / root;
     SkASSERT(sizeof(dst[0]) == sizeof(SkScalar) * 7);
     SkASSERT(0 == offsetof(SkConic, fPts[0].fX));
-    return SkScalarsAreFinite(&dst[0].fPts[0].fX, 7 * 2);
+    return SkIsFinite(&dst[0].fPts[0].fX, 7 * 2);
 }
 
 void SkConic::chopAt(SkScalar t1, SkScalar t2, SkConic* dst) const {
@@ -1484,8 +1485,12 @@ bool SkConic::asQuadTol(SkScalar tol) const {
 // Limit the number of suggested quads to approximate a conic
 #define kMaxConicToQuadPOW2     5
 
+static inline bool bad_conic_w(float w) {
+    return w < 0 || !SkIsFinite(w);
+}
+
 int SkConic::computeQuadPOW2(SkScalar tol) const {
-    if (tol < 0 || !SkScalarIsFinite(tol) || !SkPointPriv::AreFinite(fPts, 3)) {
+    if (tol < 0 || !SkIsFinite(tol) || !SkPointPriv::AreFinite(fPts, 3) || bad_conic_w(fW)) {
         return 0;
     }
 
@@ -1567,7 +1572,12 @@ static SkPoint* subdivide(const SkConic& src, SkPoint pts[], int level) {
 }
 
 int SkConic::chopIntoQuadsPOW2(SkPoint pts[], int pow2) const {
-    SkASSERT(pow2 >= 0);
+    SkASSERT(pow2 >= 0 && pow2 <= kMaxConicToQuadPOW2);
+
+    if (bad_conic_w(fW)) {
+        pow2 = 0;
+    }
+
     *pts = fPts[0];
     SkDEBUGCODE(SkPoint* endPts);
     if (pow2 == kMaxConicToQuadPOW2) {  // If an extreme weight generates many quads ...
@@ -1692,11 +1702,11 @@ void SkConic::computeTightBounds(SkRect* bounds) const {
     if (this->findYExtrema(&t)) {
         this->evalAt(t, &pts[count++]);
     }
-    bounds->setBounds(pts, count);
+    *bounds = SkRect::BoundsOrEmpty({pts, count});
 }
 
 void SkConic::computeFastBounds(SkRect* bounds) const {
-    bounds->setBounds(fPts, 3);
+    *bounds = SkRect::BoundsOrEmpty(fPts);
 }
 
 #if 0  // unimplemented
@@ -1715,7 +1725,7 @@ SkScalar SkConic::TransformW(const SkPoint pts[3], SkScalar w, const SkMatrix& m
 
     ratquad_mapTo3D(pts, w, src);
 
-    matrix.mapHomogeneousPoints(dst, src, 3);
+    matrix.mapHomogeneousPoints(dst, src);
 
     // w' = sqrt(w1*w1/w0*w2)
     // use doubles temporarily, to handle small numer/denom
@@ -1725,7 +1735,7 @@ SkScalar SkConic::TransformW(const SkPoint pts[3], SkScalar w, const SkMatrix& m
     return sk_double_to_float(sqrt(sk_ieee_double_divide(w1 * w1, w0 * w2)));
 }
 
-int SkConic::BuildUnitArc(const SkVector& uStart, const SkVector& uStop, SkRotationDirection dir,
+int SkConic::BuildUnitArc(const SkVector& uStart, const SkVector& uStop, SkPathDirection dir,
                           const SkMatrix* userMatrix, SkConic dst[kMaxConicsForArc]) {
     // rotate by x,y so that uStart is (1.0)
     SkScalar x = SkPoint::DotProduct(uStart, uStop);
@@ -1736,12 +1746,12 @@ int SkConic::BuildUnitArc(const SkVector& uStart, const SkVector& uStop, SkRotat
     // check for (effectively) coincident vectors
     // this can happen if our angle is nearly 0 or nearly 180 (y == 0)
     // ... we use the dot-prod to distinguish between 0 and 180 (x > 0)
-    if (absY <= SK_ScalarNearlyZero && x > 0 && ((y >= 0 && kCW_SkRotationDirection == dir) ||
-                                                 (y <= 0 && kCCW_SkRotationDirection == dir))) {
+    if (absY <= SK_ScalarNearlyZero && x > 0 && ((y >= 0 && SkPathDirection::kCW == dir) ||
+                                                 (y <= 0 && SkPathDirection::kCCW == dir))) {
         return 0;
     }
 
-    if (dir == kCCW_SkRotationDirection) {
+    if (dir == SkPathDirection::kCCW) {
         y = -y;
     }
 
@@ -1781,6 +1791,9 @@ int SkConic::BuildUnitArc(const SkVector& uStart, const SkVector& uStop, SkRotat
     const SkPoint finalP = { x, y };
     const SkPoint& lastQ = quadrantPts[quadrant * 2];  // will already be a unit-vector
     const SkScalar dot = SkVector::DotProduct(lastQ, finalP);
+    if (SkIsNaN(dot)) {
+        return 0;
+    }
     SkASSERT(0 <= dot && dot <= SK_Scalar1 + SK_ScalarNearlyZero);
 
     if (dot < 1) {
@@ -1801,14 +1814,14 @@ int SkConic::BuildUnitArc(const SkVector& uStart, const SkVector& uStop, SkRotat
     // now handle counter-clockwise and the initial unitStart rotation
     SkMatrix    matrix;
     matrix.setSinCos(uStart.fY, uStart.fX);
-    if (dir == kCCW_SkRotationDirection) {
+    if (dir == SkPathDirection::kCCW) {
         matrix.preScale(SK_Scalar1, -SK_Scalar1);
     }
     if (userMatrix) {
         matrix.postConcat(*userMatrix);
     }
     for (int i = 0; i < conicCount; ++i) {
-        matrix.mapPoints(dst[i].fPts, 3);
+        matrix.mapPoints(dst[i].fPts);
     }
     return conicCount;
 }

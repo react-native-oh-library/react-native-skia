@@ -5,8 +5,16 @@
  * found in the LICENSE file.
  */
 
-#include "modules/svg/include/SkSVGRenderContext.h"
 #include "modules/svg/include/SkSVGShape.h"
+
+#include "include/core/SkPaint.h"  // IWYU pragma: keep
+#include "include/private/base/SkDebug.h"
+#include "modules/svg/include/SkSVGAttribute.h"
+#include "modules/svg/include/SkSVGRenderContext.h"
+#include "modules/svg/include/SkSVGTypes.h"
+
+class SkSVGNode;
+enum class SkSVGTag;
 
 SkSVGShape::SkSVGShape(SkSVGTag t) : INHERITED(t) {}
 
@@ -17,15 +25,15 @@ void SkSVGShape::onRender(const SkSVGRenderContext& ctx) const {
              strokePaint = ctx.strokePaint();
 
     // TODO: this approach forces duplicate geometry resolution in onDraw(); refactor to avoid.
-    if (fillPaint.isValid()) {
+    if (fillPaint.has_value()) {
         this->onDraw(ctx.canvas(), ctx.lengthContext(), *fillPaint, fillType);
     }
 
-    if (strokePaint.isValid()) {
+    if (strokePaint.has_value()) {
         this->onDraw(ctx.canvas(), ctx.lengthContext(), *strokePaint, fillType);
     }
 }
 
 void SkSVGShape::appendChild(sk_sp<SkSVGNode>) {
-    SkDebugf("cannot append child nodes to an SVG shape.\n");
+    SkDEBUGF("cannot append child nodes to an SVG shape.\n");
 }

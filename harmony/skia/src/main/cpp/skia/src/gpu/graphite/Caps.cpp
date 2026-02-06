@@ -4,17 +4,18 @@
  * Use of this source code is governed by a BSD-style license that can be
  * found in the LICENSE file.
  */
-
 #include "src/gpu/graphite/Caps.h"
 
 #include "include/core/SkCapabilities.h"
-#include "include/core/SkPaint.h"
-#include "include/core/SkTextureCompressionType.h"
 #include "include/gpu/ShaderErrorHandler.h"
 #include "include/gpu/graphite/ContextOptions.h"
 #include "include/gpu/graphite/TextureInfo.h"
-#include "src/core/SkBlenderBase.h"
+#include "include/private/base/SkTo.h"
+#include "src/gpu/graphite/ContextOptionsPriv.h"
+#include "src/gpu/graphite/ResourceTypes.h"
 #include "src/sksl/SkSLUtil.h"
+
+#include <algorithm>
 
 namespace skgpu::graphite {
 
@@ -35,7 +36,7 @@ void Caps::finishInitialization(const ContextOptions& options) {
         fShaderErrorHandler = DefaultShaderErrorHandler();
     }
 
-#if defined(GRAPHITE_TEST_UTILS)
+#if defined(GPU_TEST_UTILS)
     if (options.fOptionsPriv) {
         fMaxTextureSize = std::min(fMaxTextureSize, options.fOptionsPriv->fMaxTextureSizeOverride);
         fMaxTextureAtlasSize = options.fOptionsPriv->fMaxTextureAtlasSize;
@@ -43,16 +44,22 @@ void Caps::finishInitialization(const ContextOptions& options) {
     }
 #endif
     fGlyphCacheTextureMaximumBytes = options.fGlyphCacheTextureMaximumBytes;
+    fMinMSAAPathSize = options.fMinimumPathSizeForMSAA;
     fMinDistanceFieldFontSize = options.fMinDistanceFieldFontSize;
     fGlyphsAsPathsFontSize = options.fGlyphsAsPathsFontSize;
-    fAllowMultipleGlyphCacheTextures = options.fAllowMultipleGlyphCacheTextures;
+    fMaxPathAtlasTextureSize = options.fMaxPathAtlasTextureSize;
+    fAllowMultipleAtlasTextures = options.fAllowMultipleAtlasTextures;
     fSupportBilerpFromGlyphAtlas = options.fSupportBilerpFromGlyphAtlas;
-    if (options.fDisableCachedGlyphUploads) {
-        fRequireOrderedRecordings = true;
-    }
+    fRequireOrderedRecordings = options.fRequireOrderedRecordings;
+    fSetBackendLabels = options.fSetBackendLabels;
 }
 
 sk_sp<SkCapabilities> Caps::capabilities() const { return fCapabilities; }
+
+SkISize Caps::getDepthAttachmentDimensions(const TextureInfo& textureInfo,
+                                           const SkISize colorAttachmentDimensions) const {
+    return colorAttachmentDimensions;
+}
 
 bool Caps::isTexturable(const TextureInfo& info) const {
     if (info.numSamples() > 1) {
@@ -84,6 +91,8 @@ static inline SkColorType color_type_fallback(SkColorType ct) {
         case kA16_float_SkColorType:
             return kRGBA_F16_SkColorType;
         case kGray_8_SkColorType:
+        case kRGB_F16F16F16x_SkColorType:
+        case kRGB_101010x_SkColorType:
             return kRGB_888x_SkColorType;
         default:
             return kUnknown_SkColorType;
@@ -128,25 +137,27 @@ skgpu::Swizzle Caps::getWriteSwizzle(SkColorType ct, const TextureInfo& info) co
     return colorTypeInfo->fWriteSwizzle;
 }
 
-DstReadRequirement Caps::getDstReadRequirement() const {
-    // TODO(b/238757201): Currently this only supports dst reads by FB fetch and texture copy.
+DstReadStrategy Caps::getDstReadStrategy() const {
+    // TODO(b/238757201; b/383769988): Dst reads are currently only supported by FB fetch and
+    // texture copy.
     if (this->shaderCaps()->fFBFetchSupport) {
-        return DstReadRequirement::kFramebufferFetch;
+        return DstReadStrategy::kFramebufferFetch;
     } else {
-        return DstReadRequirement::kTextureCopy;
+        return DstReadStrategy::kTextureCopy;
     }
 }
 
-sktext::gpu::SDFTControl Caps::getSDFTControl(bool useSDFTForSmallText) const {
+sktext::gpu::SubRunControl Caps::getSubRunControl(bool useSDFTForSmallText) const {
 #if !defined(SK_DISABLE_SDF_TEXT)
-    return sktext::gpu::SDFTControl{
+    return sktext::gpu::SubRunControl{
             this->shaderCaps()->supportsDistanceFieldText(),
             useSDFTForSmallText,
             true, /*ableToUsePerspectiveSDFT*/
             this->minDistanceFieldFontSize(),
-            this->glyphsAsPathsFontSize()};
+            this->glyphsAsPathsFontSize(),
+            true /*forcePathAA*/};
 #else
-    return sktext::gpu::SDFTControl{};
+    return sktext::gpu::SubRunControl{/*forcePathAA=*/true};
 #endif
 }
 

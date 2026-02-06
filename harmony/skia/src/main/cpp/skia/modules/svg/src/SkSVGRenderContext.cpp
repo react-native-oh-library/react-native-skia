@@ -7,18 +7,28 @@
 
 #include "modules/svg/include/SkSVGRenderContext.h"
 
+#include "include/core/SkBlendMode.h"
 #include "include/core/SkCanvas.h"
+#include "include/core/SkColor.h"
 #include "include/core/SkImageFilter.h"
+#include "include/core/SkPaint.h"
 #include "include/core/SkPath.h"
 #include "include/core/SkPathEffect.h"
+#include "include/core/SkString.h"
 #include "include/effects/SkDashPathEffect.h"
-#include "include/private/base/SkTo.h"
+#include "include/private/base/SkDebug.h"
+#include "include/private/base/SkSpan_impl.h"
+#include "include/private/base/SkTArray.h"
+#include "include/private/base/SkTPin.h"
 #include "modules/svg/include/SkSVGAttribute.h"
 #include "modules/svg/include/SkSVGClipPath.h"
 #include "modules/svg/include/SkSVGFilter.h"
 #include "modules/svg/include/SkSVGMask.h"
 #include "modules/svg/include/SkSVGNode.h"
 #include "modules/svg/include/SkSVGTypes.h"
+
+#include <cstring>
+#include <vector>
 
 using namespace skia_private;
 
@@ -70,7 +80,7 @@ SkScalar SkSVGLengthContext::resolve(const SkSVGLength& l, LengthType t) const {
     case SkSVGLength::Unit::kPC:
         return l.value() * fDPI * kPCMultiplier;
     default:
-        SkDebugf("unsupported unit type: <%d>\n", (int)l.unit());
+        SkDEBUGF("unsupported unit type: <%d>\n", (int)l.unit());
         return 0;
     }
 }
@@ -137,7 +147,7 @@ static sk_sp<SkPathEffect> dash_effect(const SkSVGPresentationAttributes& props,
     const auto phase = lctx.resolve(*props.fStrokeDashOffset,
                                     SkSVGLengthContext::LengthType::kOther);
 
-    return SkDashPathEffect::Make(intervals.begin(), intervals.size(), phase);
+    return SkDashPathEffect::Make(intervals, phase);
 }
 
 }  // namespace
@@ -152,42 +162,47 @@ SkSVGRenderContext::SkSVGRenderContext(SkCanvas* canvas,
                                        const SkSVGIDMapper& mapper,
                                        const SkSVGLengthContext& lctx,
                                        const SkSVGPresentationContext& pctx,
-                                       const OBBScope& obbs)
-    : fFontMgr(fmgr)
-    , fResourceProvider(rp)
-    , fIDMapper(mapper)
-    , fLengthContext(lctx)
-    , fPresentationContext(pctx)
-    , fCanvas(canvas)
-    , fCanvasSaveCount(canvas->getSaveCount())
-    , fOBBScope(obbs) {}
+                                       const OBBScope& obbs,
+                                       const sk_sp<SkShapers::Factory>& fact)
+        : fFontMgr(fmgr)
+        , fTextShapingFactory(fact)
+        , fResourceProvider(rp)
+        , fIDMapper(mapper)
+        , fLengthContext(lctx)
+        , fPresentationContext(pctx)
+        , fCanvas(canvas)
+        , fCanvasSaveCount(canvas->getSaveCount())
+        , fOBBScope(obbs) {}
 
 SkSVGRenderContext::SkSVGRenderContext(const SkSVGRenderContext& other)
-    : SkSVGRenderContext(other.fCanvas,
-                         other.fFontMgr,
-                         other.fResourceProvider,
-                         other.fIDMapper,
-                         *other.fLengthContext,
-                         *other.fPresentationContext,
-                         other.fOBBScope) {}
+        : SkSVGRenderContext(other.fCanvas,
+                             other.fFontMgr,
+                             other.fResourceProvider,
+                             other.fIDMapper,
+                             *other.fLengthContext,
+                             *other.fPresentationContext,
+                             other.fOBBScope,
+                             other.fTextShapingFactory) {}
 
 SkSVGRenderContext::SkSVGRenderContext(const SkSVGRenderContext& other, SkCanvas* canvas)
-    : SkSVGRenderContext(canvas,
-                         other.fFontMgr,
-                         other.fResourceProvider,
-                         other.fIDMapper,
-                         *other.fLengthContext,
-                         *other.fPresentationContext,
-                         other.fOBBScope) {}
+        : SkSVGRenderContext(canvas,
+                             other.fFontMgr,
+                             other.fResourceProvider,
+                             other.fIDMapper,
+                             *other.fLengthContext,
+                             *other.fPresentationContext,
+                             other.fOBBScope,
+                             other.fTextShapingFactory) {}
 
 SkSVGRenderContext::SkSVGRenderContext(const SkSVGRenderContext& other, const SkSVGNode* node)
-    : SkSVGRenderContext(other.fCanvas,
-                         other.fFontMgr,
-                         other.fResourceProvider,
-                         other.fIDMapper,
-                         *other.fLengthContext,
-                         *other.fPresentationContext,
-                         OBBScope{node, this}) {}
+        : SkSVGRenderContext(other.fCanvas,
+                             other.fFontMgr,
+                             other.fResourceProvider,
+                             other.fIDMapper,
+                             *other.fLengthContext,
+                             *other.fPresentationContext,
+                             OBBScope{node, this},
+                             other.fTextShapingFactory) {}
 
 SkSVGRenderContext::~SkSVGRenderContext() {
     fCanvas->restoreToCount(fCanvasSaveCount);
@@ -195,7 +210,7 @@ SkSVGRenderContext::~SkSVGRenderContext() {
 
 SkSVGRenderContext::BorrowedNode SkSVGRenderContext::findNodeById(const SkSVGIRI& iri) const {
     if (iri.type() != SkSVGIRI::Type::kLocal) {
-        SkDebugf("non-local iri references not currently supported");
+        SkDEBUGF("non-local iri references not currently supported");
         return BorrowedNode(nullptr);
     }
     return BorrowedNode(fIDMapper.find(iri.iri()));
@@ -346,7 +361,7 @@ void SkSVGRenderContext::applyClip(const SkSVGFuncIRI& clip) {
     this->saveOnce();
 
     fCanvas->clipPath(clipPath, true);
-    fClipPath.set(clipPath);
+    fClipPath = clipPath;
 }
 
 void SkSVGRenderContext::applyMask(const SkSVGFuncIRI& mask) {
@@ -381,18 +396,17 @@ void SkSVGRenderContext::applyMask(const SkSVGFuncIRI& mask) {
     // Restoring triggers srcIn-compositing the content against the mask.
 }
 
-SkTLazy<SkPaint> SkSVGRenderContext::commonPaint(const SkSVGPaint& paint_selector,
+std::optional<SkPaint> SkSVGRenderContext::commonPaint(const SkSVGPaint& paint_selector,
                                                  float paint_opacity) const {
     if (paint_selector.type() == SkSVGPaint::Type::kNone) {
-        return SkTLazy<SkPaint>();
+        return std::optional<SkPaint>();
     }
 
-    SkTLazy<SkPaint> p;
-    p.init();
+    SkPaint p;
 
     switch (paint_selector.type()) {
     case SkSVGPaint::Type::kColor:
-        p->setColor(this->resolveSvgColor(paint_selector.color()));
+        p.setColor(this->resolveSvgColor(paint_selector.color()));
         break;
     case SkSVGPaint::Type::kIRI: {
         // Our property inheritance is borked as it follows the render path and not the tree
@@ -411,45 +425,46 @@ SkTLazy<SkPaint> SkSVGRenderContext::commonPaint(const SkSVGPaint& paint_selecto
                                      fIDMapper,
                                      *fLengthContext,
                                      pctx,
-                                     fOBBScope);
+                                     fOBBScope,
+                                     fTextShapingFactory);
 
         const auto node = this->findNodeById(paint_selector.iri());
-        if (!node || !node->asPaint(local_ctx, p.get())) {
+        if (!node || !node->asPaint(local_ctx, &p)) {
             // Use the fallback color.
-            p->setColor(this->resolveSvgColor(paint_selector.color()));
+            p.setColor(this->resolveSvgColor(paint_selector.color()));
         }
     } break;
     default:
         SkUNREACHABLE;
     }
 
-    p->setAntiAlias(true); // TODO: shape-rendering support
+    p.setAntiAlias(true); // TODO: shape-rendering support
 
     // We observe 3 opacity components:
     //   - initial paint server opacity (e.g. color stop opacity)
     //   - paint-specific opacity (e.g. 'fill-opacity', 'stroke-opacity')
     //   - deferred opacity override (optimization for leaf nodes 'opacity')
-    p->setAlphaf(SkTPin(p->getAlphaf() * paint_opacity * fDeferredPaintOpacity, 0.0f, 1.0f));
+    p.setAlphaf(SkTPin(p.getAlphaf() * paint_opacity * fDeferredPaintOpacity, 0.0f, 1.0f));
 
     return p;
 }
 
-SkTLazy<SkPaint> SkSVGRenderContext::fillPaint() const {
+std::optional<SkPaint> SkSVGRenderContext::fillPaint() const {
     const auto& props = fPresentationContext->fInherited;
     auto p = this->commonPaint(*props.fFill, *props.fFillOpacity);
 
-    if (p.isValid()) {
+    if (p.has_value()) {
         p->setStyle(SkPaint::kFill_Style);
     }
 
     return p;
 }
 
-SkTLazy<SkPaint> SkSVGRenderContext::strokePaint() const {
+std::optional<SkPaint> SkSVGRenderContext::strokePaint() const {
     const auto& props = fPresentationContext->fInherited;
     auto p = this->commonPaint(*props.fStroke, *props.fStrokeOpacity);
 
-    if (p.isValid()) {
+    if (p.has_value()) {
         p->setStyle(SkPaint::kStroke_Style);
         p->setStrokeWidth(fLengthContext->resolve(*props.fStrokeWidth,
                                                   SkSVGLengthContext::LengthType::kOther));
@@ -477,7 +492,7 @@ SkSVGColorType SkSVGRenderContext::resolveSvgColor(const SkSVGColor& color) cons
         case SkSVGColor::Type::kCurrentColor:
             return *fPresentationContext->fInherited.fColor;
         case SkSVGColor::Type::kICCColor:
-            SkDebugf("ICC color unimplemented");
+            SkDEBUGF("ICC color unimplemented");
             return SK_ColorBLACK;
     }
     SkUNREACHABLE;

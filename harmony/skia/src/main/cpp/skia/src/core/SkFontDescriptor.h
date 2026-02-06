@@ -109,9 +109,6 @@ public:
     const SkFontArguments::VariationPosition::Coordinate* getVariation() const {
         return fVariation.get();
     }
-    SkFontArguments::VariationPosition::Coordinate* getVariation() {
-        return fVariation.get();
-    }
     int getPaletteEntryOverrideCount() const { return fPaletteEntryOverrideCount; }
     const SkFontArguments::Palette::Override* getPaletteEntryOverrides() const {
         return fPaletteEntryOverrides.get();
@@ -145,6 +142,7 @@ public:
                          this->getPaletteEntryOverrideCount()});
     }
     static SkFontStyle::Width SkFontStyleWidthForWidthAxisValue(SkScalar width);
+    static SkScalar SkFontWidthAxisValueForStyleWidth(int width);
 
 private:
     SkString fFamilyName;

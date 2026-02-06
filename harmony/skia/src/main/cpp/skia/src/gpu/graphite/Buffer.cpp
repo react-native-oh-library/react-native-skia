@@ -4,8 +4,10 @@
  * Use of this source code is governed by a BSD-style license that can be
  * found in the LICENSE file.
  */
-
 #include "src/gpu/graphite/Buffer.h"
+
+#include "include/gpu/GpuTypes.h"
+#include "include/private/base/SkAssert.h"
 #include "src/gpu/graphite/Caps.h"
 #include "src/gpu/graphite/SharedContext.h"
 
@@ -13,6 +15,7 @@ namespace skgpu::graphite {
 
 void* Buffer::map() {
     SkASSERT(this->isUnmappable() || !this->sharedContext()->caps()->bufferMapsAreAsync());
+    SkASSERT(this->isProtected() == Protected::kNo);
     if (!this->isMapped()) {
         this->onMap();
     }
@@ -21,6 +24,7 @@ void* Buffer::map() {
 
 void Buffer::asyncMap(GpuFinishedProc proc, GpuFinishedContext ctx) {
     SkASSERT(this->sharedContext()->caps()->bufferMapsAreAsync());
+    SkASSERT(this->isProtected() == Protected::kNo);
     this->onAsyncMap(proc, ctx);
 }
 

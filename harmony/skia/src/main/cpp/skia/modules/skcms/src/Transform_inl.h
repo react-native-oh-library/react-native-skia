@@ -22,15 +22,11 @@ using U8  = V<uint8_t>;
     // GCC is kind of weird, not allowing vector = scalar directly.
     static constexpr F F0 = F() + 0.0f,
                        F1 = F() + 1.0f,
-                       FHalf = F() + 0.5f,
                        FInfBits = F() + 0x7f800000; // equals 2139095040, the bit pattern of +Inf
-    static constexpr I32 F16InfBits = I32() + 0x4780'0000;
 #else
     static constexpr F F0 = 0.0f,
                        F1 = 1.0f,
-                       FHalf = 0.5f,
                        FInfBits = 0x7f800000; // equals 2139095040, the bit pattern of +Inf
-    static constexpr I32 F16InfBits = 0x4780'0000; // equals +Inf in half float, shifted to 32-bits
 #endif
 
 // Instead of checking __AVX__ below, we'll check USING_AVX.
@@ -41,7 +37,7 @@ using U8  = V<uint8_t>;
     #define  USING_AVX
 #endif
 #if !defined(USING_AVX_F16C) && defined(USING_AVX) && defined(__F16C__)
-    #define  USING AVX_F16C
+    #define  USING_AVX_F16C
 #endif
 #if !defined(USING_AVX2)     && defined(USING_AVX) && defined(__AVX2__)
     #define  USING_AVX2
@@ -115,14 +111,9 @@ template <typename D, typename S>
 SI D cast(const S& v) {
 #if N == 1
     return (D)v;
-#elif defined(__clang__)
-    return __builtin_convertvector(v, D);
 #else
-    D d;
-    for (int i = 0; i < N; i++) {
-        d[i] = v[i];
-    }
-    return d;
+    return __builtin_convertvector(v, D);
+
 #endif
 }
 
@@ -153,52 +144,39 @@ SI U32 to_fixed(F f) {  return (U32)cast<I32>(f + 0.5f); }
     }
 #endif
 
-#if defined(USING_NEON)
-    SI F min_(F x, F y) { return (F)vminq_f32((float32x4_t)x, (float32x4_t)y); }
-    SI F max_(F x, F y) { return (F)vmaxq_f32((float32x4_t)x, (float32x4_t)y); }
 
-    SI I32 min_(I32 x, I32 y) { return (I32)vminq_s32((int32x4_t)x, (int32x4_t)y); }
-    SI I32 max_(I32 x, I32 y) { return (I32)vmaxq_s32((int32x4_t)x, (int32x4_t)y); }
-#else
-    SI F min_(F x, F y) { return if_then_else(x > y, y, x); }
-    SI F max_(F x, F y) { return if_then_else(x < y, y, x); }
-
-    SI I32 min_(I32 x, I32 y) { return if_then_else(x > y, y, x); }
-    SI I32 max_(I32 x, I32 y) { return if_then_else(x < y, y, x); }
-#endif
-
-// KEEP IN SYNC with skvx::from_half to ensure that f16 colors are computed consistently in both
-// skcms and skvx.
 SI F F_from_Half(U16 half) {
 #if defined(USING_NEON_F16C)
     return vcvt_f32_f16((float16x4_t)half);
 #elif defined(USING_AVX512F)
     return (F)_mm512_cvtph_ps((__m256i)half);
 #elif defined(USING_AVX_F16C)
+#if defined(__clang__) && __clang_major__ >= 15 // for _Float16 support
+    typedef _Float16 __attribute__((vector_size(16))) F16;
+    return __builtin_convertvector((F16)half, F);
+#else
     typedef int16_t __attribute__((vector_size(16))) I16;
     return __builtin_ia32_vcvtph2ps256((I16)half);
+#endif // defined(__clang))
 #else
-    I32 wide = cast<I32>(half);
+    U32 wide = cast<U32>(half);
     // A half is 1-5-10 sign-exponent-mantissa, with 15 exponent bias.
-    // To match intrinsic behavior, this preserves denormal values, infinities, and NaNs, which
-    // helps improve consistency between architectures.
-    I32     s  = wide & 0x8000,
-            em = wide ^ s,
-    inf_or_nan = (em >= (31 << 10)) & (255 << 23), // Expands exponent to fill 8 bits
-       is_norm =  em > 0x3ff,
-           // denormalized f16's are 2^-14*0.[m0:9] == 2^-24*[m0:9].0
-           sub = bit_pun<I32>(cast<F>(em) * (1.f/(1<<24))),
-          norm = ((em<<13) + ((127-15)<<23)), // Shifts mantissa, shifts + re-biases exponent
-        finite = if_then_else(is_norm, norm, sub);
-    // If 'x' is f16 +/- infinity, inf_or_nan will be the filled 8-bit exponent but 'norm' will be
-    // all 0s since 'x's mantissa is 0. Thus norm | inf_or_nan becomes f32 infinity. However, if
-    // 'x' is an f16 NaN, some bits of 'norm' will be non-zero, so it stays an f32 NaN after the OR.
-    return bit_pun<F>((s<<16) | finite | inf_or_nan);
+    U32 s  = wide & 0x8000,
+        em = wide ^ s;
+
+    // Constructing the float is easy if the half is not denormalized.
+    F norm = bit_pun<F>( (s<<16) + (em<<13) + ((127-15)<<23) );
+
+    // Simply flush all denorm half floats to zero.
+    return if_then_else(em < 0x0400, F0, norm);
 #endif
 }
 
-// KEEP IN SYNC with skvx::to_half to ensure that f16 colors are computed consistently in both
-// skcms and skvx.
+#if defined(__clang__)
+    // The -((127-15)<<10) underflows that side of the math when
+    // we pass a denorm half float.  It's harmless... we'll take the 0 side anyway.
+    __attribute__((no_sanitize("unsigned-integer-overflow")))
+#endif
 SI U16 Half_from_F(F f) {
 #if defined(USING_NEON_F16C)
     return (U16)vcvt_f16_f32(f);
@@ -208,23 +186,13 @@ SI U16 Half_from_F(F f) {
     return (U16)__builtin_ia32_vcvtps2ph256(f, 0x04/*_MM_FROUND_CUR_DIRECTION*/);
 #else
     // A float is 1-8-23 sign-exponent-mantissa, with 127 exponent bias.
-    // To match intrinsic behavior, this implements round-to-nearest-even, converting floats to
-    // denormal f16 values, overflowing to infinity and preserving infinity. However, it does not
-    // handle NaN float values (they become infinity).
-    I32     sem = bit_pun<I32>(f),
-            s   = sem & 0x8000'0000,
-             em = min_(sem ^ s, F16InfBits), // |x| clamped to f16 infinity
-          // F(em)*8192 increases the exponent by 13, which when added back to em will shift the
-          // mantissa bits 13 to the right. We clamp to 1/2 for subnormal values, which
-          // automatically shifts the mantissa to match 2^-14 expected for a subnorm f16.
-          magic = bit_pun<I32>(max_(bit_pun<F>(em) * 8192.f, FHalf)) & (255 << 23),
-        // Shift mantissa with automatic round-to-even
-        rounded = bit_pun<I32>((bit_pun<F>(em) + bit_pun<F>(magic))),
-            // Subtract 127 for f32 bias, subtract 13 to undo the *8192, subtract 1 to remove
-            // the implicit leading 1., and add 15 to get the f16 biased exponent.
-            exp = ((magic >> 13) - ((127-15+13+1)<<10)), // shift and re-bias exponent
-            f16 = rounded + exp; // use + if 'rounded' rolled over into first exponent bit
-    return cast<U16>((s>>16) | f16);
+    U32 sem = bit_pun<U32>(f),
+        s   = sem & 0x80000000,
+         em = sem ^ s;
+
+    // For simplicity we flush denorm half floats (including all denorm floats) to zero.
+    return cast<U16>(if_then_else(em < 0x38800000, (U32)F0
+                                                 , (s>>16) + (em>>13) - ((127-15)<<10)));
 #endif
 }
 
@@ -239,6 +207,17 @@ SI U64 swap_endian_16x4(const U64& rgba) {
     return (rgba & 0x00ff00ff00ff00ff) << 8
          | (rgba & 0xff00ff00ff00ff00) >> 8;
 }
+
+#if defined(USING_NEON)
+    SI F min_(F x, F y) { return (F)vminq_f32((float32x4_t)x, (float32x4_t)y); }
+    SI F max_(F x, F y) { return (F)vmaxq_f32((float32x4_t)x, (float32x4_t)y); }
+#elif defined(__loongarch_sx)
+    SI F min_(F x, F y) { return (F)__lsx_vfmin_s(x, y); }
+    SI F max_(F x, F y) { return (F)__lsx_vfmax_s(x, y); }
+#else
+    SI F min_(F x, F y) { return if_then_else(x > y, y, x); }
+    SI F max_(F x, F y) { return if_then_else(x < y, y, x); }
+#endif
 
 SI F floor_(F x) {
 #if N == 1
@@ -255,6 +234,8 @@ SI F floor_(F x) {
     return __builtin_ia32_roundps256(x, 0x01/*_MM_FROUND_FLOOR*/);
 #elif defined(__SSE4_1__)
     return _mm_floor_ps(x);
+#elif defined(__loongarch_sx)
+    return __lsx_vfrintrm_s((__m128)x);
 #else
     // Round trip through integers with a truncating cast.
     F roundtrip = cast<F>(cast<I32>(x));
@@ -378,6 +359,14 @@ SI F apply_hlginv(const skcms_TransferFunction* tf, F x) {
     return bit_pun<F>(sign | bit_pun<U32>(v));
 }
 
+// Compute the luminance Y used in the HLG OOTF. This is equivalent to computing the dot product
+// with the vector [0.2627 0.678  0.0593] in Rec2020 primaries, but is performed in the XYZD50
+// space to simplify the pipeline.
+SI F compute_Y_in_xyzd50(F x, F y, F z) {
+  return -0.02831655f * x +
+          1.00995452f * y +
+          0.02102382f * z;
+}
 
 // Strided loads and stores of N values, starting from p.
 template <typename T, typename P>
@@ -668,7 +657,7 @@ SI void sample_clut_8(const uint8_t* grid_8, I32 ix, F* r, F* g, F* b, F* a) {
 }
 
 SI void sample_clut_16(const uint8_t* grid_16, I32 ix, F* r, F* g, F* b) {
-#if defined(__arm__)
+#if defined(__arm__) || defined(__loongarch_sx)
     // This is up to 2x faster on 32-bit ARM than the #else-case fast path.
     *r = F_from_U16_BE(gather_16(grid_16, 3*ix+0));
     *g = F_from_U16_BE(gather_16(grid_16, 3*ix+1));
@@ -856,6 +845,12 @@ STAGE(load_g8, NoCtx) {
     r = g = b = F_from_U8(load<U8>(src + 1*i));
 }
 
+STAGE(load_ga88, NoCtx) {
+    U16 u16 = load<U16>(src + 2 * i);
+    r = g = b = cast<F>((u16 >> 0) & 0xff) * (1 / 255.0f);
+            a = cast<F>((u16 >> 8) & 0xff) * (1 / 255.0f);
+}
+
 STAGE(load_4444, NoCtx) {
     U16 abgr = load<U16>(src + 2*i);
 
@@ -917,13 +912,19 @@ STAGE(load_1010102, NoCtx) {
 }
 
 STAGE(load_101010x_XR, NoCtx) {
-    static constexpr float min = -0.752941f;
-    static constexpr float max = 1.25098f;
-    static constexpr float range = max - min;
     U32 rgba = load<U32>(src + 4*i);
-    r = cast<F>((rgba >>  0) & 0x3ff) * (1/1023.0f) * range + min;
-    g = cast<F>((rgba >> 10) & 0x3ff) * (1/1023.0f) * range + min;
-    b = cast<F>((rgba >> 20) & 0x3ff) * (1/1023.0f) * range + min;
+    r = cast<F>(((rgba >>  0) & 0x3ff) - 384) / 510.0f;
+    g = cast<F>(((rgba >> 10) & 0x3ff) - 384) / 510.0f;
+    b = cast<F>(((rgba >> 20) & 0x3ff) - 384) / 510.0f;
+}
+
+STAGE(load_10101010_XR, NoCtx) {
+    U64 rgba = load<U64>(src + 8 * i);
+    // Each channel is 16 bits, where the 6 low bits are padding.
+    r = cast<F>(((rgba >> ( 0+6)) & 0x3ff) - 384) / 510.0f;
+    g = cast<F>(((rgba >> (16+6)) & 0x3ff) - 384) / 510.0f;
+    b = cast<F>(((rgba >> (32+6)) & 0x3ff) - 384) / 510.0f;
+    a = cast<F>(((rgba >> (48+6)) & 0x3ff) - 384) / 510.0f;
 }
 
 STAGE(load_161616LE, NoCtx) {
@@ -1223,6 +1224,27 @@ STAGE(hlg_rgb, const skcms_TransferFunction* tf) {
     b = apply_hlg(tf, b);
 }
 
+// Apply the HLG Reference OOTF, as described in ITU-R BT.2100-3 Table 5.
+STAGE(hlg_ootf_scale, const void*) {
+    // Compute Y in the XYZD50 primaries.
+    F Y = compute_Y_in_xyzd50(r, g, b);
+
+    // Apply the gamma of 1.2.
+    const float gamma_minus_1 = 0.2f;
+    U32 sign;
+    Y = strip_sign(Y, &sign);
+    F Y_to_gamma_minus1 = apply_sign(approx_pow(Y, gamma_minus_1), sign);
+    r = r * Y_to_gamma_minus1;
+    g = g * Y_to_gamma_minus1;
+    b = b * Y_to_gamma_minus1;
+
+    // Scale to the reference peak white (1000 nits) to get display luminance. Then divide by the
+    // HDR reference white (203 nits), to get a value in relative linear color space.
+    r *= 1000.0f / 203.0f;
+    g *= 1000.0f / 203.0f;
+    b *= 1000.0f / 203.0f;
+}
+
 STAGE(hlginv_r, const skcms_TransferFunction* tf) { r = apply_hlginv(tf, r); }
 STAGE(hlginv_g, const skcms_TransferFunction* tf) { g = apply_hlginv(tf, g); }
 STAGE(hlginv_b, const skcms_TransferFunction* tf) { b = apply_hlginv(tf, b); }
@@ -1232,6 +1254,23 @@ STAGE(hlginv_rgb, const skcms_TransferFunction* tf) {
     r = apply_hlginv(tf, r);
     g = apply_hlginv(tf, g);
     b = apply_hlginv(tf, b);
+}
+
+// Perform the inverse of the operation in hlg_ootf_scale.
+STAGE(hlginv_ootf_scale, const void*) {
+    r *= (203.f / 1000.0f);
+    g *= (203.f / 1000.0f);
+    b *= (203.f / 1000.0f);
+
+    const float gamma_inv_minus_1 = 1.0f / 1.2f - 1.0f;
+    F Y = compute_Y_in_xyzd50(r, g, b);
+    U32 sign;
+    Y = strip_sign(Y, &sign);
+    F Y_to_gamma_minus1 = apply_sign(approx_pow(Y, gamma_inv_minus_1), sign);
+
+    r = r * Y_to_gamma_minus1;
+    g = g * Y_to_gamma_minus1;
+    b = b * Y_to_gamma_minus1;
 }
 
 STAGE(table_r, const skcms_Curve* curve) { r = table(curve, r); }
@@ -1261,6 +1300,12 @@ FINAL_STAGE(store_a8, NoCtx) {
 FINAL_STAGE(store_g8, NoCtx) {
     // g should be holding luminance (Y) (r,g,b ~~~> X,Y,Z)
     store(dst + 1*i, cast<U8>(to_fixed(g * 255)));
+}
+
+FINAL_STAGE(store_ga88, NoCtx) {
+    // g should be holding luminance (Y) (r,g,b ~~~> X,Y,Z)
+    store<U16>(dst + 2*i, cast<U16>(to_fixed(g * 255) << 0 )
+                        | cast<U16>(to_fixed(a * 255) << 8 ));
 }
 
 FINAL_STAGE(store_4444, NoCtx) {
@@ -1306,13 +1351,17 @@ FINAL_STAGE(store_8888, NoCtx) {
 }
 
 FINAL_STAGE(store_101010x_XR, NoCtx) {
-    static constexpr float min = -0.752941f;
-    static constexpr float max = 1.25098f;
-    static constexpr float range = max - min;
-    store(dst + 4*i, cast<U32>(to_fixed(((r - min) / range) * 1023)) <<  0
-                   | cast<U32>(to_fixed(((g - min) / range) * 1023)) << 10
-                   | cast<U32>(to_fixed(((b - min) / range) * 1023)) << 20);
-    return;
+    store(dst + 4*i, cast<U32>(to_fixed((r * 510) + 384)) <<  0
+                   | cast<U32>(to_fixed((g * 510) + 384)) << 10
+                   | cast<U32>(to_fixed((b * 510) + 384)) << 20);
+}
+
+FINAL_STAGE(store_10101010_XR, NoCtx) {
+    // Each channel is 16 bits, where the 6 low bits are padding.
+    store(dst + 8*i, cast<U64>(to_fixed((r * 510) + 384)) << ( 0+6)
+                   | cast<U64>(to_fixed((g * 510) + 384)) << (16+6)
+                   | cast<U64>(to_fixed((b * 510) + 384)) << (32+6)
+                   | cast<U64>(to_fixed((a * 510) + 384)) << (48+6));
 }
 
 FINAL_STAGE(store_1010102, NoCtx) {
@@ -1518,7 +1567,7 @@ FINAL_STAGE(store_ffff, NoCtx) {
 // NOLINTNEXTLINE(misc-definitions-in-headers)
 void run_program(const Op* program, const void** contexts, SKCMS_MAYBE_UNUSED ptrdiff_t programSize,
                  const char* src, char* dst, int n,
-                 const size_t src_bpp, const size_t dst_bpp) {
+                size_t src_bpp, size_t dst_bpp) {
 #if SKCMS_HAS_MUSTTAIL
     // Convert the program into an array of tailcall stages.
     StageFn stages[32];

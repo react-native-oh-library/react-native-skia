@@ -95,7 +95,7 @@ std::unique_ptr<GrFragmentProcessor> ColorTableEffect::Make(
 
 GR_DEFINE_FRAGMENT_PROCESSOR_TEST(ColorTableEffect)
 
-#if defined(GR_TEST_UTILS)
+#if defined(GPU_TEST_UTILS)
 std::unique_ptr<GrFragmentProcessor> ColorTableEffect::TestCreate(GrProcessorTestData* d) {
     int flags = 0;
     uint8_t luts[256][4];
@@ -118,7 +118,7 @@ std::unique_ptr<GrFragmentProcessor> ColorTableEffect::TestCreate(GrProcessorTes
     sk_sp<SkColorSpace> colorSpace = GrTest::TestColorSpace(d->fRandom);
     SkSurfaceProps props;  // default props for testing
     auto [success, fp] = GrFragmentProcessors::Make(
-            d->context(),
+            d->surfaceDrawContext(),
             filter.get(),
             d->inputFP(),
             GrColorInfo(GrColorType::kRGBA_8888, kUnknown_SkAlphaType, std::move(colorSpace)),

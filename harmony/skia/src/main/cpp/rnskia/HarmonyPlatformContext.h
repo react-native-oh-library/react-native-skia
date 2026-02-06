@@ -37,8 +37,8 @@ public:
 
     ~HarmonyPlatformContext() override;
 
-    void startDrawLoop() override;
-    void stopDrawLoop() override;
+//    void startDrawLoop() override;
+//    void stopDrawLoop() override;
     void runTaskOnMainThread();
     void SetStopRunOnMainThread();
     void runOnMainThread(std::function<void()>) override; // 运行在主线程上
@@ -61,9 +61,9 @@ public:
 
     // static sk_sp<SkImage> makeImageFromHardwareBuffer(void *buffer, bool requireKnownFormat = false);
 
-    static std::unique_ptr<WindowSurfaceHolder> makeWindowedSurface(OHNativeWindow *window, int width, int height) {
-        return std::make_unique<WindowSurfaceHolder>(window, width, height);
-    }
+    // static std::unique_ptr<WindowSurfaceHolder> makeWindowedSurface(OHNativeWindow *window, int width, int height) {
+    //     return std::make_unique<WindowSurfaceHolder>(window, width, height);
+    // }
 
     sk_sp<SkFontMgr> createFontMgr() override;
 
@@ -86,6 +86,23 @@ public:
     facebook::jsi::Runtime *_runtime;
     bool Getview(size_t tag);
 
+    GrDirectContext *getDirectContext() override;
+
+    sk_sp<SkImage> makeImageFromNativeTexture(const TextureInfo &textureInfo,
+                                            int width, int height,
+                                            bool mipMapped) override;
+
+    const TextureInfo getTexture(sk_sp<SkSurface> image) override;
+
+    const TextureInfo getTexture(sk_sp<SkImage> image) override;
+
+
+  std::shared_ptr<WindowContext>
+  makeContextFromNativeSurface(void *surface, int width, int height) override;
+
+  std::vector<std::string> getSystemFontFamilies() override;
+
+  std::string resolveFontFamily(const std::string &familyName) override;
 private:
     std::string DEFAULT_ASSETS_DEST = "assets/";
     // 绘制循环

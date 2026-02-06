@@ -7,14 +7,21 @@
 #ifndef SkPDFGradientShader_DEFINED
 #define SkPDFGradientShader_DEFINED
 
-#include "include/core/SkShader.h"
+#include "include/core/SkColor.h"
+#include "include/core/SkMatrix.h"
+#include "include/core/SkRect.h"
+#include "include/core/SkScalar.h"
+#include "include/private/base/SkAssert.h"
+#include "include/private/base/SkPoint_impl.h"
 #include "src/pdf/SkPDFTypes.h"
 #include "src/pdf/SkPDFUtils.h"
 #include "src/shaders/SkShaderBase.h"
 
-class SkMatrix;
+#include <cstdint>
+#include <memory>
+
 class SkPDFDocument;
-struct SkIRect;
+class SkShader;
 
 namespace SkPDFGradientShader {
 
@@ -26,7 +33,7 @@ SkPDFIndirectReference Make(SkPDFDocument* doc,
 struct Key {
     SkShaderBase::GradientType fType;
     SkShaderBase::GradientInfo fInfo;
-    std::unique_ptr<SkColor[]> fColors;
+    std::unique_ptr<SkColor4f[]> fColors;
     std::unique_ptr<SkScalar[]> fStops;
     SkMatrix fCanvasTransform;
     SkMatrix fShaderTransform;

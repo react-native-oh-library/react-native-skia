@@ -11,9 +11,11 @@
 #include "include/core/SkRefCnt.h"
 #include "modules/skottie/include/Skottie.h"
 
+#include "include/core/SkFontMgr.h"
 #include "include/core/SkFontStyle.h"
 #include "include/core/SkString.h"
 #include "include/core/SkTypeface.h"
+#include "modules/skottie/include/ExternalLayer.h"
 #include "modules/skottie/include/SkottieProperty.h"
 #include "modules/skottie/include/SlotManager.h"
 #include "modules/skottie/src/animator/Animator.h"
@@ -21,9 +23,10 @@
 #include "src/base/SkUTF.h"
 #include "src/core/SkTHash.h"
 
-#include <vector>
+#include "modules/skshaper/include/SkShaper_factory.h"
 
-class SkFontMgr;
+#include <string>
+#include <vector>
 
 namespace skjson {
 class ArrayValue;
@@ -65,7 +68,7 @@ class AnimationBuilder final : public SkNoncopyable {
 public:
     AnimationBuilder(sk_sp<ResourceProvider>, sk_sp<SkFontMgr>, sk_sp<PropertyObserver>,
                      sk_sp<Logger>, sk_sp<MarkerObserver>, sk_sp<PrecompInterceptor>,
-                     sk_sp<ExpressionManager>,
+                     sk_sp<ExpressionManager>, sk_sp<SkShapers::Factory>,
                      Animation::Builder::Stats*, const SkSize& comp_size,
                      float duration, float framerate, uint32_t flags);
 
@@ -73,6 +76,7 @@ public:
         sk_sp<sksg::RenderNode> fSceneRoot;
         AnimatorScope           fAnimators;
         sk_sp<SlotManager>      fSlotManager;
+        std::vector<LayerInfo>  fLayerInfo;
     };
 
     AnimationInfo parse(const skjson::ObjectValue&);
@@ -196,20 +200,20 @@ public:
         return fSlotsRoot;
     }
 
+    void parseFonts (const skjson::ObjectValue* jfonts, const skjson::ArrayValue* jchars);
+
 private:
     friend class CompositionBuilder;
     friend class CustomFont;
     friend class LayerBuilder;
     friend class AnimatablePropertyContainer;
+    friend class SkSLEffectBase;
 
     struct AttachLayerContext;
     struct AttachShapeContext;
     struct FootageAssetInfo;
-    struct LayerInfo;
 
     void parseAssets(const skjson::ArrayValue*);
-    void parseFonts (const skjson::ObjectValue* jfonts,
-                     const skjson::ArrayValue* jchars);
 
     // Return true iff all fonts were resolved.
     bool resolveNativeTypefaces();
@@ -236,30 +240,27 @@ private:
     sk_sp<sksg::RenderNode> attachTextLayer   (const skjson::ObjectValue&, LayerInfo*) const;
     sk_sp<sksg::RenderNode> attachAudioLayer  (const skjson::ObjectValue&, LayerInfo*) const;
 
-    sk_sp<ResourceProvider>      fResourceProvider;
-    sk_sp<SkFontMgr>             fFontMgr;
-    sk_sp<PropertyObserver>      fPropertyObserver;
-    sk_sp<Logger>                fLogger;
-    sk_sp<MarkerObserver>        fMarkerObserver;
-    sk_sp<PrecompInterceptor>    fPrecompInterceptor;
-    sk_sp<ExpressionManager>     fExpressionManager;
-    sk_sp<SceneGraphRevalidator> fRevalidator;
-    sk_sp<SlotManager>           fSlotManager;
-    Animation::Builder::Stats*   fStats;
-    const SkSize                 fCompSize;
-    const float                  fDuration,
-                                 fFrameRate;
-    const uint32_t               fFlags;
-    mutable AnimatorScope*       fCurrentAnimatorScope;
-    mutable const char*          fPropertyObserverContext = nullptr;
-    mutable bool                 fHasNontrivialBlending : 1;
+    void trackLayerInfo(const LayerInfo& info) const {fLayerInfo.emplace_back(info);}
 
-    struct LayerInfo {
-        SkSize      fSize;
-        const float fInPoint,
-                    fOutPoint;
-    };
-
+    sk_sp<ResourceProvider>        fResourceProvider;
+    sk_sp<SkFontMgr>               fFontMgr;
+    sk_sp<PropertyObserver>        fPropertyObserver;
+    sk_sp<Logger>                  fLogger;
+    sk_sp<MarkerObserver>          fMarkerObserver;
+    sk_sp<PrecompInterceptor>      fPrecompInterceptor;
+    sk_sp<ExpressionManager>       fExpressionManager;
+    sk_sp<SkShapers::Factory>      fShapingFactory;
+    sk_sp<SceneGraphRevalidator>   fRevalidator;
+    sk_sp<SlotManager>             fSlotManager;
+    Animation::Builder::Stats*     fStats;
+    const SkSize                   fCompSize;
+    const float                    fDuration,
+                                   fFrameRate;
+    const uint32_t                 fFlags;
+    mutable std::vector<LayerInfo> fLayerInfo;
+    mutable AnimatorScope*         fCurrentAnimatorScope;
+    mutable const char*            fPropertyObserverContext = nullptr;
+    mutable bool                   fHasNontrivialBlending : 1;
     struct AssetInfo {
         const skjson::ObjectValue* fAsset;
         mutable bool               fIsAttaching; // Used for cycle detection

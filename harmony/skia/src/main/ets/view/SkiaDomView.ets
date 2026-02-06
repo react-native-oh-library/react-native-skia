@@ -5,7 +5,6 @@
  */
 
 import XComponentContext from '../XComponentContext';
-import { display } from '@kit.ArkUI';
 import Logger from '../Logger';
 
 const TAG: string = 'SkiaDomView'
@@ -20,13 +19,15 @@ export struct SkiaDomView {
   nativeID: number = 0;
   xComponentId: string = '';
   mode: string = 'default';
-  debug: boolean = true;
+  debug: boolean = false;
+  opaque: boolean = false;
+  colorSpace: string = "srgb";
 
   aboutToAppear(): void {
     this.xComponentId = X_COMPONENT_ID + '_' + this.nativeID;
-    display.getAllDisplays((error, display) => {
-      Logger.debug(TAG, 'aboutToAppear getAllDisplays' + JSON.stringify(display));
-    });
+    Logger.debug(TAG,
+      "aboutToAppear xComponentId " + this.xComponentId + " debug " + this.debug + " opaque " + this.opaque +
+        " colorSpace " + this.colorSpace);
   }
 
   aboutToDisappear(): void {
@@ -37,14 +38,15 @@ export struct SkiaDomView {
   build() {
     XComponent({
       id: X_COMPONENT_ID + "_" + this.nativeID,
-      type: XComponentType.SURFACE,
+      type: this.opaque ? XComponentType.TEXTURE : XComponentType.SURFACE,
       libraryname: "rnoh_skia",
       controller: this.xComponentController
     })
       .onLoad((xComponentContext) => {
         this.xComponentContext = xComponentContext as XComponentContext;
-        Logger.debug(TAG, 'XComponent onLoad nativeID=' + this.nativeID);
-        this.xComponentContext?.registerView(X_COMPONENT_ID + "_" + this.nativeID, this.nativeID);
+        Logger.debug(TAG, 'XComponent onLoad nativeID=' + this.nativeID + " debug " + this.debug);
+        this.xComponentContext?.registerView(X_COMPONENT_ID + "_" + this.nativeID, this.nativeID,
+          this.colorSpace === "srgb" ? false : true);
         this.xComponentContext?.setModeAndDebug(this.xComponentId, this.mode, this.debug);
       })
       .onSizeChange((oldValue: SizeOptions, newValue: SizeOptions) => {
@@ -52,7 +54,8 @@ export struct SkiaDomView {
           'XComponent onSizeChange oldValue=' + JSON.stringify(oldValue) + ", newValue=" + JSON.stringify(newValue));
         let width = newValue.width?.valueOf() as number;
         let height = newValue.height?.valueOf() as number;
-        this.xComponentContext?.onSurfaceSizeChanged(X_COMPONENT_ID + "_" + this.nativeID, this.nativeID, width, height);
+        this.xComponentContext?.onSurfaceSizeChanged(X_COMPONENT_ID + "_" + this.nativeID, this.nativeID, width,
+          height);
       })
       .backgroundColor(Color.Transparent)
       .width(this.viewWidth)

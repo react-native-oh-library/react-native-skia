@@ -7,10 +7,17 @@
 
 #include "src/gpu/ganesh/GrPersistentCacheUtils.h"
 
+#include "include/private/base/SkTo.h"
+#include "include/private/gpu/ganesh/GrTypesPriv.h"
 #include "src/core/SkReadBuffer.h"
 #include "src/core/SkWriteBuffer.h"
 #include "src/sksl/SkSLProgramSettings.h"
-#include "src/sksl/SkSLString.h"
+#include "src/sksl/codegen/SkSLNativeShader.h"
+
+#include <algorithm>
+#include <cstddef>
+#include <cstdint>
+#include <vector>
 
 namespace GrPersistentCacheUtils {
 
@@ -32,7 +39,7 @@ int GetCurrentVersion() {
 }
 
 sk_sp<SkData> PackCachedShaders(SkFourByteTag shaderType,
-                                const std::string shaders[],
+                                const SkSL::NativeShader shaders[],
                                 const SkSL::Program::Interface interfaces[],
                                 int numInterfaces,
                                 const ShaderMetadata* meta) {
@@ -44,7 +51,13 @@ sk_sp<SkData> PackCachedShaders(SkFourByteTag shaderType,
     writer.writeInt(kCurrentVersion);
     writer.writeUInt(shaderType);
     for (int i = 0; i < kGrShaderTypeCount; ++i) {
-        writer.writeByteArray(shaders[i].c_str(), shaders[i].size());
+        if (shaders[i].isBinary()) {
+            writer.writeByteArray(shaders[i].fBinary.data(),
+                                  shaders[i].fBinary.size() * sizeof(uint32_t));
+        } else {
+            writer.writeByteArray(shaders[i].fText.c_str(), shaders[i].fText.size());
+        }
+
         writer.writePad32(&interfaces[std::min(i, numInterfaces - 1)],
                           sizeof(SkSL::Program::Interface));
     }
@@ -55,7 +68,7 @@ sk_sp<SkData> PackCachedShaders(SkFourByteTag shaderType,
             writer.writeBool(meta->fSettings->fForceNoRTFlip);
             writer.writeBool(meta->fSettings->fFragColorIsInOut);
             writer.writeBool(meta->fSettings->fForceHighPrecision);
-            writer.writeBool(meta->fSettings->fUsePushConstants);
+            writer.writeBool(meta->fSettings->fUseVulkanPushConstantsForGaneshRTAdjust);
         }
 
         writer.writeInt(meta->fAttributeNames.size());
@@ -80,15 +93,23 @@ SkFourByteTag GetType(SkReadBuffer* reader) {
 }
 
 bool UnpackCachedShaders(SkReadBuffer* reader,
-                         std::string shaders[],
+                         SkSL::NativeShader shaders[],
+                         bool areShadersBinary,
                          SkSL::Program::Interface interfaces[],
                          int numInterfaces,
                          ShaderMetadata* meta) {
     for (int i = 0; i < kGrShaderTypeCount; ++i) {
         size_t shaderLen = 0;
-        const char* shaderBuf = static_cast<const char*>(reader->skipByteArray(&shaderLen));
+        const void* shaderBuf = reader->skipByteArray(&shaderLen);
         if (shaderBuf) {
-            shaders[i].assign(shaderBuf, shaderLen);
+            if (areShadersBinary) {
+                const uint32_t* words = static_cast<const uint32_t*>(shaderBuf);
+                SkASSERT(shaderLen % 4 == 0);
+                shaders[i].fBinary.insert(
+                        shaders[i].fBinary.end(), words, words + shaderLen / sizeof(uint32_t));
+            } else {
+                shaders[i].fText.assign(static_cast<const char*>(shaderBuf), shaderLen);
+            }
         }
 
         // GL, for example, only wants one Interface
@@ -102,10 +123,10 @@ bool UnpackCachedShaders(SkReadBuffer* reader,
         SkASSERT(meta->fSettings != nullptr);
 
         if (reader->readBool()) {
-            meta->fSettings->fForceNoRTFlip      = reader->readBool();
-            meta->fSettings->fFragColorIsInOut   = reader->readBool();
-            meta->fSettings->fForceHighPrecision = reader->readBool();
-            meta->fSettings->fUsePushConstants   = reader->readBool();
+            meta->fSettings->fForceNoRTFlip                             = reader->readBool();
+            meta->fSettings->fFragColorIsInOut                          = reader->readBool();
+            meta->fSettings->fForceHighPrecision                        = reader->readBool();
+            meta->fSettings->fUseVulkanPushConstantsForGaneshRTAdjust   = reader->readBool();
         }
 
         meta->fAttributeNames.resize(reader->readInt());
@@ -124,7 +145,8 @@ bool UnpackCachedShaders(SkReadBuffer* reader,
 
     if (!reader->isValid()) {
         for (int i = 0; i < kGrShaderTypeCount; ++i) {
-            shaders[i].clear();
+            shaders[i].fText.clear();
+            shaders[i].fBinary.clear();
         }
     }
     return reader->isValid();

@@ -10,11 +10,15 @@
 
 #include "include/sksl/SkSLVersion.h"
 #include "src/sksl/SkSLDefines.h"
+#include "src/sksl/SkSLModule.h"
 #include "src/sksl/SkSLProgramKind.h"
 
+#include <optional>
 #include <vector>
 
 namespace SkSL {
+
+enum class ModuleType : int8_t;
 
 /**
  * Holds the compiler settings for a program.
@@ -61,8 +65,8 @@ struct ProgramSettings {
     // correctness
     bool fValidateSPIRV = true;
     // If true, any synthetic uniforms must use push constant syntax
-    bool fUsePushConstants = false;
-    // TODO(skia:11209) - Replace this with a "promised" capabilities?
+    bool fUseVulkanPushConstantsForGaneshRTAdjust = false;
+    // TODO(skbug.com/40042585) - Replace this with a "promised" capabilities?
     // Sets a maximum SkSL version. Compilation will fail if the program uses features that aren't
     // allowed at the requested version. For instance, a valid program must have fully-unrollable
     // `for` loops at version 100, but any loop structure is allowed at version 300.
@@ -79,10 +83,17 @@ struct ProgramSettings {
  * All the configuration data for a given program.
  */
 struct ProgramConfig {
-    /** True if we are currently processing one of the built-in SkSL include modules. */
-    bool fIsBuiltinCode;
+    /**
+     * If we are compiling one of the SkSL built-in modules, this field indicates which one.
+     * Contains `ModuleType::program` when not compiling a module at all.
+     */
+    ModuleType fModuleType;
     ProgramKind fKind;
     ProgramSettings fSettings;
+
+    bool isBuiltinCode() {
+        return fModuleType != ModuleType::program;
+    }
 
     // When enforcesSkSLVersion() is true, this determines the available feature set that will be
     // enforced. This is set automatically when the `#version` directive is parsed.
@@ -93,7 +104,7 @@ struct ProgramConfig {
     }
 
     bool strictES2Mode() const {
-        // TODO(skia:11209): Remove the first condition - so this is just based on #version.
+        // TODO(skbug.com/40042585): Remove the first condition - so this is just based on #version.
         //                   Make it more generic (eg, isVersionLT) checking.
         return fSettings.fMaxVersionAllowed == Version::k100 &&
                fRequiredSkSLVersion == Version::k100 &&
@@ -112,14 +123,12 @@ struct ProgramConfig {
 
     static bool IsFragment(ProgramKind kind) {
         return kind == ProgramKind::kFragment ||
-               kind == ProgramKind::kGraphiteFragment ||
-               kind == ProgramKind::kGraphiteFragmentES2;
+               kind == ProgramKind::kGraphiteFragment;
     }
 
     static bool IsVertex(ProgramKind kind) {
         return kind == ProgramKind::kVertex ||
-               kind == ProgramKind::kGraphiteVertex ||
-               kind == ProgramKind::kGraphiteVertexES2;
+               kind == ProgramKind::kGraphiteVertex;
     }
 
     static bool IsCompute(ProgramKind kind) {
@@ -150,6 +159,11 @@ struct ProgramConfig {
     static bool IsRuntimeBlender(ProgramKind kind) {
         return (kind == ProgramKind::kRuntimeBlender ||
                 kind == ProgramKind::kPrivateRuntimeBlender);
+    }
+
+    static bool IsMesh(ProgramKind kind) {
+        return (kind == ProgramKind::kMeshVertex ||
+                kind == ProgramKind::kMeshFragment);
     }
 
     static bool AllowsPrivateIdentifiers(ProgramKind kind) {

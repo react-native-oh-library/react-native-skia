@@ -1,6 +1,6 @@
 {
   "name": "canvaskit-wasm",
-  "version": "0.39.1",
+  "version": "0.40.0",
   "description": "A WASM version of Skia's Canvas API",
   "main": "bin/canvaskit.js",
   "homepage": "https://github.com/google/skia/tree/main/modules/canvaskit",
@@ -72,6 +72,7 @@
       "import": "./bin/profiling/canvaskit.js",
       "types": "./types/index.d.ts"
     },
-    "./bin/profiling/canvaskit.wasm": "./bin/profiling/canvaskit.wasm"
+    "./bin/profiling/canvaskit.wasm": "./bin/profiling/canvaskit.wasm",
+    "./package.json": "./package.json"
   }
 }

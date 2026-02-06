@@ -4,34 +4,76 @@
  * Use of this source code is governed by a BSD-style license that can be
  * found in the LICENSE file.
  */
-
 #include "src/gpu/ganesh/ops/AAConvexPathRenderer.h"
 
+#include "include/core/SkMatrix.h"
+#include "include/core/SkPath.h"
+#include "include/core/SkPoint.h"
+#include "include/core/SkRefCnt.h"
+#include "include/core/SkScalar.h"
 #include "include/core/SkString.h"
 #include "include/core/SkTypes.h"
+#include "include/gpu/ganesh/GrRecordingContext.h"
+#include "include/private/base/SkDebug.h"
+#include "include/private/base/SkFloatingPoint.h"
+#include "include/private/base/SkMath.h"
+#include "include/private/base/SkTArray.h"
+#include "include/private/base/SkTDArray.h"
+#include "include/private/gpu/ganesh/GrTypesPriv.h"
+#include "src/base/SkArenaAlloc.h"
+#include "src/core/SkColorData.h"
 #include "src/core/SkGeometry.h"
 #include "src/core/SkMatrixPriv.h"
+#include "src/core/SkPathEnums.h"
 #include "src/core/SkPathPriv.h"
 #include "src/core/SkPointPriv.h"
+#include "src/core/SkSLTypeShared.h"
 #include "src/gpu/BufferWriter.h"
 #include "src/gpu/KeyBuilder.h"
+#include "src/gpu/ganesh/GrAppliedClip.h"
 #include "src/gpu/ganesh/GrAuditTrail.h"
+#include "src/gpu/ganesh/GrBuffer.h"
 #include "src/gpu/ganesh/GrCaps.h"
 #include "src/gpu/ganesh/GrDrawOpTest.h"
 #include "src/gpu/ganesh/GrGeometryProcessor.h"
-#include "src/gpu/ganesh/GrProcessor.h"
+#include "src/gpu/ganesh/GrMeshDrawTarget.h"
+#include "src/gpu/ganesh/GrOpFlushState.h"
+#include "src/gpu/ganesh/GrPaint.h"
+#include "src/gpu/ganesh/GrProcessorAnalysis.h"
+#include "src/gpu/ganesh/GrProcessorSet.h"
 #include "src/gpu/ganesh/GrProcessorUnitTest.h"
 #include "src/gpu/ganesh/GrProgramInfo.h"
+#include "src/gpu/ganesh/GrRecordingContextPriv.h"
+#include "src/gpu/ganesh/GrShaderCaps.h"
+#include "src/gpu/ganesh/GrSimpleMesh.h"
+#include "src/gpu/ganesh/GrStyle.h"
 #include "src/gpu/ganesh/SurfaceDrawContext.h"
 #include "src/gpu/ganesh/geometry/GrPathUtils.h"
 #include "src/gpu/ganesh/geometry/GrStyledShape.h"
 #include "src/gpu/ganesh/glsl/GrGLSLFragmentShaderBuilder.h"
-#include "src/gpu/ganesh/glsl/GrGLSLProgramDataManager.h"
-#include "src/gpu/ganesh/glsl/GrGLSLUniformHandler.h"
 #include "src/gpu/ganesh/glsl/GrGLSLVarying.h"
 #include "src/gpu/ganesh/glsl/GrGLSLVertexGeoBuilder.h"
 #include "src/gpu/ganesh/ops/GrMeshDrawOp.h"
+#include "src/gpu/ganesh/ops/GrOp.h"
 #include "src/gpu/ganesh/ops/GrSimpleMeshDrawOpHelperWithStencil.h"
+
+#if defined(GPU_TEST_UTILS)
+#include "src/base/SkRandom.h"
+#include "src/gpu/ganesh/GrTestUtils.h"
+#endif
+
+#include <cstddef>
+#include <cstdint>
+#include <memory>
+#include <utility>
+
+class GrDstProxyView;
+class GrGLSLProgramDataManager;
+class GrGLSLUniformHandler;
+class GrSurfaceProxyView;
+enum class GrXferBarrierFlags;
+struct GrUserStencilSettings;
+struct SkRect;
 
 using namespace skia_private;
 
@@ -41,10 +83,11 @@ namespace {
 
 struct Segment {
     enum {
-        // These enum values are assumed in member functions below.
         kLine = 0,
         kQuad = 1,
     } fType;
+    // These enum values are assumed in member functions below.
+    static_assert(0 == kLine && 1 == kQuad);
 
     // line uses one pt, quad uses 2 pts
     SkPoint fPts[2];
@@ -54,16 +97,16 @@ struct Segment {
     // sharp. If so, fMid is a normalized bisector facing outward.
     SkVector fMid;
 
-    int countPoints() {
-        static_assert(0 == kLine && 1 == kQuad);
+    int countPoints() const {
+        SkASSERT(fType == kLine || fType == kQuad);
         return fType + 1;
     }
     const SkPoint& endPt() const {
-        static_assert(0 == kLine && 1 == kQuad);
+        SkASSERT(fType == kLine || fType == kQuad);
         return fPts[fType];
     }
     const SkPoint& endNorm() const {
-        static_assert(0 == kLine && 1 == kQuad);
+        SkASSERT(fType == kLine || fType == kQuad);
         return fNorms[fType];
     }
 };
@@ -120,7 +163,7 @@ bool center_of_mass(const SegmentArray& segments, SkPoint* c) {
         // undo the translate of p0 to the origin.
         *c = center + p0;
     }
-    return !SkScalarIsNaN(c->fX) && !SkScalarIsNaN(c->fY) && c->isFinite();
+    return !SkIsNaN(c->fX) && !SkIsNaN(c->fY) && c->isFinite();
 }
 
 bool compute_vectors(SegmentArray* segments,
@@ -187,14 +230,14 @@ bool compute_vectors(SegmentArray* segments,
 }
 
 struct DegenerateTestData {
-    DegenerateTestData() { fStage = kInitial; }
-    bool isDegenerate() const { return kNonDegenerate != fStage; }
-    enum {
+    bool isDegenerate() const { return Stage::kNonDegenerate != fStage; }
+    enum class Stage {
         kInitial,
         kPoint,
         kLine,
-        kNonDegenerate
-    }           fStage;
+        kNonDegenerate,
+    };
+    Stage       fStage = Stage::kInitial;
     SkPoint     fFirstPoint;
     SkVector    fLineNormal;
     SkScalar    fLineC;
@@ -205,25 +248,25 @@ static const SkScalar kCloseSqd = kClose * kClose;
 
 void update_degenerate_test(DegenerateTestData* data, const SkPoint& pt) {
     switch (data->fStage) {
-        case DegenerateTestData::kInitial:
+        case DegenerateTestData::Stage::kInitial:
             data->fFirstPoint = pt;
-            data->fStage = DegenerateTestData::kPoint;
+            data->fStage = DegenerateTestData::Stage::kPoint;
             break;
-        case DegenerateTestData::kPoint:
+        case DegenerateTestData::Stage::kPoint:
             if (SkPointPriv::DistanceToSqd(pt, data->fFirstPoint) > kCloseSqd) {
                 data->fLineNormal = pt - data->fFirstPoint;
                 data->fLineNormal.normalize();
                 data->fLineNormal = SkPointPriv::MakeOrthog(data->fLineNormal);
                 data->fLineC = -data->fLineNormal.dot(data->fFirstPoint);
-                data->fStage = DegenerateTestData::kLine;
+                data->fStage = DegenerateTestData::Stage::kLine;
             }
             break;
-        case DegenerateTestData::kLine:
+        case DegenerateTestData::Stage::kLine:
             if (SkScalarAbs(data->fLineNormal.dot(pt) + data->fLineC) > kClose) {
-                data->fStage = DegenerateTestData::kNonDegenerate;
+                data->fStage = DegenerateTestData::Stage::kNonDegenerate;
             }
             break;
-        case DegenerateTestData::kNonDegenerate:
+        case DegenerateTestData::Stage::kNonDegenerate:
             break;
         default:
             SK_ABORT("Unexpected degenerate test stage.");
@@ -287,7 +330,6 @@ bool get_segments(const SkPath& path,
                   SkPoint* fanPt,
                   int* vCount,
                   int* iCount) {
-    SkPath::Iter iter(path, true);
     // This renderer over-emphasizes very thin path regions. We use the distance
     // to the path from the sample to compute coverage. Every pixel intersected
     // by the path will be hit and the maximum distance is sqrt(2)/2. We don't
@@ -301,36 +343,36 @@ bool get_segments(const SkPath& path,
         return false;
     }
 
-    for (;;) {
-        SkPoint pts[4];
-        SkPath::Verb verb = iter.next(pts);
-        switch (verb) {
-            case SkPath::kMove_Verb:
-                m.mapPoints(pts, 1);
-                update_degenerate_test(&degenerateData, pts[0]);
+    SkPath::Iter iter(path, true);
+    while (auto rec = iter.next()) {
+        SkSpan<const SkPoint> src = rec->fPoints;
+        switch (rec->fVerb) {
+            case SkPathVerb::kMove:
+                update_degenerate_test(&degenerateData, m.mapPoint(src[0]));
                 break;
-            case SkPath::kLine_Verb: {
-                if (!SkPathPriv::AllPointsEq(pts, 2)) {
-                    m.mapPoints(&pts[1], 1);
-                    update_degenerate_test(&degenerateData, pts[1]);
-                    add_line_to_segment(pts[1], segments);
+            case SkPathVerb::kLine: {
+                if (!SkPathPriv::AllPointsEq(src)) {
+                    SkPoint dst = m.mapPoint(src[1]);
+                    update_degenerate_test(&degenerateData, dst);
+                    add_line_to_segment(dst, segments);
                 }
                 break;
             }
-            case SkPath::kQuad_Verb:
-                if (!SkPathPriv::AllPointsEq(pts, 3)) {
-                    m.mapPoints(pts, 3);
-                    update_degenerate_test(&degenerateData, pts[1]);
-                    update_degenerate_test(&degenerateData, pts[2]);
-                    add_quad_segment(pts, segments);
+            case SkPathVerb::kQuad:
+                if (!SkPathPriv::AllPointsEq(src)) {
+                    SkPoint dst[3];
+                    m.mapPoints(dst, src);
+                    update_degenerate_test(&degenerateData, dst[1]);
+                    update_degenerate_test(&degenerateData, dst[2]);
+                    add_quad_segment(dst, segments);
                 }
                 break;
-            case SkPath::kConic_Verb: {
-                if (!SkPathPriv::AllPointsEq(pts, 3)) {
-                    m.mapPoints(pts, 3);
-                    SkScalar weight = iter.conicWeight();
+            case SkPathVerb::kConic: {
+                if (!SkPathPriv::AllPointsEq(src)) {
+                    SkPoint dst[3];
+                    m.mapPoints(dst, src);
                     SkAutoConicToQuads converter;
-                    const SkPoint* quadPts = converter.computeQuads(pts, weight, 0.25f);
+                    const SkPoint* quadPts = converter.computeQuads(dst, rec->conicWeight(), 0.25f);
                     for (int i = 0; i < converter.countQuads(); ++i) {
                         update_degenerate_test(&degenerateData, quadPts[2*i + 1]);
                         update_degenerate_test(&degenerateData, quadPts[2*i + 2]);
@@ -339,25 +381,26 @@ bool get_segments(const SkPath& path,
                 }
                 break;
             }
-            case SkPath::kCubic_Verb: {
-                if (!SkPathPriv::AllPointsEq(pts, 4)) {
-                    m.mapPoints(pts, 4);
-                    update_degenerate_test(&degenerateData, pts[1]);
-                    update_degenerate_test(&degenerateData, pts[2]);
-                    update_degenerate_test(&degenerateData, pts[3]);
-                    add_cubic_segments(pts, dir, segments);
+            case SkPathVerb::kCubic: {
+                if (!SkPathPriv::AllPointsEq(src)) {
+                    SkPoint dst[4];
+                    m.mapPoints(dst, src);
+                    update_degenerate_test(&degenerateData, dst[1]);
+                    update_degenerate_test(&degenerateData, dst[2]);
+                    update_degenerate_test(&degenerateData, dst[3]);
+                    add_cubic_segments(dst, dir, segments);
                 }
                 break;
             }
-            case SkPath::kDone_Verb:
-                if (degenerateData.isDegenerate()) {
-                    return false;
-                } else {
-                    return compute_vectors(segments, fanPt, dir, vCount, iCount);
-                }
-            default:
+            case SkPathVerb::kClose:
                 break;
         }
+    }
+
+    if (degenerateData.isDegenerate()) {
+        return false;
+    } else {
+        return compute_vectors(segments, fanPt, dir, vCount, iCount);
     }
 }
 
@@ -675,7 +718,7 @@ std::unique_ptr<GrGeometryProcessor::ProgramImpl> QuadEdgeEffect::makeProgramImp
 
 GR_DEFINE_GEOMETRY_PROCESSOR_TEST(QuadEdgeEffect)
 
-#if defined(GR_TEST_UTILS)
+#if defined(GPU_TEST_UTILS)
 GrGeometryProcessor* QuadEdgeEffect::TestCreate(GrProcessorTestData* d) {
     SkMatrix localMatrix = GrTest::TestMatrix(d->fRandom);
     bool usesLocalCoords = d->fRandom->nextBool();
@@ -743,8 +786,12 @@ private:
                              GrXferBarrierFlags renderPassXferBarriers,
                              GrLoadOp colorLoadOp) override {
         SkMatrix invert;
-        if (fHelper.usesLocalCoords() && !fPaths.back().fViewMatrix.invert(&invert)) {
-            return;
+        if (fHelper.usesLocalCoords()) {
+            if (auto inv = fPaths.back().fViewMatrix.invert()) {
+                invert = *inv;
+            } else {
+                return;
+            }
         }
 
         GrGeometryProcessor* quadProcessor = QuadEdgeEffect::Make(arena, invert,
@@ -783,21 +830,19 @@ private:
 
             // We avoid initializing the path unless we have to
             const SkPath* pathPtr = &args.fPath;
-            SkTLazy<SkPath> tmpPath;
+            std::optional<SkPath> tmpPath;
             if (viewMatrix->hasPerspective()) {
-                SkPath* tmpPathPtr = tmpPath.init(*pathPtr);
-                tmpPathPtr->setIsVolatile(true);
-                tmpPathPtr->transform(*viewMatrix);
+                tmpPath.emplace(pathPtr->makeTransform(*viewMatrix));
+                tmpPath->setIsVolatile(true);
+                pathPtr = &tmpPath.value();
                 viewMatrix = &SkMatrix::I();
-                pathPtr = tmpPathPtr;
             }
 
             int vertexCount;
             int indexCount;
-            enum {
-                kPreallocSegmentCnt = 512 / sizeof(Segment),
-                kPreallocDrawCnt = 4,
-            };
+            static constexpr size_t kPreallocSegmentCnt = 512 / sizeof(Segment);
+            static constexpr size_t kPreallocDrawCnt = 4;
+
             STArray<kPreallocSegmentCnt, Segment, true> segments;
             SkPoint fanPt;
 
@@ -875,7 +920,7 @@ private:
         return CombineResult::kMerged;
     }
 
-#if defined(GR_TEST_UTILS)
+#if defined(GPU_TEST_UTILS)
     SkString onDumpInfo() const override {
         return SkStringPrintf("Count: %d\n%s", fPaths.size(), fHelper.dumpInfo().c_str());
     }
@@ -924,8 +969,7 @@ bool AAConvexPathRenderer::onDrawPath(const DrawPathArgs& args) {
     SkASSERT(args.fSurfaceDrawContext->numSamples() <= 1);
     SkASSERT(!args.fShape->isEmpty());
 
-    SkPath path;
-    args.fShape->asPath(&path);
+    SkPath path = args.fShape->asPath();
 
     GrOp::Owner op = AAConvexPathOp::Make(args.fContext, std::move(args.fPaint),
                                           *args.fViewMatrix,
@@ -936,7 +980,7 @@ bool AAConvexPathRenderer::onDrawPath(const DrawPathArgs& args) {
 
 }  // namespace skgpu::ganesh
 
-#if defined(GR_TEST_UTILS)
+#if defined(GPU_TEST_UTILS)
 
 GR_DRAW_OP_TEST_DEFINE(AAConvexPathOp) {
     SkMatrix viewMatrix = GrTest::TestMatrixInvertible(random);

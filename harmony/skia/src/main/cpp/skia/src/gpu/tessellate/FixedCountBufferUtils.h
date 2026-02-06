@@ -11,6 +11,10 @@
 #include "src/gpu/tessellate/LinearTolerances.h"
 #include "src/gpu/tessellate/Tessellation.h"
 
+#include <algorithm>
+#include <cstddef>
+#include <cstdint>
+
 namespace skgpu { struct VertexWriter; }
 
 namespace skgpu::tess {
@@ -52,10 +56,18 @@ public:
         return NumCurveTrianglesAtResolveLevel(resolveLevel) * 3;
     }
 
+    static constexpr size_t VertexBufferVertexCount() {
+        return kMaxParametricSegments + 1;
+    }
+
+    static constexpr size_t VertexBufferStride() {
+        return 2 * sizeof(float);
+    }
+
     // Return the number of bytes to allocate for a buffer filled via WriteVertexBuffer, assuming
     // the shader and curve instances do require more than kMaxParametricSegments segments.
     static constexpr size_t VertexBufferSize() {
-        return (kMaxParametricSegments + 1) * (2 * sizeof(float));
+        return VertexBufferVertexCount() * VertexBufferStride();
     }
 
     // As above but for the corresponding index buffer, written via WriteIndexBuffer.
@@ -85,8 +97,16 @@ public:
         return (NumCurveTrianglesAtResolveLevel(resolveLevel) + 1) * 3;
     }
 
+    static constexpr size_t VertexBufferVertexCount() {
+        return (kMaxParametricSegments + 1) + 1/*fan vertex*/;
+    }
+
+    static constexpr size_t VertexBufferStride() {
+        return 2 * sizeof(float);
+    }
+
     static constexpr size_t VertexBufferSize() {
-        return ((kMaxParametricSegments + 1) + 1/*fan vertex*/) * (2 * sizeof(float));
+        return VertexBufferVertexCount() * VertexBufferStride();
     }
 
     static constexpr size_t IndexBufferSize() {

@@ -4,22 +4,34 @@
  * Use of this source code is governed by a BSD-style license that can be
  * found in the LICENSE file.
  */
-
 #include "src/gpu/ganesh/glsl/GrGLSLProgramBuilder.h"
 
-#include <memory>
-
-#include "src/gpu/ganesh/GrCaps.h"
+#include "include/core/SkSpan.h"
+#include "include/core/SkString.h"
+#include "include/gpu/ganesh/GrTypes.h"
+#include "include/private/base/SkAssert.h"
+#include "include/private/base/SkTemplates.h"
+#include "src/core/SkSLTypeShared.h"
 #include "src/gpu/ganesh/GrFragmentProcessor.h"
 #include "src/gpu/ganesh/GrGeometryProcessor.h"
 #include "src/gpu/ganesh/GrPipeline.h"
-#include "src/gpu/ganesh/GrRenderTarget.h"
+#include "src/gpu/ganesh/GrResourceHandle.h"
 #include "src/gpu/ganesh/GrShaderCaps.h"
-#include "src/gpu/ganesh/GrTexture.h"
+#include "src/gpu/ganesh/GrSurfaceProxy.h"
+#include "src/gpu/ganesh/GrSurfaceProxyView.h"
+#include "src/gpu/ganesh/GrTextureProxy.h"
 #include "src/gpu/ganesh/GrXferProcessor.h"
 #include "src/gpu/ganesh/effects/GrTextureEffect.h"
 #include "src/gpu/ganesh/glsl/GrGLSLVarying.h"
 #include "src/sksl/SkSLCompiler.h"
+#include "src/sksl/SkSLString.h"
+
+#include <functional>
+#include <memory>
+#include <tuple>
+#include <unordered_map>
+#include <utility>
+
 
 using namespace skia_private;
 
@@ -80,8 +92,10 @@ bool GrGLSLProgramBuilder::emitAndInstallPrimProc(SkString* outputColor, SkStrin
     fUniformHandles.fRTAdjustmentUni = this->uniformHandler()->addUniform(
             nullptr, kVertex_GrShaderFlag, SkSLType::kFloat4, SkSL::Compiler::RTADJUST_NAME);
 
+#if defined(SK_DEBUG)
     fFS.codeAppendf("// Stage %d, %s\n", fStageIndex, geomProc.name());
     fVS.codeAppendf("// Primitive Processor %s\n", geomProc.name());
+#endif
 
     SkASSERT(!fGPImpl);
     fGPImpl = geomProc.makeProgramImpl(*this->shaderCaps());
@@ -339,7 +353,9 @@ bool GrGLSLProgramBuilder::emitAndInstallDstTexture() {
                 SkSLType::kHalf4,
                 "DstTextureCoords",
                 &dstTextureCoordsName);
+#if defined(SK_DEBUG)
         fFS.codeAppend("// Read color from copy of the destination\n");
+#endif
         if (dstTextureProxy->textureType() == GrTextureType::k2D) {
             fFS.codeAppendf("float2 _dstTexCoord = (sk_FragCoord.xy - %s.xy) * %s.zw;\n",
                     dstTextureCoordsName, dstTextureCoordsName);
@@ -372,7 +388,9 @@ bool GrGLSLProgramBuilder::emitAndInstallDstTexture() {
 
         // Populate the _dstColor variable by loading from the input attachment at the top of the
         // fragment shader.
+#if defined(SK_DEBUG)
         fFS.codeAppend("// Read color from input attachment\n");
+#endif
         const char* dstColor = fFS.dstColor();
         SkString dstColorDecl = SkStringPrintf("half4 %s;", dstColor);
         fFS.definitionAppend(dstColorDecl.c_str());
@@ -399,7 +417,11 @@ bool GrGLSLProgramBuilder::emitAndInstallXferProc(const SkString& colorIn,
     }
 
     SkString openBrace;
+#if defined(SK_DEBUG)
     openBrace.printf("{ // Xfer Processor: %s\n", xp.name());
+#else
+    openBrace.printf("{\n");
+#endif
     fFS.codeAppend(openBrace.c_str());
 
     SkString finalInColor = colorIn.size() ? colorIn : SkString("float4(1)");

@@ -5,14 +5,20 @@
  * found in the LICENSE file.
  */
 
-#include "include/core/SkCanvas.h"
-#include "include/core/SkMatrix.h"
-#include "include/pathops/SkPathOps.h"
-#include "include/private/base/SkTPin.h"
 #include "modules/svg/include/SkSVGNode.h"
+
+#include "include/core/SkColor.h"
+#include "include/core/SkM44.h"
+#include "include/core/SkMatrix.h"
+#include "include/core/SkPath.h"
+#include "include/pathops/SkPathOps.h"
+#include "include/private/base/SkAssert.h"
 #include "modules/svg/include/SkSVGRenderContext.h"
-#include "modules/svg/include/SkSVGValue.h"
-#include "src/base/SkTLazy.h"
+
+#include <algorithm>
+#include <array>
+#include <cstddef>
+#include <optional>
 
 SkSVGNode::SkSVGNode(SkSVGTag t) : fTag(t) {
     // Uninherited presentation attributes need a non-null default value.
@@ -49,7 +55,9 @@ SkPath SkSVGNode::asPath(const SkSVGRenderContext& ctx) const {
 
     if (const auto* clipPath = localContext.clipPath()) {
         // There is a clip-path present on the current node.
-        Op(path, *clipPath, kIntersect_SkPathOp, &path);
+        if (auto result = Op(path, *clipPath, kIntersect_SkPathOp)) {
+            path = *result;
+        }
     }
 
     return path;
@@ -77,7 +85,7 @@ void SkSVGNode::setAttribute(SkSVGAttribute attr, const SkSVGValue& v) {
 }
 
 template <typename T>
-void SetInheritedByDefault(SkTLazy<T>& presentation_attribute, const T& value) {
+void SetInheritedByDefault(std::optional<T>& presentation_attribute, const T& value) {
     if (value.type() != T::Type::kInherit) {
         presentation_attribute.set(value);
     } else {

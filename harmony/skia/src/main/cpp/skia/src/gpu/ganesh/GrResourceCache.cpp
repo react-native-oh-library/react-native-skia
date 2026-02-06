@@ -6,24 +6,27 @@
  */
 
 #include "src/gpu/ganesh/GrResourceCache.h"
-#include <atomic>
-#include <vector>
-#include "include/gpu/GrDirectContext.h"
+
+#include "include/core/SkString.h"
+#include "include/gpu/ganesh/GrDirectContext.h"
+#include "include/gpu/ganesh/GrTypes.h"
 #include "include/private/base/SingleOwner.h"
+#include "include/private/base/SkNoncopyable.h"
 #include "include/private/base/SkTo.h"
+#include "src/base/SkMathPriv.h"
 #include "src/base/SkRandom.h"
-#include "src/base/SkScopeExit.h"
 #include "src/base/SkTSort.h"
 #include "src/core/SkMessageBus.h"
-#include "src/gpu/ganesh/GrCaps.h"
+#include "src/core/SkTraceEvent.h"
 #include "src/gpu/ganesh/GrDirectContextPriv.h"
 #include "src/gpu/ganesh/GrGpuResourceCacheAccess.h"
 #include "src/gpu/ganesh/GrProxyProvider.h"
-#include "src/gpu/ganesh/GrTexture.h"
-#include "src/gpu/ganesh/GrTextureProxyCacheAccess.h"
 #include "src/gpu/ganesh/GrThreadSafeCache.h"
-#include "src/gpu/ganesh/GrTracing.h"
-#include "src/gpu/ganesh/SkGr.h"
+
+#include <algorithm>
+#include <chrono>
+#include <cstring>
+#include <vector>
 
 using namespace skia_private;
 
@@ -299,10 +302,6 @@ void GrResourceCache::refAndMakeResourceMRU(GrGpuResource* resource) {
         fPurgeableBytes -= resource->gpuMemorySize();
         fPurgeableQueue.remove(resource);
         this->addToNonpurgeableArray(resource);
-    } else if (!resource->cacheAccess().hasRefOrCommandBufferUsage() &&
-               resource->resourcePriv().budgetedType() == GrBudgetedType::kBudgeted) {
-        SkASSERT(fNumBudgetedResourcesFlushWillMakePurgeable > 0);
-        fNumBudgetedResourcesFlushWillMakePurgeable--;
     }
     resource->cacheAccess().ref();
 
@@ -341,11 +340,6 @@ void GrResourceCache::notifyARefCntReachedZero(GrGpuResource* resource,
 #endif
     resource->cacheAccess().setTimestamp(this->getNextTimestamp());
     SkDEBUGCODE(fNewlyPurgeableResourceForValidation = nullptr);
-
-    if (!resource->resourcePriv().isPurgeable() &&
-        resource->resourcePriv().budgetedType() == GrBudgetedType::kBudgeted) {
-        ++fNumBudgetedResourcesFlushWillMakePurgeable;
-    }
 
     if (!resource->resourcePriv().isPurgeable()) {
         this->validate();
@@ -410,10 +404,6 @@ void GrResourceCache::didChangeBudgetStatus(GrGpuResource* resource) {
         fBudgetedHighWaterBytes = std::max(fBudgetedBytes, fBudgetedHighWaterBytes);
         fBudgetedHighWaterCount = std::max(fBudgetedCount, fBudgetedHighWaterCount);
 #endif
-        if (!resource->resourcePriv().isPurgeable() &&
-            !resource->cacheAccess().hasRefOrCommandBufferUsage()) {
-            ++fNumBudgetedResourcesFlushWillMakePurgeable;
-        }
         if (resource->cacheAccess().isUsableAsScratch()) {
             fScratchMap.insert(resource->resourcePriv().getScratchKey(), resource);
         }
@@ -422,10 +412,6 @@ void GrResourceCache::didChangeBudgetStatus(GrGpuResource* resource) {
         SkASSERT(resource->resourcePriv().budgetedType() != GrBudgetedType::kUnbudgetedCacheable);
         --fBudgetedCount;
         fBudgetedBytes -= size;
-        if (!resource->resourcePriv().isPurgeable() &&
-            !resource->cacheAccess().hasRefOrCommandBufferUsage()) {
-            --fNumBudgetedResourcesFlushWillMakePurgeable;
-        }
         if (!resource->cacheAccess().hasRef() && !resource->getUniqueKey().isValid() &&
             resource->resourcePriv().getScratchKey().isValid()) {
             fScratchMap.remove(resource->resourcePriv().getScratchKey(), resource);
@@ -629,11 +615,6 @@ void GrResourceCache::purgeUnlockedResources(size_t bytesToPurge, bool preferScr
     }
 }
 
-bool GrResourceCache::requestsFlush() const {
-    return this->overBudget() && !fPurgeableQueue.count() &&
-           fNumBudgetedResourcesFlushWillMakePurgeable > 0;
-}
-
 void GrResourceCache::processFreedGpuResources() {
     TArray<UnrefResourceMessage> msgs;
     fUnrefResourceInbox.poll(&msgs);
@@ -745,7 +726,7 @@ void GrResourceCache::getStats(Stats* stats) const {
     }
 }
 
-#if defined(GR_TEST_UTILS)
+#if defined(GPU_TEST_UTILS)
 void GrResourceCache::dumpStats(SkString* out) const {
     this->validate();
 
@@ -774,7 +755,7 @@ void GrResourceCache::dumpStatsKeyValuePairs(TArray<SkString>* keys,
 
     keys->push_back(SkString("gpu_cache_purgable_entries")); values->push_back(stats.fNumPurgeable);
 }
-#endif // defined(GR_TEST_UTILS)
+#endif // defined(GPU_TEST_UTILS)
 #endif // GR_CACHE_STATS
 
 #ifdef SK_DEBUG
@@ -851,18 +832,12 @@ void GrResourceCache::validate() const {
 
     Stats stats(this);
     size_t purgeableBytes = 0;
-    int numBudgetedResourcesFlushWillMakePurgeable = 0;
 
     for (int i = 0; i < fNonpurgeableResources.size(); ++i) {
         SkASSERT(!fNonpurgeableResources[i]->resourcePriv().isPurgeable() ||
                  fNewlyPurgeableResourceForValidation == fNonpurgeableResources[i]);
         SkASSERT(*fNonpurgeableResources[i]->cacheAccess().accessCacheIndex() == i);
         SkASSERT(!fNonpurgeableResources[i]->wasDestroyed());
-        if (fNonpurgeableResources[i]->resourcePriv().budgetedType() == GrBudgetedType::kBudgeted &&
-            !fNonpurgeableResources[i]->cacheAccess().hasRefOrCommandBufferUsage() &&
-            fNewlyPurgeableResourceForValidation != fNonpurgeableResources[i]) {
-            ++numBudgetedResourcesFlushWillMakePurgeable;
-        }
         stats.update(fNonpurgeableResources[i]);
     }
     for (int i = 0; i < fPurgeableQueue.count(); ++i) {
@@ -877,8 +852,6 @@ void GrResourceCache::validate() const {
     SkASSERT(fBudgetedCount <= fCount);
     SkASSERT(fBudgetedBytes <= fBytes);
     SkASSERT(stats.fBytes == fBytes);
-    SkASSERT(fNumBudgetedResourcesFlushWillMakePurgeable ==
-             numBudgetedResourcesFlushWillMakePurgeable);
     SkASSERT(stats.fBudgetedBytes == fBudgetedBytes);
     SkASSERT(stats.fBudgetedCount == fBudgetedCount);
     SkASSERT(purgeableBytes == fPurgeableBytes);
@@ -916,7 +889,7 @@ bool GrResourceCache::isInCache(const GrGpuResource* resource) const {
 
 #endif // SK_DEBUG
 
-#if defined(GR_TEST_UTILS)
+#if defined(GPU_TEST_UTILS)
 
 int GrResourceCache::countUniqueKeysWithTag(const char* tag) const {
     int count = 0;
@@ -947,4 +920,4 @@ void GrResourceCache::visitSurfaces(
     }
 }
 
-#endif // defined(GR_TEST_UTILS)
+#endif // defined(GPU_TEST_UTILS)

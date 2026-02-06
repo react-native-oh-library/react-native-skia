@@ -9,11 +9,11 @@
 
 #include "src/gpu/ganesh/d3d/GrD3DPipelineStateBuilder.h"
 
-#include "include/gpu/GrDirectContext.h"
-#include "include/gpu/d3d/GrD3DTypes.h"
+#include "include/gpu/ganesh/GrDirectContext.h"
+#include "include/gpu/ganesh/d3d/GrD3DTypes.h"
 #include "src/core/SkReadBuffer.h"
 #include "src/core/SkTraceEvent.h"
-#include "src/gpu/PipelineUtils.h"
+#include "src/gpu/SkSLToBackend.h"
 #include "src/gpu/ganesh/GrAutoLocaleSetter.h"
 #include "src/gpu/ganesh/GrDirectContextPriv.h"
 #include "src/gpu/ganesh/GrPersistentCacheUtils.h"
@@ -27,6 +27,7 @@
 #include "src/sksl/SkSLCompiler.h"
 #include "src/sksl/SkSLProgramKind.h"
 #include "src/sksl/SkSLProgramSettings.h"
+#include "src/sksl/codegen/SkSLNativeShader.h"
 #include "src/utils/SkShaderUtils.h"
 
 #include <d3dcompiler.h>
@@ -106,11 +107,11 @@ static gr_cp<ID3DBlob> GrCompileHLSLShader(GrD3DGpu* gpu,
 }
 
 bool GrD3DPipelineStateBuilder::loadHLSLFromCache(SkReadBuffer* reader, gr_cp<ID3DBlob> shaders[]) {
-
-    std::string hlsl[kGrShaderTypeCount];
+    SkSL::NativeShader hlsl[kGrShaderTypeCount];
     SkSL::Program::Interface intfs[kGrShaderTypeCount];
 
-    if (!GrPersistentCacheUtils::UnpackCachedShaders(reader, hlsl, intfs, kGrShaderTypeCount)) {
+    if (!GrPersistentCacheUtils::UnpackCachedShaders(
+                reader, hlsl, /*areShadersBinary=*/false, intfs, kGrShaderTypeCount)) {
         return false;
     }
 
@@ -118,7 +119,7 @@ bool GrD3DPipelineStateBuilder::loadHLSLFromCache(SkReadBuffer* reader, gr_cp<ID
         if (intfs[shaderType].fRTFlipUniform != SkSL::Program::Interface::kRTFlip_None) {
             this->addRTFlipUniform(SKSL_RTFLIP_NAME);
         }
-        shaders[shaderType] = GrCompileHLSLShader(fGpu, hlsl[shaderType], kind);
+        shaders[shaderType] = GrCompileHLSLShader(fGpu, hlsl[shaderType].fText, kind);
         return shaders[shaderType].get();
     };
 
@@ -130,7 +131,7 @@ gr_cp<ID3DBlob> GrD3DPipelineStateBuilder::compileD3DProgram(SkSL::ProgramKind k
                                                              const std::string& sksl,
                                                              const SkSL::ProgramSettings& settings,
                                                              SkSL::Program::Interface* outInterface,
-                                                             std::string* outHLSL) {
+                                                             SkSL::NativeShader* outHLSL) {
     if (!skgpu::SkSLToHLSL(this->caps()->shaderCaps(),
                            sksl,
                            kind,
@@ -145,7 +146,7 @@ gr_cp<ID3DBlob> GrD3DPipelineStateBuilder::compileD3DProgram(SkSL::ProgramKind k
         this->addRTFlipUniform(SKSL_RTFLIP_NAME);
     }
 
-    return GrCompileHLSLShader(fGpu, *outHLSL, kind);
+    return GrCompileHLSLShader(fGpu, outHLSL->fText, kind);
 }
 
 static DXGI_FORMAT attrib_type_to_format(GrVertexAttribType type) {
@@ -530,7 +531,8 @@ std::unique_ptr<GrD3DPipelineState> GrD3DPipelineStateBuilder::finalize() {
     this->finalizeShaders();
 
     SkSL::ProgramSettings settings;
-    settings.fSharpenTextures = true;
+    settings.fSharpenTextures =
+        this->gpu()->getContext()->priv().options().fSharpenMipmappedTextures;
     settings.fRTFlipOffset = fUniformHandler.getRTFlipOffset();
     settings.fRTFlipBinding = 0;
     settings.fRTFlipSet = 0;
@@ -562,14 +564,17 @@ std::unique_ptr<GrD3DPipelineState> GrD3DPipelineStateBuilder::finalize() {
             &fVS.fCompilerString,
             &fFS.fCompilerString,
         };
-        std::string cached_sksl[kGrShaderTypeCount];
-        std::string hlsl[kGrShaderTypeCount];
+        SkSL::NativeShader cached_sksl[kGrShaderTypeCount];
+        SkSL::NativeShader hlsl[kGrShaderTypeCount];
 
         if (kSKSL_Tag == shaderType) {
-            if (GrPersistentCacheUtils::UnpackCachedShaders(&reader, cached_sksl, intfs,
+            if (GrPersistentCacheUtils::UnpackCachedShaders(&reader,
+                                                            cached_sksl,
+                                                            /*areShadersBinary=*/false,
+                                                            intfs,
                                                             kGrShaderTypeCount)) {
                 for (int i = 0; i < kGrShaderTypeCount; ++i) {
-                    sksl[i] = &cached_sksl[i];
+                    sksl[i] = &cached_sksl[i].fText;
                 }
             }
         }
@@ -592,7 +597,7 @@ std::unique_ptr<GrD3DPipelineState> GrD3DPipelineStateBuilder::finalize() {
                 // Replace the HLSL with formatted SkSL to be cached. This looks odd, but this is
                 // the last time we're going to use these strings, so it's safe.
                 for (int i = 0; i < kGrShaderTypeCount; ++i) {
-                    hlsl[i] = SkShaderUtils::PrettyPrint(*sksl[i]);
+                    hlsl[i].fText = SkShaderUtils::PrettyPrint(*sksl[i]);
                 }
             }
             sk_sp<SkData> key =

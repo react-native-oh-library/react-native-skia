@@ -7,6 +7,7 @@
 
 #include "src/gpu/ganesh/GrUtil.h"
 
+#include "include/core/SkStrokeRec.h"
 #include "src/core/SkDrawProcs.h"
 #include "src/gpu/ganesh/GrStyle.h"
 
@@ -76,5 +77,5 @@ bool GrIsStrokeHairlineOrEquivalent(const GrStyle& style,
         return true;
     }
     return stroke.getStyle() == SkStrokeRec::kStroke_Style &&
-           SkDrawTreatAAStrokeAsHairline(stroke.getWidth(), matrix, outCoverage);
+           skcpu::DrawTreatAAStrokeAsHairline(stroke.getWidth(), matrix, outCoverage);
 }

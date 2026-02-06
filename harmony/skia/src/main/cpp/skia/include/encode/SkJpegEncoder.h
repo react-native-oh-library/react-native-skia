@@ -8,10 +8,12 @@
 #ifndef SkJpegEncoder_DEFINED
 #define SkJpegEncoder_DEFINED
 
+#include "include/codec/SkEncodedOrigin.h"
 #include "include/core/SkRefCnt.h"
 #include "include/private/base/SkAPI.h"
 
 #include <memory>
+#include <optional>
 
 class SkColorSpace;
 class SkData;
@@ -77,15 +79,7 @@ struct Options {
      */
     const SkData* xmpMetadata = nullptr;
 
-    /**
-     *  An optional ICC profile to override the default behavior.
-     *
-     *  The default behavior is to generate an ICC profile using a primary matrix and
-     *  analytic transfer function. If the color space of |src| cannot be represented
-     *  in this way (e.g, it is HLG or PQ), then no profile will be embedded.
-     */
-    const skcms_ICCProfile* fICCProfile = nullptr;
-    const char* fICCProfileDescription = nullptr;
+    std::optional<SkEncodedOrigin> fOrigin;
 };
 
 /**
@@ -99,6 +93,11 @@ SK_API bool Encode(SkWStream* dst,
                    const SkYUVAPixmaps& src,
                    const SkColorSpace* srcColorSpace,
                    const Options& options);
+
+/**
+ *  Returns the encoded data for the pixmap, or nullptr on failure.
+ */
+SK_API sk_sp<SkData> Encode(const SkPixmap& src, const Options& options);
 
 /**
 *  Encode the provided image and return the resulting bytes. If the image was created as

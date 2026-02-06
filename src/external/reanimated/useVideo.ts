@@ -1,7 +1,9 @@
 import type { SharedValue, FrameInfo } from "react-native-reanimated";
 import { useEffect, useMemo } from "react";
 
-import type { SkImage, Video } from "@shopify/react-native-skia";
+import type { SkImage } from "@shopify/react-native-skia";
+import type { Video } from "./Video";
+
 import { Platform } from "@shopify/react-native-skia/src/Platform/Platform";
 
 import Rea from "@shopify/react-native-skia/src/external/reanimated/ReanimatedProxy";
@@ -64,8 +66,8 @@ const useOption = <T>(value: Animated<T>) => {
 
 const disposeVideo = (video: Video | null) => {
   "worklet";
-
   video?.dispose();
+  video?.stop();
 };
 
 export const useVideo = (
@@ -114,6 +116,13 @@ export const useVideo = (
     () => volume.value,
     (value) => {
       video?.setVolume(value);
+    }
+  );
+
+  Rea.useAnimatedReaction(
+    () => looping.value,
+    (value) => {
+      video?.setLoop(value);
     }
   );
 

@@ -4,33 +4,61 @@
  * Use of this source code is governed by a BSD-style license that can be
  * found in the LICENSE file.
  */
-
 #include "src/gpu/ganesh/SurfaceContext.h"
 
+#include "include/core/SkAlphaType.h"
 #include "include/core/SkColorSpace.h"
-#include "include/gpu/GrDirectContext.h"
-#include "include/gpu/GrRecordingContext.h"
-#include "src/core/SkAutoPixmapStorage.h"
+#include "include/core/SkColorType.h"
+#include "include/core/SkData.h"
+#include "include/core/SkImageInfo.h"
+#include "include/core/SkMatrix.h"
+#include "include/core/SkSamplingOptions.h"
+#include "include/core/SkSurface.h"
+#include "include/gpu/GpuTypes.h"
+#include "include/gpu/ganesh/GrBackendSurface.h"
+#include "include/gpu/ganesh/GrDirectContext.h"
+#include "include/gpu/ganesh/GrRecordingContext.h"
+#include "include/gpu/ganesh/GrTypes.h"
+#include "include/private/base/SingleOwner.h"
+#include "include/private/base/SkAlign.h"
+#include "include/private/base/SkAssert.h"
+#include "include/private/base/SkPoint_impl.h"
+#include "include/private/base/SkTemplates.h"
+#include "include/private/base/SkTo.h"
+#include "include/private/gpu/ganesh/GrTypesPriv.h"
+#include "src/core/SkColorSpaceXformSteps.h"
 #include "src/core/SkMipmap.h"
+#include "src/core/SkTraceEvent.h"
 #include "src/core/SkYUVMath.h"
+#include "src/gpu/AsyncReadTypes.h"
+#include "src/gpu/SkBackingFit.h"
+#include "src/gpu/ganesh/GrAuditTrail.h"
+#include "src/gpu/ganesh/GrCaps.h"
 #include "src/gpu/ganesh/GrClientMappedBufferManager.h"
 #include "src/gpu/ganesh/GrColorSpaceXform.h"
 #include "src/gpu/ganesh/GrDataUtils.h"
 #include "src/gpu/ganesh/GrDirectContextPriv.h"
 #include "src/gpu/ganesh/GrDrawingManager.h"
+#include "src/gpu/ganesh/GrFragmentProcessor.h"
 #include "src/gpu/ganesh/GrGpu.h"
 #include "src/gpu/ganesh/GrImageInfo.h"
 #include "src/gpu/ganesh/GrProxyProvider.h"
 #include "src/gpu/ganesh/GrRecordingContextPriv.h"
+#include "src/gpu/ganesh/GrRenderTargetProxy.h"
+#include "src/gpu/ganesh/GrRenderTask.h"
 #include "src/gpu/ganesh/GrResourceProvider.h"
+#include "src/gpu/ganesh/GrSurface.h"
+#include "src/gpu/ganesh/GrTextureProxy.h"
 #include "src/gpu/ganesh/GrTracing.h"
-#include "src/gpu/ganesh/SkGr.h"
 #include "src/gpu/ganesh/SurfaceFillContext.h"
 #include "src/gpu/ganesh/effects/GrBicubicEffect.h"
 #include "src/gpu/ganesh/effects/GrTextureEffect.h"
 #include "src/gpu/ganesh/geometry/GrRect.h"
 
+#include <algorithm>
+#include <cstdint>
 #include <memory>
+#include <tuple>
 
 using namespace skia_private;
 
@@ -108,7 +136,7 @@ bool SurfaceContext::readPixels(GrDirectContext* dContext, GrPixmap dst, SkIPoin
     GrSurface* srcSurface = srcProxy->peekSurface();
 
     SkColorSpaceXformSteps::Flags flags =
-            SkColorSpaceXformSteps{this->colorInfo(), dst.info()}.flags;
+            SkColorSpaceXformSteps{this->colorInfo(), dst.info()}.fFlags;
     bool unpremul            = flags.unpremul,
          needColorConversion = flags.linearize || flags.gamut_transform || flags.encode,
          premul              = flags.premul;
@@ -145,9 +173,17 @@ bool SurfaceContext::readPixels(GrDirectContext* dContext, GrPixmap dst, SkIPoin
     if (readFlag == GrCaps::SurfaceReadPixelsSupport::kCopyToTexture2D || canvas2DFastPath) {
         std::unique_ptr<SurfaceContext> tempCtx;
         if (this->asTextureProxy()) {
-            GrColorType colorType = (canvas2DFastPath || srcIsCompressed)
-                                            ? GrColorType::kRGBA_8888
-                                            : this->colorInfo().colorType();
+            GrColorType colorType = this->colorInfo().colorType();
+            if (canvas2DFastPath || srcIsCompressed) {
+                colorType = GrColorType::kRGBA_8888;
+            } else {
+                GrBackendFormat backendFormat =
+                        caps->getDefaultBackendFormat(colorType, GrRenderable::kYes);
+                if (!backendFormat.isValid()) {
+                    colorType = GrColorType::kRGBA_8888;
+                }
+            }
+
             SkAlphaType alphaType = canvas2DFastPath ? dst.alphaType()
                                                      : this->colorInfo().alphaType();
             GrImageInfo tempInfo(colorType,
@@ -371,7 +407,7 @@ bool SurfaceContext::internalWritePixels(GrDirectContext* dContext,
     GrSurface* dstSurface = dstProxy->peekSurface();
 
     SkColorSpaceXformSteps::Flags flags =
-            SkColorSpaceXformSteps{src[0].colorInfo(), this->colorInfo()}.flags;
+            SkColorSpaceXformSteps{src[0].colorInfo(), this->colorInfo()}.fFlags;
     bool unpremul            = flags.unpremul,
          needColorConversion = flags.linearize || flags.gamut_transform || flags.encode,
          premul              = flags.premul;
@@ -1322,7 +1358,7 @@ SurfaceContext::PixelTransferResult SurfaceContext::transferPixels(GrColorType d
     size_t size = rowBytes * rect.height();
     // By using kStream_GrAccessPattern here, we are not able to cache and reuse the buffer for
     // multiple reads. Switching to kDynamic_GrAccessPattern would allow for this, however doing
-    // so causes a crash in a chromium test. See skbug.com/11297
+    // so causes a crash in a chromium test. See skbug.com/40042671
     auto buffer = direct->priv().resourceProvider()->createBuffer(
             size,
             GrGpuBufferType::kXferGpuToCpu,

@@ -7,44 +7,48 @@
 
 #include "src/gpu/graphite/dawn/DawnCommandBuffer.h"
 
+#include "include/gpu/graphite/TextureInfo.h"
+#include "src/gpu/graphite/ContextUtils.h"
 #include "src/gpu/graphite/Log.h"
+#include "src/gpu/graphite/RenderPassDesc.h"
 #include "src/gpu/graphite/TextureProxy.h"
+#include "src/gpu/graphite/UniformManager.h"
 #include "src/gpu/graphite/compute/DispatchGroup.h"
 #include "src/gpu/graphite/dawn/DawnBuffer.h"
 #include "src/gpu/graphite/dawn/DawnCaps.h"
 #include "src/gpu/graphite/dawn/DawnComputePipeline.h"
 #include "src/gpu/graphite/dawn/DawnGraphicsPipeline.h"
-#include "src/gpu/graphite/dawn/DawnGraphiteUtilsPriv.h"
+#include "src/gpu/graphite/dawn/DawnGraphiteUtils.h"
 #include "src/gpu/graphite/dawn/DawnQueueManager.h"
-#include "src/gpu/graphite/dawn/DawnResourceProvider.h"
 #include "src/gpu/graphite/dawn/DawnSampler.h"
 #include "src/gpu/graphite/dawn/DawnSharedContext.h"
 #include "src/gpu/graphite/dawn/DawnTexture.h"
 
-namespace skgpu::graphite {
-
-namespace {
-
-using IntrinsicConstant = float[4];
-
-constexpr int kBufferBindingOffsetAlignment = 256;
-
-constexpr int kIntrinsicConstantAlignedSize =
-        SkAlignTo(sizeof(IntrinsicConstant), kBufferBindingOffsetAlignment);
-
 #if defined(__EMSCRIPTEN__)
-// When running against WebGPU in WASM we don't have the wgpu::CommandBuffer::WriteBuffer method. We
-// allocate a fixed size buffer to hold the intrinsics constants. If we overflow we allocate another
-// buffer.
-constexpr int kNumSlotsForIntrinsicConstantBuffer = 8;
-#else
-// Dawn has an in-band WriteBuffer command, so we can just keep overwriting the same slot between
-// render passes. Zero indicates this behavior.
-constexpr int kNumSlotsForIntrinsicConstantBuffer = 0;
+#include <emscripten/version.h>
+
+namespace wgpu {
+using TexelCopyBufferInfo = ImageCopyBuffer;
+using TexelCopyTextureInfo = ImageCopyTexture;
+}  // namespace wgpu
 #endif
 
-}  // namespace
+namespace skgpu::graphite {
 
+// On emsdk before 3.1.48 the API for RenderPass and ComputePass timestamps was different
+// and does not map to current webgpu. We check this in DawnCaps but we also must avoid
+// naming the types from the new API because they aren't defined.
+#if defined(__EMSCRIPTEN__)                                                                  \
+        && ((__EMSCRIPTEN_major__ < 3)                                                       \
+         || (__EMSCRIPTEN_major__ == 3 && __EMSCRIPTEN_minor__ < 1)                          \
+         || (__EMSCRIPTEN_major__ == 3 && __EMSCRIPTEN_minor__ == 1 && __EMSCRIPTEN_tiny__ < 48))
+    #define WGPU_TIMESTAMP_WRITES_DEFINED 0
+#else
+    #define WGPU_TIMESTAMP_WRITES_DEFINED 1
+#endif
+
+// DawnCommandBuffer
+// ----------------------------------------------------------------------------
 std::unique_ptr<DawnCommandBuffer> DawnCommandBuffer::Make(const DawnSharedContext* sharedContext,
                                                            DawnResourceProvider* resourceProvider) {
     std::unique_ptr<DawnCommandBuffer> cmdBuffer(
@@ -57,10 +61,120 @@ std::unique_ptr<DawnCommandBuffer> DawnCommandBuffer::Make(const DawnSharedConte
 
 DawnCommandBuffer::DawnCommandBuffer(const DawnSharedContext* sharedContext,
                                      DawnResourceProvider* resourceProvider)
-        : fSharedContext(sharedContext)
+        : CommandBuffer(Protected::kNo)  // Dawn doesn't support protected memory
+        , fSharedContext(sharedContext)
         , fResourceProvider(resourceProvider) {}
 
 DawnCommandBuffer::~DawnCommandBuffer() {}
+
+bool DawnCommandBuffer::startTimerQuery() {
+    wgpu::QuerySet querySet = std::move(fTimestampQuerySet);
+
+    auto buffer = fResourceProvider->findOrCreateDawnBuffer(2 * sizeof(uint64_t),
+                                                            BufferType::kQuery,
+                                                            AccessPattern::kHostVisible,
+                                                            "TimerQuery");
+    if (!buffer) {
+        SKGPU_LOG_W("Failed to create buffer for resolving results, timer query will "
+                    "not be reported.");
+        return false;
+    }
+    sk_sp<DawnBuffer> xferBuffer;
+    if (!fSharedContext->caps()->drawBufferCanBeMapped()) {
+        xferBuffer = fResourceProvider->findOrCreateDawnBuffer(2 * sizeof(uint64_t),
+                                                               BufferType::kXferGpuToCpu,
+                                                               AccessPattern::kHostVisible,
+                                                               "TimerQueryXfer");
+        if (!xferBuffer) {
+            SKGPU_LOG_W("Failed to create buffer for transferring timestamp results, timer "
+                        "query will not be reported.");
+            return false;
+        }
+    }
+    if (!querySet) {
+        wgpu::QuerySetDescriptor descriptor;
+        descriptor.count = 2;
+        descriptor.label = "Command Buffer Timer Query";
+        descriptor.type = wgpu::QueryType::Timestamp;
+        descriptor.nextInChain = nullptr;
+        querySet = fSharedContext->device().CreateQuerySet(&descriptor);
+        if (!querySet) {
+            SKGPU_LOG_W("Failed to create query set, timer query will not be reported.");
+            return false;
+        }
+    }
+
+    fTimestampQuerySet = std::move(querySet);
+    fTimestampQueryBuffer = std::move(buffer);
+    fTimestampQueryXferBuffer = std::move(xferBuffer);
+
+    if (fSharedContext->dawnCaps()->supportsCommandBufferTimestamps()) {
+        // In native Dawn we use the writeTimeStamp method on CommandBuffer to bracket
+        // the whole command buffer.
+        fCommandEncoder.WriteTimestamp(fTimestampQuerySet, 0);
+    } else {
+        // On WebGPU the best we can do is add timestamps to each render/compute pass as we record
+        // them. Since we don't know a priori how many passes there will be we write a begin
+        // timestamp on the first pass and an end on every pass, overwriting the second query in the
+        // set.
+        fWroteFirstPassTimestamps = false;
+    }
+
+    return true;
+}
+
+void DawnCommandBuffer::endTimerQuery() {
+    SkASSERT(fTimestampQuerySet);
+    SkASSERT(fTimestampQueryBuffer);
+    if (fSharedContext->dawnCaps()->supportsCommandBufferTimestamps()) {
+        fCommandEncoder.WriteTimestamp(fTimestampQuerySet, 1);
+    } else if (!fWroteFirstPassTimestamps) {
+        // If we didn't have any passes then we can't report anything.
+        fTimestampQueryBuffer = nullptr;
+        fTimestampQueryXferBuffer = nullptr;
+        return;
+    }
+    // This resolve covers both timestamp code paths (command encoder and render/compute pass).
+    fCommandEncoder.ResolveQuerySet(
+            fTimestampQuerySet, 0, 2, fTimestampQueryBuffer->dawnBuffer(), 0);
+    if (fTimestampQueryXferBuffer) {
+        SkASSERT(fTimestampQueryBuffer->size() == fTimestampQueryBuffer->size());
+        fCommandEncoder.CopyBufferToBuffer(fTimestampQueryBuffer->dawnBuffer(),
+                                           /*sourceOffset=*/0,
+                                           fTimestampQueryXferBuffer->dawnBuffer(),
+                                           /*destinationOffset=*/0,
+                                           /*size=*/fTimestampQueryBuffer->size());
+        fTimestampQueryBuffer.reset();
+    }
+    if (fSharedContext->caps()->bufferMapsAreAsync()) {
+        sk_sp<Buffer> buffer =
+                fTimestampQueryXferBuffer ? fTimestampQueryXferBuffer : fTimestampQueryBuffer;
+        this->addBuffersToAsyncMapOnSubmit({&buffer, 1});
+    }
+}
+
+std::optional<GpuStats> DawnCommandBuffer::gpuStats() {
+    auto& buffer = fTimestampQueryXferBuffer ? fTimestampQueryXferBuffer : fTimestampQueryBuffer;
+    if (!buffer) {
+        return {};
+    }
+    if (fSharedContext->caps()->bufferMapsAreAsync()) {
+        if (!buffer->isMapped()) {
+            return {};
+        }
+    }
+    uint64_t* results = static_cast<uint64_t*>(buffer->map());
+    if (!results) {
+        SKGPU_LOG_W("Failed to get timer query results because buffer couldn't be mapped.");
+        return {};
+    }
+    if (results[1] < results[0]) {
+        return {};
+    }
+    GpuStats stats;
+    stats.elapsedTime = results[1] - results[0];
+    return stats;
+}
 
 wgpu::CommandBuffer DawnCommandBuffer::finishEncoding() {
     SkASSERT(fCommandEncoder);
@@ -72,57 +186,123 @@ wgpu::CommandBuffer DawnCommandBuffer::finishEncoding() {
 }
 
 void DawnCommandBuffer::onResetCommandBuffer() {
-    fIntrinsicConstantBuffer = nullptr;
-
     fActiveGraphicsPipeline = nullptr;
     fActiveRenderPassEncoder = nullptr;
     fActiveComputePassEncoder = nullptr;
     fCommandEncoder = nullptr;
 
-    for (auto& bufferSlot : fBoundUniformBuffers) {
-        bufferSlot = nullptr;
+    for (auto& bufferSlot : fBoundUniforms) {
+        bufferSlot = {};
     }
     fBoundUniformBuffersDirty = true;
+    if (fTimestampQueryBuffer && fTimestampQueryBuffer->isUnmappable()) {
+        fTimestampQueryBuffer->unmap();
+    }
+    if (fTimestampQueryXferBuffer && fTimestampQueryXferBuffer->isUnmappable()) {
+        fTimestampQueryXferBuffer->unmap();
+    }
+    fTimestampQueryBuffer = {};
+    fTimestampQueryXferBuffer = {};
+    fWroteFirstPassTimestamps = false;
 }
 
 bool DawnCommandBuffer::setNewCommandBufferResources() {
     SkASSERT(!fCommandEncoder);
     fCommandEncoder = fSharedContext->device().CreateCommandEncoder();
     SkASSERT(fCommandEncoder);
+
     return true;
 }
 
+// Requests a sampler. Dynamic samplers live in the global cache, requiring no tracking, but
+// immutable samplers are created on the current graphics pipeline, and may outlive it, requiring
+// further tracking.
+const DawnSampler* DawnCommandBuffer::getSampler(
+        const DrawPassCommands::BindTexturesAndSamplers& command, int32_t index) {
+    auto desc = command.fSamplers[index];
+    if (desc.isImmutable()) {
+        const DawnSampler* immutableSampler = fActiveGraphicsPipeline->immutableSampler(index);
+        if (immutableSampler) {
+            this->trackResource(sk_ref_sp<Sampler>(immutableSampler));
+        }
+        return immutableSampler;
+    } else {
+        // Use the shared Sampler held in the global cache
+        return static_cast<const DawnSampler*>(
+                fSharedContext->globalCache()->getDynamicSampler(desc));
+    }
+}
+
 bool DawnCommandBuffer::onAddRenderPass(const RenderPassDesc& renderPassDesc,
+                                        SkIRect renderPassBounds,
                                         const Texture* colorTexture,
                                         const Texture* resolveTexture,
                                         const Texture* depthStencilTexture,
-                                        SkRect viewport,
+                                        SkIPoint resolveOffset,
+                                        SkIRect viewport,
                                         const DrawPassList& drawPasses) {
-    // Update viewport's constant buffer before starting a render pass.
-    this->preprocessViewport(viewport);
+    // `viewport` has already been translated by the replay translation by the base CommandBuffer
+    if (!SkIRect::Intersects(viewport, fRenderPassBounds)) SK_UNLIKELY {
+            // The entire pass is offscreen
+            return true;
+        }
 
-    if (!this->beginRenderPass(renderPassDesc, colorTexture, resolveTexture, depthStencilTexture)) {
+
+    UniformManager intrinsicValues{Layout::kStd140};
+    CollectIntrinsicUniforms(fSharedContext->caps(), viewport, fDstReadBounds, &intrinsicValues);
+    const auto uniformData = UniformDataBlock::Wrap(&intrinsicValues);
+    const bool usePushConstant = fSharedContext->dawnCaps()
+                                         ->resourceBindingRequirements()
+                                         .fUsePushConstantsForIntrinsicConstants;
+
+    // If push constant is not supported, update the intrinsic constant buffer before starting a
+    // render pass.
+    if (!usePushConstant && !this->updateIntrinsicUniformsAsUBO(uniformData)) SK_UNLIKELY {
+        return false;
+    }
+
+    if (!this->beginRenderPass(renderPassDesc,
+                               resolveOffset,
+                               renderPassBounds,
+                               colorTexture,
+                               resolveTexture,
+                               depthStencilTexture)) SK_UNLIKELY {
+        return false;
+    }
+
+    // If push constant is supported, update the intrinsic constants after starting a render pass.
+    if (usePushConstant && !this->updateIntrinsicUniformsAsPushConstant(uniformData)) SK_UNLIKELY {
         return false;
     }
 
     this->setViewport(viewport);
 
     for (const auto& drawPass : drawPasses) {
-        this->addDrawPass(drawPass.get());
+        if (!this->addDrawPass(drawPass.get())) SK_UNLIKELY {
+            this->endRenderPass();
+            return false;
+        }
     }
 
-    this->endRenderPass();
-    return true;
+    return this->endRenderPass();
 }
 
-bool DawnCommandBuffer::onAddComputePass(const DispatchGroupList& groups) {
+bool DawnCommandBuffer::onAddComputePass(DispatchGroupSpan groups) {
     this->beginComputePass();
     for (const auto& group : groups) {
         group->addResourceRefs(this);
         for (const auto& dispatch : group->dispatches()) {
             this->bindComputePipeline(group->getPipeline(dispatch.fPipelineIndex));
             this->bindDispatchResources(*group, dispatch);
-            this->dispatchWorkgroups(dispatch.fParams.fGlobalDispatchSize);
+            if (const WorkgroupSize* globalSize =
+                        std::get_if<WorkgroupSize>(&dispatch.fGlobalSizeOrIndirect)) {
+                this->dispatchWorkgroups(*globalSize);
+            } else {
+                SkASSERT(std::holds_alternative<BindBufferInfo>(dispatch.fGlobalSizeOrIndirect));
+                const BindBufferInfo& indirect =
+                        *std::get_if<BindBufferInfo>(&dispatch.fGlobalSizeOrIndirect);
+                this->dispatchWorkgroupsIndirect(indirect.fBuffer, indirect.fOffset);
+            }
         }
     }
     this->endComputePass();
@@ -130,6 +310,8 @@ bool DawnCommandBuffer::onAddComputePass(const DispatchGroupList& groups) {
 }
 
 bool DawnCommandBuffer::beginRenderPass(const RenderPassDesc& renderPassDesc,
+                                        const SkIPoint& resolveOffset,
+                                        SkIRect renderPassBounds,
                                         const Texture* colorTexture,
                                         const Texture* resolveTexture,
                                         const Texture* depthStencilTexture) {
@@ -157,17 +339,48 @@ bool DawnCommandBuffer::beginRenderPass(const RenderPassDesc& renderPassDesc,
     wgpu::RenderPassDepthStencilAttachment wgpuDepthStencilAttachment;
 
     // Set up color attachment.
-#ifndef __EMSCRIPTEN__
+#if !defined(__EMSCRIPTEN__)
     wgpu::DawnRenderPassColorAttachmentRenderToSingleSampled mssaRenderToSingleSampledDesc;
+    wgpu::RenderPassDescriptorResolveRect wgpuPartialRect = {};
 #endif
 
-    auto& colorInfo = renderPassDesc.fColorAttachment;
-    bool loadMSAAFromResolveExplicitly = false;
+#if WGPU_TIMESTAMP_WRITES_DEFINED
+#if defined(__EMSCRIPTEN__)
+    wgpu::RenderPassTimestampWrites wgpuTimestampWrites;
+#else
+    wgpu::PassTimestampWrites wgpuTimestampWrites;
+#endif
+    if (!fSharedContext->dawnCaps()->supportsCommandBufferTimestamps() && fTimestampQueryBuffer) {
+        SkASSERT(fTimestampQuerySet);
+        wgpuTimestampWrites.querySet = fTimestampQuerySet;
+        if (!fWroteFirstPassTimestamps) {
+            wgpuTimestampWrites.beginningOfPassWriteIndex = 0;
+            fWroteFirstPassTimestamps = true;
+        }
+        wgpuTimestampWrites.endOfPassWriteIndex = 1;
+        wgpuRenderPass.timestampWrites = &wgpuTimestampWrites;
+    }
+#else
+    SkASSERT(!fTimestampQueryBuffer);
+#endif
+
+    // Validate attachment descs and textures
+    const auto& colorInfo = renderPassDesc.fColorAttachment;
+    const auto& resolveInfo = renderPassDesc.fColorResolveAttachment;
+    const auto& depthStencilInfo = renderPassDesc.fDepthStencilAttachment;
+    SkASSERT(colorTexture ? colorInfo.isCompatible(colorTexture->textureInfo())
+                          : colorInfo.fFormat == TextureFormat::kUnsupported);
+    SkASSERT(resolveTexture ? resolveInfo.isCompatible(resolveTexture->textureInfo())
+                            : resolveInfo.fFormat == TextureFormat::kUnsupported);
+    SkASSERT(depthStencilTexture ? depthStencilInfo.isCompatible(depthStencilTexture->textureInfo())
+                                 : depthStencilInfo.fFormat == TextureFormat::kUnsupported);
+
+    // Set up color attachment
+    bool emulateLoadStoreResolveTexture = false;
     if (colorTexture) {
         wgpuRenderPass.colorAttachments = &wgpuColorAttachment;
         wgpuRenderPass.colorAttachmentCount = 1;
 
-        // TODO: check Texture matches RenderPassDesc
         const auto* dawnColorTexture = static_cast<const DawnTexture*>(colorTexture);
         SkASSERT(dawnColorTexture->renderTextureView());
         wgpuColorAttachment.view = dawnColorTexture->renderTextureView();
@@ -180,8 +393,8 @@ bool DawnCommandBuffer::beginRenderPass(const RenderPassDesc& renderPassDesc,
 
         // Set up resolve attachment
         if (resolveTexture) {
-            SkASSERT(renderPassDesc.fColorResolveAttachment.fStoreOp == StoreOp::kStore);
-            // TODO: check Texture matches RenderPassDesc
+            SkASSERT(resolveInfo.fStoreOp == StoreOp::kStore);
+
             const auto* dawnResolveTexture = static_cast<const DawnTexture*>(resolveTexture);
             SkASSERT(dawnResolveTexture->renderTextureView());
             wgpuColorAttachment.resolveTarget = dawnResolveTexture->renderTextureView();
@@ -189,10 +402,46 @@ bool DawnCommandBuffer::beginRenderPass(const RenderPassDesc& renderPassDesc,
             // Inclusion of a resolve texture implies the client wants to finish the
             // renderpass with a resolve.
             SkASSERT(wgpuColorAttachment.storeOp == wgpu::StoreOp::Discard);
+            // But it also means we might have to load the resolve texture into the MSAA color attachment
 
-            // But it also means we have to load the resolve texture into the MSAA color attachment
-            loadMSAAFromResolveExplicitly =
-                    renderPassDesc.fColorResolveAttachment.fLoadOp == LoadOp::kLoad;
+            if (fSharedContext->dawnCaps()->emulateLoadStoreResolve()) {
+                emulateLoadStoreResolveTexture = true;
+            } else if (resolveInfo.fLoadOp == LoadOp::kLoad) {
+                std::optional<wgpu::LoadOp> resolveLoadOp =
+                        fSharedContext->dawnCaps()->resolveTextureLoadOp();
+                if (resolveLoadOp.has_value()) {
+                    wgpuColorAttachment.loadOp = *resolveLoadOp;
+                } else {
+                    // No Dawn built-in support, we need to manually load the resolve texture.
+                    emulateLoadStoreResolveTexture = true;
+                }
+            }
+
+            if (!emulateLoadStoreResolveTexture) {
+#if !defined(__EMSCRIPTEN__)
+                if (fSharedContext->dawnCaps()->supportsPartialLoadResolve()) {
+                    SkIRect msaaArea = renderPassBounds;
+                    SkAssertResult(msaaArea.intersect(SkIRect::MakeSize(
+                            colorTexture->dimensions())));
+                    wgpuPartialRect.colorOffsetX = msaaArea.x();
+                    wgpuPartialRect.colorOffsetY = msaaArea.y();
+
+                    SkIRect resolveArea = renderPassBounds;
+                    resolveArea.offset(resolveOffset);
+                    SkAssertResult(resolveArea.intersect(SkIRect::MakeSize(
+                            resolveTexture->dimensions())));
+                    wgpuPartialRect.resolveOffsetX = resolveArea.x();
+                    wgpuPartialRect.resolveOffsetY = resolveArea.y();
+                    wgpuPartialRect.width = resolveArea.width();
+                    wgpuPartialRect.height = resolveArea.height();
+                    wgpuRenderPass.nextInChain = &wgpuPartialRect;
+                } else
+#endif
+                {
+                    SkASSERT(resolveOffset.isZero());
+                }
+            }
+
             // TODO: If the color resolve texture is read-only we can use a private (vs. memoryless)
             // msaa attachment that's coupled to the framebuffer and the StoreAndMultisampleResolve
             // action instead of loading as a draw.
@@ -217,17 +466,13 @@ bool DawnCommandBuffer::beginRenderPass(const RenderPassDesc& renderPassDesc,
     }
 
     // Set up stencil/depth attachment
-    auto& depthStencilInfo = renderPassDesc.fDepthStencilAttachment;
     if (depthStencilTexture) {
         const auto* dawnDepthStencilTexture = static_cast<const DawnTexture*>(depthStencilTexture);
-        auto format = dawnDepthStencilTexture->textureInfo().dawnTextureSpec().fFormat;
-        SkASSERT(DawnFormatIsDepthOrStencil(format));
 
-        // TODO: check Texture matches RenderPassDesc
         SkASSERT(dawnDepthStencilTexture->renderTextureView());
         wgpuDepthStencilAttachment.view = dawnDepthStencilTexture->renderTextureView();
 
-        if (DawnFormatIsDepth(format)) {
+        if (TextureFormatHasDepth(depthStencilInfo.fFormat)) {
             wgpuDepthStencilAttachment.depthClearValue = renderPassDesc.fClearDepth;
             wgpuDepthStencilAttachment.depthLoadOp =
                     wgpuLoadActionMap[static_cast<int>(depthStencilInfo.fLoadOp)];
@@ -235,7 +480,7 @@ bool DawnCommandBuffer::beginRenderPass(const RenderPassDesc& renderPassDesc,
                     wgpuStoreActionMap[static_cast<int>(depthStencilInfo.fStoreOp)];
         }
 
-        if (DawnFormatIsStencil(format)) {
+        if (TextureFormatHasStencil(depthStencilInfo.fFormat)) {
             wgpuDepthStencilAttachment.stencilClearValue = renderPassDesc.fClearStencil;
             wgpuDepthStencilAttachment.stencilLoadOp =
                     wgpuLoadActionMap[static_cast<int>(depthStencilInfo.fLoadOp)];
@@ -244,18 +489,16 @@ bool DawnCommandBuffer::beginRenderPass(const RenderPassDesc& renderPassDesc,
         }
 
         wgpuRenderPass.depthStencilAttachment = &wgpuDepthStencilAttachment;
-    } else {
-        SkASSERT(!depthStencilInfo.fTextureInfo.isValid());
     }
 
-    if (loadMSAAFromResolveExplicitly) {
-        // Manually load the contents of the resolve texture into the MSAA attachment as a draw,
-        // so the actual load op for the MSAA attachment had better have been discard.
-
-        if (!this->loadMSAAFromResolveAndBeginRenderPassEncoder(
+    if (emulateLoadStoreResolveTexture) {
+        if (!this->emulateLoadMSAAFromResolveAndBeginRenderPassEncoder(
                     renderPassDesc,
                     wgpuRenderPass,
-                    static_cast<const DawnTexture*>(colorTexture))) {
+                    resolveOffset,
+                    renderPassBounds,
+                    static_cast<const DawnTexture*>(colorTexture),
+                    static_cast<const DawnTexture*>(resolveTexture))) {
             return false;
         }
     }
@@ -266,131 +509,153 @@ bool DawnCommandBuffer::beginRenderPass(const RenderPassDesc& renderPassDesc,
     return true;
 }
 
-bool DawnCommandBuffer::loadMSAAFromResolveAndBeginRenderPassEncoder(
-        const RenderPassDesc& frontendRenderPassDesc,
-        const wgpu::RenderPassDescriptor& wgpuRenderPassDesc,
-        const DawnTexture* msaaTexture) {
+bool DawnCommandBuffer::emulateLoadMSAAFromResolveAndBeginRenderPassEncoder(
+        const RenderPassDesc& intendedRenderPassDesc,
+        const wgpu::RenderPassDescriptor& intendedDawnRenderPassDesc,
+        const SkIPoint& resolveOffset,
+        const SkIRect& renderPassBounds,
+        const DawnTexture* msaaTexture,
+        const DawnTexture* resolveTexture) {
     SkASSERT(!fActiveRenderPassEncoder);
 
-    // Copy from resolve texture to an intermediate texture. Using blit with draw
-    // pipeline because the resolveTexture might be created from a swapchain, and it
-    // is possible that only its texture view is available. So onCopyTextureToTexture()
-    // which operates on wgpu::Texture instead of wgpu::TextureView cannot be used in that case.
-    auto msaaLoadTexture = fResourceProvider->findOrCreateDiscardableMSAALoadTexture(
-            msaaTexture->dimensions(), msaaTexture->textureInfo());
-    if (!msaaLoadTexture) {
-        SKGPU_LOG_E("DawnCommandBuffer::loadMSAAFromResolveAndBeginRenderPassEncoder: "
-                    "Can't create MSAA Load Texture.");
-        return false;
+    const bool loadResolve =
+            intendedRenderPassDesc.fColorResolveAttachment.fLoadOp == LoadOp::kLoad;
+
+    // Override the render pass to exclude the resolve texture. We will emulate the loading &
+    // resolve via blit. The resovle step will be done separately after endRenderPass()
+    RenderPassDesc renderPassWithoutResolveDesc = intendedRenderPassDesc;
+    renderPassWithoutResolveDesc.fColorResolveAttachment = {};
+
+    wgpu::RenderPassColorAttachment dawnColorAttachmentWithoutResolve =
+            intendedDawnRenderPassDesc.colorAttachments[0];
+    dawnColorAttachmentWithoutResolve.resolveTarget = nullptr;
+    dawnColorAttachmentWithoutResolve.storeOp = wgpu::StoreOp::Store;
+
+    if (loadResolve) {
+        // If we intend to load the resolve texture, then override the loadOp of the MSAA attachment
+        // to Load instead of Clear.
+        // This path is intended to be used when the device doesn't support transient attachments.
+        // Which most likely means it is a non-tiled GPU. On non-tiled GPUs, load is a no-op so it
+        // should be faster than clearing the whole MSAA attachment. Note: Dawn doesn't have any
+        // DontCare loadOp.
+        dawnColorAttachmentWithoutResolve.loadOp = wgpu::LoadOp::Load;
     }
 
-    this->trackCommandBufferResource(msaaLoadTexture);
+    wgpu::RenderPassDescriptor dawnRenderPassDescWithoutResolve = intendedDawnRenderPassDesc;
+    dawnRenderPassDescWithoutResolve.colorAttachments = &dawnColorAttachmentWithoutResolve;
+    dawnRenderPassDescWithoutResolve.colorAttachmentCount = 1;
 
-    // Creating intermediate render pass (copy from resolve texture -> MSAA load texture)
-    RenderPassDesc intermediateRenderPassDesc = {};
-    intermediateRenderPassDesc.fColorAttachment.fLoadOp = LoadOp::kDiscard;
-    intermediateRenderPassDesc.fColorAttachment.fStoreOp = StoreOp::kStore;
-    intermediateRenderPassDesc.fColorAttachment.fTextureInfo =
-            frontendRenderPassDesc.fColorResolveAttachment.fTextureInfo;
+    auto renderPassEncoder = fCommandEncoder.BeginRenderPass(&dawnRenderPassDescWithoutResolve);
 
-    wgpu::RenderPassColorAttachment wgpuIntermediateColorAttachment;
-     // Dawn doesn't support actual DontCare so use LoadOp::Clear.
-    wgpuIntermediateColorAttachment.loadOp = wgpu::LoadOp::Clear;
-    wgpuIntermediateColorAttachment.clearValue = {1, 1, 1, 1};
-    wgpuIntermediateColorAttachment.storeOp = wgpu::StoreOp::Store;
-    wgpuIntermediateColorAttachment.view = msaaLoadTexture->renderTextureView();
+    SkIRect msaaArea = renderPassBounds;
+    msaaArea.intersect(SkIRect::MakeSize(msaaTexture->dimensions()));
+    SkIRect resolveArea = renderPassBounds;
+    resolveArea.offset(resolveOffset);
+    resolveArea.intersect(SkIRect::MakeSize(resolveTexture->dimensions()));
 
-    wgpu::RenderPassDescriptor wgpuIntermediateRenderPassDesc;
-    wgpuIntermediateRenderPassDesc.colorAttachmentCount = 1;
-    wgpuIntermediateRenderPassDesc.colorAttachments = &wgpuIntermediateColorAttachment;
-
-    auto renderPassEncoder = fCommandEncoder.BeginRenderPass(&wgpuIntermediateRenderPassDesc);
-
-    bool blitSucceeded = this->doBlitWithDraw(
-            renderPassEncoder,
-            intermediateRenderPassDesc,
-            /*sourceTextureView=*/wgpuRenderPassDesc.colorAttachments[0].resolveTarget,
-            msaaTexture->dimensions().width(),
-            msaaTexture->dimensions().height());
-
-    renderPassEncoder.End();
-
-    if (!blitSucceeded) {
-        return false;
-    }
-
-    // Start actual render pass (blit from MSAA load texture -> MSAA texture)
-    renderPassEncoder = fCommandEncoder.BeginRenderPass(&wgpuRenderPassDesc);
-
-    if (!this->doBlitWithDraw(renderPassEncoder,
-                              frontendRenderPassDesc,
-                              /*sourceTextureView=*/msaaLoadTexture->renderTextureView(),
-                              msaaTexture->dimensions().width(),
-                              msaaTexture->dimensions().height())) {
-        renderPassEncoder.End();
-        return false;
+    if (loadResolve) {
+        // Blit from the resolve texture to the MSAA texture
+        if (!this->doBlitWithDraw(renderPassEncoder,
+                                  renderPassWithoutResolveDesc,
+                                  /*srcTextureView=*/resolveTexture->renderTextureView(),
+                                  /*srcSampleCount=*/1,
+                                  /*srcOffset=*/resolveArea.topLeft(),
+                                  /*dstBounds=*/msaaArea)) {
+            renderPassEncoder.End();
+            return false;
+        }
     }
 
     fActiveRenderPassEncoder = renderPassEncoder;
+
+    fResolveStepEmulationInfo = {msaaTexture, resolveTexture, msaaArea.topLeft(), resolveArea};
 
     return true;
 }
 
 bool DawnCommandBuffer::doBlitWithDraw(const wgpu::RenderPassEncoder& renderEncoder,
-                                       const RenderPassDesc& frontendRenderPassDesc,
-                                       const wgpu::TextureView& sourceTextureView,
-                                       int width,
-                                       int height) {
-    auto loadPipeline = fResourceProvider->findOrCreateBlitWithDrawPipeline(frontendRenderPassDesc);
-    if (!loadPipeline) {
+                                       const RenderPassDesc& frontendRenderPassDescKey,
+                                       const wgpu::TextureView& srcTextureView,
+                                       int srcSampleCount,
+                                       const SkIPoint& srcOffset,
+                                       const SkIRect& dstBounds) {
+    DawnResourceProvider::BlitWithDrawEncoder blit =
+            fResourceProvider->findOrCreateBlitWithDrawEncoder(frontendRenderPassDescKey,
+                                                               srcSampleCount);
+    if (!blit) {
         SKGPU_LOG_E("Unable to create pipeline to blit with draw");
         return false;
     }
 
     SkASSERT(renderEncoder);
 
-    renderEncoder.SetPipeline(loadPipeline);
-
-    // The load msaa pipeline takes no uniforms, no vertex/instance attributes and only uses
-    // one texture that does not require a sampler.
-
-    // TODO: b/260368758
-    // cache single texture's bind group creation.
-    wgpu::BindGroupEntry entry;
-    entry.binding = 0;
-    entry.textureView = sourceTextureView;
-
-    wgpu::BindGroupDescriptor desc;
-    desc.layout = loadPipeline.GetBindGroupLayout(0);
-    desc.entryCount = 1;
-    desc.entries = &entry;
-
-    auto bindGroup = fSharedContext->device().CreateBindGroup(&desc);
-
-    renderEncoder.SetBindGroup(0, bindGroup);
-
-    renderEncoder.SetScissorRect(0, 0, width, height);
-    renderEncoder.SetViewport(0, 0, width, height, 0, 1);
-
-    // Fullscreen triangle
-    renderEncoder.Draw(3);
+    blit.EncodeBlit(fSharedContext->device(), renderEncoder, srcTextureView, srcOffset, dstBounds);
 
     return true;
 }
 
-void DawnCommandBuffer::endRenderPass() {
+bool DawnCommandBuffer::endRenderPass() {
     SkASSERT(fActiveRenderPassEncoder);
     fActiveRenderPassEncoder.End();
     fActiveRenderPassEncoder = nullptr;
+
+    // Return early if no resolve step's emulation is needed.
+    if (!fResolveStepEmulationInfo.has_value()) {
+        return true;
+    }
+
+    // Creating an intermediate render pass to copy from the MSAA texture -> resolve texture.
+    RenderPassDesc intermediateRenderPassDesc = {};
+    intermediateRenderPassDesc.fColorAttachment = {
+            TextureInfoPriv::ViewFormat(fResolveStepEmulationInfo->fResolveTexture->textureInfo()),
+            LoadOp::kLoad,
+            StoreOp::kStore,
+            /*fSampleCount=*/1 };
+
+    wgpu::RenderPassColorAttachment dawnIntermediateColorAttachment;
+    dawnIntermediateColorAttachment.loadOp = wgpu::LoadOp::Load;
+    dawnIntermediateColorAttachment.storeOp = wgpu::StoreOp::Store;
+    dawnIntermediateColorAttachment.view =
+            fResolveStepEmulationInfo->fResolveTexture->renderTextureView();
+
+    wgpu::RenderPassDescriptor dawnIntermediateRenderPassDesc;
+    dawnIntermediateRenderPassDesc.colorAttachmentCount = 1;
+    dawnIntermediateRenderPassDesc.colorAttachments = &dawnIntermediateColorAttachment;
+
+    auto renderPassEncoder = fCommandEncoder.BeginRenderPass(&dawnIntermediateRenderPassDesc);
+
+    bool blitSucceeded = this->doBlitWithDraw(
+            renderPassEncoder,
+            intermediateRenderPassDesc,
+            /*srcTextureView=*/fResolveStepEmulationInfo->fMSAATexture->renderTextureView(),
+            /*srcSampleCount=*/fResolveStepEmulationInfo->fMSAATexture->textureInfo().numSamples(),
+            /*srcOffset=*/fResolveStepEmulationInfo->fMSAAAOffset,
+            /*dstBounds=*/fResolveStepEmulationInfo->fResolveArea);
+
+    renderPassEncoder.End();
+
+    fResolveStepEmulationInfo.reset();
+
+    return blitSucceeded;
 }
 
-void DawnCommandBuffer::addDrawPass(const DrawPass* drawPass) {
-    drawPass->addResourceRefs(this);
+bool DawnCommandBuffer::addDrawPass(DrawPass* drawPass) {
+    // If there is gradient data to bind, it must be done prior to draws.
+    if (drawPass->floatStorageManager()->hasData()) {
+        this->bindUniformBuffer(drawPass->floatStorageManager()->getBufferInfo(),
+                                UniformSlot::kGradient);
+    }
+
+    if (!drawPass->addResourceRefs(fResourceProvider, this)) SK_UNLIKELY {
+        return false;
+    }
+
     for (auto [type, cmdPtr] : drawPass->commands()) {
         switch (type) {
             case DrawPassCommands::Type::kBindGraphicsPipeline: {
                 auto bgp = static_cast<DrawPassCommands::BindGraphicsPipeline*>(cmdPtr);
-                this->bindGraphicsPipeline(drawPass->getPipeline(bgp->fPipelineIndex));
+                if (!this->bindGraphicsPipeline(drawPass->getPipeline(bgp->fPipelineIndex)))
+                    SK_UNLIKELY { return false; }
                 break;
             }
             case DrawPassCommands::Type::kSetBlendConstants: {
@@ -403,21 +668,38 @@ void DawnCommandBuffer::addDrawPass(const DrawPass* drawPass) {
                 this->bindUniformBuffer(bub->fInfo, bub->fSlot);
                 break;
             }
-            case DrawPassCommands::Type::kBindDrawBuffers: {
-                auto bdb = static_cast<DrawPassCommands::BindDrawBuffers*>(cmdPtr);
-                this->bindDrawBuffers(
-                        bdb->fVertices, bdb->fInstances, bdb->fIndices, bdb->fIndirect);
+            case DrawPassCommands::Type::kBindStaticDataBuffer: {
+                auto bdb = static_cast<DrawPassCommands::BindStaticDataBuffer*>(cmdPtr);
+                this->bindInputBuffer(bdb->fStaticData.fBuffer, bdb->fStaticData.fOffset,
+                                      DawnGraphicsPipeline::kStaticDataBufferIndex);
+                break;
+            }
+            case DrawPassCommands::Type::kBindAppendDataBuffer: {
+                auto bdb = static_cast<DrawPassCommands::BindAppendDataBuffer*>(cmdPtr);
+                this->bindInputBuffer(bdb->fAppendData.fBuffer, bdb->fAppendData.fOffset,
+                                      DawnGraphicsPipeline::kAppendDataBufferIndex);
+                break;
+            }
+            case DrawPassCommands::Type::kBindIndexBuffer: {
+                auto bdb = static_cast<DrawPassCommands::BindIndexBuffer*>(cmdPtr);
+                this->bindIndexBuffer(
+                        bdb->fIndices.fBuffer, bdb->fIndices.fOffset);
+                break;
+            }
+            case DrawPassCommands::Type::kBindIndirectBuffer: {
+                auto bdb = static_cast<DrawPassCommands::BindIndirectBuffer*>(cmdPtr);
+                this->bindIndirectBuffer(
+                        bdb->fIndirect.fBuffer, bdb->fIndirect.fOffset);
                 break;
             }
             case DrawPassCommands::Type::kBindTexturesAndSamplers: {
                 auto bts = static_cast<DrawPassCommands::BindTexturesAndSamplers*>(cmdPtr);
-                bindTextureAndSamplers(*drawPass, *bts);
+                this->bindTextureAndSamplers(*drawPass, *bts);
                 break;
             }
             case DrawPassCommands::Type::kSetScissor: {
                 auto ss = static_cast<DrawPassCommands::SetScissor*>(cmdPtr);
-                const SkIRect& rect = ss->fScissor;
-                this->setScissor(rect.fLeft, rect.fTop, rect.width(), rect.height());
+                this->setScissor(ss->fScissor);
                 break;
             }
             case DrawPassCommands::Type::kDraw: {
@@ -460,24 +742,54 @@ void DawnCommandBuffer::addDrawPass(const DrawPass* drawPass) {
                 this->drawIndexedIndirect(draw->fType);
                 break;
             }
+            case DrawPassCommands::Type::kAddBarrier: {
+                SKGPU_LOG_E("DawnCommandBuffer does not support the addition of barriers.");
+                break;
+            }
         }
     }
+
+    return true;
 }
 
-void DawnCommandBuffer::bindGraphicsPipeline(const GraphicsPipeline* graphicsPipeline) {
+bool DawnCommandBuffer::bindGraphicsPipeline(const GraphicsPipeline* graphicsPipeline) {
     SkASSERT(fActiveRenderPassEncoder);
 
-    fActiveGraphicsPipeline = static_cast<const DawnGraphicsPipeline*>(graphicsPipeline);
-    fActiveRenderPassEncoder.SetPipeline(fActiveGraphicsPipeline->dawnRenderPipeline());
+    auto* dawnGraphicsPipeline = static_cast<const DawnGraphicsPipeline*>(graphicsPipeline);
+    auto& wgpuPipeline = dawnGraphicsPipeline->dawnRenderPipeline();
+    if (!wgpuPipeline) SK_UNLIKELY {
+        return false;
+    }
+    fActiveGraphicsPipeline = dawnGraphicsPipeline;
+    fActiveRenderPassEncoder.SetPipeline(wgpuPipeline);
     fBoundUniformBuffersDirty = true;
+
+    if (fActiveGraphicsPipeline->dstReadStrategy() == DstReadStrategy::kTextureCopy &&
+        fActiveGraphicsPipeline->numFragTexturesAndSamplers() == 2) {
+        // The pipeline has a single paired texture+sampler and uses texture copies for dst reads.
+        // This situation comes about when the program requires complex blending but otherwise
+        // is not referencing any images. Since there are no other images in play, the DrawPass
+        // will not have a BindTexturesAndSamplers command that we can tack the dstCopy on to.
+        // Instead we need to set the texture BindGroup ASAP to just the dstCopy.
+        // TODO(b/366254117): Once we standardize on a pipeline layout across all backends, the dst
+        // copy texture may not go in a group with the regular textures, in which case this binding
+        // can hopefully happen in a single place (e.g. here or at the start of the renderpass and
+        // not also every other time the textures are changed).
+        const auto* texture = static_cast<const DawnTexture*>(fDstCopy.first);
+        const auto* sampler = static_cast<const DawnSampler*>(fDstCopy.second);
+        wgpu::BindGroup bindGroup =
+                fResourceProvider->findOrCreateSingleTextureSamplerBindGroup(sampler, texture);
+        fActiveRenderPassEncoder.SetBindGroup(
+                DawnGraphicsPipeline::kTextureBindGroupIndex, bindGroup);
+    }
+
+    return true;
 }
 
-void DawnCommandBuffer::bindUniformBuffer(const BindUniformBufferInfo& info, UniformSlot slot) {
+void DawnCommandBuffer::bindUniformBuffer(const BindBufferInfo& info, UniformSlot slot) {
     SkASSERT(fActiveRenderPassEncoder);
 
-    auto dawnBuffer = static_cast<const DawnBuffer*>(info.fBuffer);
-
-    unsigned int bufferIndex = 0;
+    unsigned int bufferIndex;
     switch (slot) {
         case UniformSlot::kRenderStep:
             bufferIndex = DawnGraphicsPipeline::kRenderStepUniformBufferIndex;
@@ -485,41 +797,37 @@ void DawnCommandBuffer::bindUniformBuffer(const BindUniformBufferInfo& info, Uni
         case UniformSlot::kPaint:
             bufferIndex = DawnGraphicsPipeline::kPaintUniformBufferIndex;
             break;
-        default:
-            SkASSERT(false);
+        case UniformSlot::kGradient:
+            bufferIndex = DawnGraphicsPipeline::kGradientBufferIndex;
+            break;
     }
 
-    fBoundUniformBuffers[bufferIndex] = dawnBuffer;
-    fBoundUniformBufferOffsets[bufferIndex] = static_cast<uint32_t>(info.fOffset);
-    fBoundUniformBufferSizes[bufferIndex] = info.fBindingSize;
-
+    fBoundUniforms[bufferIndex] = info;
     fBoundUniformBuffersDirty = true;
 }
 
-void DawnCommandBuffer::bindDrawBuffers(const BindBufferInfo& vertices,
-                                        const BindBufferInfo& instances,
-                                        const BindBufferInfo& indices,
-                                        const BindBufferInfo& indirect) {
+void DawnCommandBuffer::bindInputBuffer(const Buffer* buffer, size_t offset,
+                                        uint32_t bindingIndex) {
     SkASSERT(fActiveRenderPassEncoder);
+    if (buffer) {
+        auto dawnBuffer = static_cast<const DawnBuffer*>(buffer)->dawnBuffer();
+        fActiveRenderPassEncoder.SetVertexBuffer(bindingIndex, dawnBuffer, offset);
+    }
+}
 
-    if (vertices.fBuffer) {
-        auto dawnBuffer = static_cast<const DawnBuffer*>(vertices.fBuffer)->dawnBuffer();
-        fActiveRenderPassEncoder.SetVertexBuffer(
-                DawnGraphicsPipeline::kVertexBufferIndex, dawnBuffer, vertices.fOffset);
-    }
-    if (instances.fBuffer) {
-        auto dawnBuffer = static_cast<const DawnBuffer*>(instances.fBuffer)->dawnBuffer();
-        fActiveRenderPassEncoder.SetVertexBuffer(
-                DawnGraphicsPipeline::kInstanceBufferIndex, dawnBuffer, instances.fOffset);
-    }
-    if (indices.fBuffer) {
-        auto dawnBuffer = static_cast<const DawnBuffer*>(indices.fBuffer)->dawnBuffer();
+void DawnCommandBuffer::bindIndexBuffer(const Buffer* indexBuffer, size_t offset) {
+    SkASSERT(fActiveRenderPassEncoder);
+    if (indexBuffer) {
+        auto dawnBuffer = static_cast<const DawnBuffer*>(indexBuffer)->dawnBuffer();
         fActiveRenderPassEncoder.SetIndexBuffer(
-                dawnBuffer, wgpu::IndexFormat::Uint16, indices.fOffset);
+                dawnBuffer, wgpu::IndexFormat::Uint16, offset);
     }
-    if (indirect.fBuffer) {
-        fCurrentIndirectBuffer = static_cast<const DawnBuffer*>(indirect.fBuffer)->dawnBuffer();
-        fCurrentIndirectBufferOffset = indirect.fOffset;
+}
+
+void DawnCommandBuffer::bindIndirectBuffer(const Buffer* indirectBuffer, size_t offset) {
+    if (indirectBuffer) {
+        fCurrentIndirectBuffer = static_cast<const DawnBuffer*>(indirectBuffer)->dawnBuffer();
+        fCurrentIndirectBufferOffset = offset;
     } else {
         fCurrentIndirectBuffer = nullptr;
         fCurrentIndirectBufferOffset = 0;
@@ -531,38 +839,86 @@ void DawnCommandBuffer::bindTextureAndSamplers(
     SkASSERT(fActiveRenderPassEncoder);
     SkASSERT(fActiveGraphicsPipeline);
 
-    wgpu::BindGroup bindGroup;
+    // When there's an active graphics pipeline with a texture-copy dstread requirement, add one
+    // to account for the intrinsic dstCopy texture we bind here.
+    // NOTE: This is in units of pairs of textures and samplers, whereas the value reported by
+    // the current pipeline is in net bindings (textures + samplers).
+    int numTexturesAndSamplers = command.fNumTexSamplers;
+    if (fActiveGraphicsPipeline->dstReadStrategy() == DstReadStrategy::kTextureCopy) {
+        numTexturesAndSamplers++;
+    }
+    SkASSERT(fActiveGraphicsPipeline->numFragTexturesAndSamplers() == 2*numTexturesAndSamplers);
+
+    // If possible, it's ideal to optimize for the common case of using a single texture with one
+    // dynamic sampler. When using only one sampler, determine whether it is static or dynamic.
+    bool usingSingleStaticSampler = false;
+#if !defined(__EMSCRIPTEN__)
     if (command.fNumTexSamplers == 1) {
-        // Optimize for single texture.
-        SkASSERT(fActiveGraphicsPipeline->numTexturesAndSamplers() == 2);
+        const wgpu::YCbCrVkDescriptor& ycbcrDesc =
+                TextureInfoPriv::Get<DawnTextureInfo>(
+                    command.fTextures[0]->texture()->textureInfo())
+                        .fYcbcrVkDescriptor;
+        usingSingleStaticSampler = DawnDescriptorIsValid(ycbcrDesc);
+    }
+#endif
 
-        const auto* texture =
-                static_cast<const DawnTexture*>(drawPass.getTexture(command.fTextureIndices[0]));
-        const auto* sampler =
-                static_cast<const DawnSampler*>(drawPass.getSampler(command.fSamplerIndices[0]));
+    wgpu::BindGroup bindGroup;
+    // Optimize for single texture with dynamic sampling.
+    if (numTexturesAndSamplers == 1 && !usingSingleStaticSampler) {
+        SkASSERT(fActiveGraphicsPipeline->numFragTexturesAndSamplers() == 2);
+        SkASSERT(fActiveGraphicsPipeline->dstReadStrategy() != DstReadStrategy::kTextureCopy);
 
+        const auto* texture = static_cast<const DawnTexture*>(command.fTextures[0]->texture());
+        const auto* sampler = this->getSampler(command, 0);
         bindGroup = fResourceProvider->findOrCreateSingleTextureSamplerBindGroup(sampler, texture);
     } else {
-        std::vector<wgpu::BindGroupEntry> entries(2 * command.fNumTexSamplers);
+        std::vector<wgpu::BindGroupEntry> entries;
 
         for (int i = 0; i < command.fNumTexSamplers; ++i) {
-            const auto* texture = static_cast<const DawnTexture*>(
-                    drawPass.getTexture(command.fTextureIndices[i]));
-            const auto* sampler = static_cast<const DawnSampler*>(
-                    drawPass.getSampler(command.fSamplerIndices[i]));
+            const auto* texture = static_cast<const DawnTexture*>(command.fTextures[i]->texture());
+            const auto* sampler = this->getSampler(command, i);
             auto& wgpuTextureView = texture->sampleTextureView();
             auto& wgpuSampler = sampler->dawnSampler();
 
+#if !defined(__EMSCRIPTEN__)
             // Assuming shader generator assigns binding slot to sampler then texture,
             // then the next sampler and texture, and so on, we need to use
             // 2 * i as base binding index of the sampler and texture.
             // TODO: https://b.corp.google.com/issues/259457090:
             // Better configurable way of assigning samplers and textures' bindings.
-            entries[2 * i].binding = 2 * i;
-            entries[2 * i].sampler = wgpuSampler;
+            const wgpu::YCbCrVkDescriptor& ycbcrDesc =
+                    texture->dawnTextureInfo().fYcbcrVkDescriptor;
 
-            entries[2 * i + 1].binding = 2 * i + 1;
-            entries[2 * i + 1].textureView = wgpuTextureView;
+            // Only add a sampler as a bind group entry if it's a regular dynamic sampler. A valid
+            // YCbCrVkDescriptor indicates the usage of a static sampler, which should not be
+            // included here. They should already be fully specified in the bind group layout.
+            if (!DawnDescriptorIsValid(ycbcrDesc)) {
+#endif
+                wgpu::BindGroupEntry samplerEntry;
+                samplerEntry.binding = 2 * i;
+                samplerEntry.sampler = wgpuSampler;
+                entries.push_back(samplerEntry);
+#if !defined(__EMSCRIPTEN__)
+            }
+#endif
+            wgpu::BindGroupEntry textureEntry;
+            textureEntry.binding = 2 * i + 1;
+            textureEntry.textureView = wgpuTextureView;
+            entries.push_back(textureEntry);
+        }
+
+        if (fActiveGraphicsPipeline->dstReadStrategy() == DstReadStrategy::kTextureCopy) {
+            // Append the dstCopy sampler and texture as the very last two bind group entries
+            wgpu::BindGroupEntry samplerEntry;
+            samplerEntry.binding = 2*numTexturesAndSamplers - 2;
+            samplerEntry.sampler = static_cast<const DawnSampler*>(fDstCopy.second)->dawnSampler();
+            entries.push_back(samplerEntry);
+
+            wgpu::BindGroupEntry textureEntry;
+            textureEntry.binding = 2*numTexturesAndSamplers - 1;
+            textureEntry.textureView =
+                    static_cast<const DawnTexture*>(fDstCopy.first)->sampleTextureView();
+            entries.push_back(textureEntry);
         }
 
         wgpu::BindGroupDescriptor desc;
@@ -578,43 +934,34 @@ void DawnCommandBuffer::bindTextureAndSamplers(
 }
 
 void DawnCommandBuffer::syncUniformBuffers() {
+    static constexpr int kNumBuffers = DawnGraphicsPipeline::kNumUniformBuffers;
+
     if (fBoundUniformBuffersDirty) {
         fBoundUniformBuffersDirty = false;
 
-        std::array<uint32_t, 3> dynamicOffsets;
-        std::array<std::pair<const DawnBuffer*, uint32_t>, 3> boundBuffersAndSizes;
-        boundBuffersAndSizes[0].first = fIntrinsicConstantBuffer.get();
-        boundBuffersAndSizes[0].second = sizeof(IntrinsicConstant);
+        std::array<uint32_t, kNumBuffers> dynamicOffsets;
+        std::array<std::pair<const DawnBuffer*, uint32_t>, kNumBuffers> boundBuffersAndSizes;
 
-        int activeIntrinsicBufferSlot = fIntrinsicConstantBufferSlotsUsed - 1;
-        dynamicOffsets[0] = activeIntrinsicBufferSlot * kIntrinsicConstantAlignedSize;
+        std::array<bool, kNumBuffers> enabled = {
+                !fSharedContext->dawnCaps()
+                         ->resourceBindingRequirements()
+                         .fUsePushConstantsForIntrinsicConstants,  // intrinsic uniforms
+                fActiveGraphicsPipeline->hasStepUniforms(),            // render step uniforms
+                fActiveGraphicsPipeline->hasPaintUniforms(),           // paint uniforms
+                fActiveGraphicsPipeline->hasGradientBuffer(),          // gradient SSBO
+        };
 
-        if (fActiveGraphicsPipeline->hasStepUniforms() &&
-            fBoundUniformBuffers[DawnGraphicsPipeline::kRenderStepUniformBufferIndex]) {
-            boundBuffersAndSizes[1].first =
-                    fBoundUniformBuffers[DawnGraphicsPipeline::kRenderStepUniformBufferIndex];
-            boundBuffersAndSizes[1].second =
-                    fBoundUniformBufferSizes[DawnGraphicsPipeline::kRenderStepUniformBufferIndex];
-            dynamicOffsets[1] =
-                    fBoundUniformBufferOffsets[DawnGraphicsPipeline::kRenderStepUniformBufferIndex];
-        } else {
-            // Unused buffer entry
-            boundBuffersAndSizes[1].first = nullptr;
-            dynamicOffsets[1] = 0;
-        }
-
-        if (fActiveGraphicsPipeline->hasPaintUniforms() &&
-            fBoundUniformBuffers[DawnGraphicsPipeline::kPaintUniformBufferIndex]) {
-            boundBuffersAndSizes[2].first =
-                    fBoundUniformBuffers[DawnGraphicsPipeline::kPaintUniformBufferIndex];
-            boundBuffersAndSizes[2].second =
-                    fBoundUniformBufferSizes[DawnGraphicsPipeline::kPaintUniformBufferIndex];
-            dynamicOffsets[2] =
-                    fBoundUniformBufferOffsets[DawnGraphicsPipeline::kPaintUniformBufferIndex];
-        } else {
-            // Unused buffer entry
-            boundBuffersAndSizes[2].first = nullptr;
-            dynamicOffsets[2] = 0;
+        for (int i = 0; i < kNumBuffers; ++i) {
+            if (enabled[i] && fBoundUniforms[i]) {
+                boundBuffersAndSizes[i].first =
+                        static_cast<const DawnBuffer*>(fBoundUniforms[i].fBuffer);
+                boundBuffersAndSizes[i].second = fBoundUniforms[i].fSize;
+                dynamicOffsets[i] = fBoundUniforms[i].fOffset;
+            } else {
+                // Unused or null binding
+                boundBuffersAndSizes[i].first = nullptr;
+                dynamicOffsets[i] = 0;
+            }
         }
 
         auto bindGroup =
@@ -627,86 +974,46 @@ void DawnCommandBuffer::syncUniformBuffers() {
     }
 }
 
-void DawnCommandBuffer::setScissor(unsigned int left,
-                                   unsigned int top,
-                                   unsigned int width,
-                                   unsigned int height) {
+void DawnCommandBuffer::setScissor(const Scissor& scissor) {
     SkASSERT(fActiveRenderPassEncoder);
-    SkIRect scissor = SkIRect::MakeXYWH(
-            left + fReplayTranslation.x(), top + fReplayTranslation.y(), width, height);
-    if (!scissor.intersect(SkIRect::MakeSize(fRenderPassSize))) {
-        scissor.setEmpty();
-    }
-    fActiveRenderPassEncoder.SetScissorRect(
-            scissor.x(), scissor.y(), scissor.width(), scissor.height());
+    SkIRect rect = scissor.getRect(fReplayTranslation, fRenderPassBounds);
+    fActiveRenderPassEncoder.SetScissorRect(rect.x(), rect.y(), rect.width(), rect.height());
 }
 
-void DawnCommandBuffer::preprocessViewport(const SkRect& viewport) {
-    // Dawn's framebuffer space has (0, 0) at the top left. This agrees with Skia's device coords.
-    // However, in NDC (-1, -1) is the bottom left. So we flip the origin here (assuming all
-    // surfaces we have are TopLeft origin).
-    const float x = viewport.x() - fReplayTranslation.x();
-    const float y = viewport.y() - fReplayTranslation.y();
-    const float invTwoW = 2.f / viewport.width();
-    const float invTwoH = 2.f / viewport.height();
-    const IntrinsicConstant rtAdjust = {invTwoW, -invTwoH, -1.f - x * invTwoW, 1.f + y * invTwoH};
+bool DawnCommandBuffer::updateIntrinsicUniformsAsUBO(UniformDataBlock uniformData) {
+    BindBufferInfo binding =
+            fResourceProvider->findOrCreateIntrinsicBindBufferInfo(this, uniformData);
 
-    bool needNewBuffer = !fIntrinsicConstantBuffer;
-    if (!needNewBuffer && kNumSlotsForIntrinsicConstantBuffer > 0) {
-        needNewBuffer = (fIntrinsicConstantBufferSlotsUsed == kNumSlotsForIntrinsicConstantBuffer);
+    if (!binding) {
+        return false;
+    } else if (binding == fBoundUniforms[DawnGraphicsPipeline::kIntrinsicUniformBufferIndex]) {
+        return true; // no binding change needed
     }
 
-    if (needNewBuffer) {
-        size_t bufferSize;
+    fBoundUniforms[DawnGraphicsPipeline::kIntrinsicUniformBufferIndex] = binding;
+    fBoundUniformBuffersDirty = true;
+    return true;
+}
 
-        if constexpr (kNumSlotsForIntrinsicConstantBuffer > 1) {
-            bufferSize = kIntrinsicConstantAlignedSize * kNumSlotsForIntrinsicConstantBuffer;
-        } else {
-            bufferSize = kIntrinsicConstantAlignedSize;
-        }
-
-        fIntrinsicConstantBuffer = fResourceProvider->findOrCreateDawnBuffer(
-                bufferSize, BufferType::kUniform, AccessPattern::kGpuOnly);
-
-        fIntrinsicConstantBufferSlotsUsed = 0;
-        SkASSERT(fIntrinsicConstantBuffer);
-
-        this->trackResource(fIntrinsicConstantBuffer);
-    }
-
-    // TODO: https://b.corp.google.com/issues/259267703
-    // Make updating intrinsic constants faster. Metal has setVertexBytes method
-    // to quickly sending intrinsic constants to vertex shader without any buffer. But Dawn doesn't
-    // have similar capability. So we have to use WriteBuffer(), and this method is not allowed to
-    // be called when there is an active render pass.
-    SkASSERT(!fActiveRenderPassEncoder);
-    SkASSERT(!fActiveComputePassEncoder);
-
-    if constexpr (kNumSlotsForIntrinsicConstantBuffer > 0) {
-        uint64_t offset = fIntrinsicConstantBufferSlotsUsed * kIntrinsicConstantAlignedSize;
-        fSharedContext->queue().WriteBuffer(fIntrinsicConstantBuffer->dawnBuffer(),
-                                            offset,
-                                            &rtAdjust,
-                                            sizeof(rtAdjust));
-        fIntrinsicConstantBufferSlotsUsed++;
-    } else {
+bool DawnCommandBuffer::updateIntrinsicUniformsAsPushConstant(UniformDataBlock uniformData) {
 #if !defined(__EMSCRIPTEN__)
-        fCommandEncoder.WriteBuffer(fIntrinsicConstantBuffer->dawnBuffer(),
-                                    0,
-                                    reinterpret_cast<const uint8_t*>(rtAdjust),
-                                    sizeof(rtAdjust));
+    SkASSERT(fActiveRenderPassEncoder);
+    SkASSERT(uniformData.size() <= DawnGraphicsPipeline::kIntrinsicUniformSize);
+    fActiveRenderPassEncoder.SetImmediateData(0, uniformData.data(), uniformData.size());
+    return true;
+#else
+    SkASSERT(false); // No push constant support in WASM yet
+    return false;
 #endif
-        fIntrinsicConstantBufferSlotsUsed = 1;
-    }
 }
 
-void DawnCommandBuffer::setViewport(const SkRect& viewport) {
+void DawnCommandBuffer::setViewport(SkIRect viewport) {
     SkASSERT(fActiveRenderPassEncoder);
     fActiveRenderPassEncoder.SetViewport(
             viewport.x(), viewport.y(), viewport.width(), viewport.height(), 0, 1);
 }
 
-void DawnCommandBuffer::setBlendConstants(float* blendConstants) {
+void DawnCommandBuffer::setBlendConstants(std::array<float, 4> blendConstants) {
     SkASSERT(fActiveRenderPassEncoder);
     wgpu::Color blendConst = {
             blendConstants[0], blendConstants[1], blendConstants[2], blendConstants[3]};
@@ -788,7 +1095,27 @@ void DawnCommandBuffer::drawIndexedIndirect(PrimitiveType type) {
 void DawnCommandBuffer::beginComputePass() {
     SkASSERT(!fActiveRenderPassEncoder);
     SkASSERT(!fActiveComputePassEncoder);
-    fActiveComputePassEncoder = fCommandEncoder.BeginComputePass();
+    wgpu::ComputePassDescriptor wgpuComputePassDescriptor = {};
+#if WGPU_TIMESTAMP_WRITES_DEFINED
+#if defined(__EMSCRIPTEN__)
+    wgpu::ComputePassTimestampWrites wgpuTimestampWrites;
+#else
+    wgpu::PassTimestampWrites wgpuTimestampWrites;
+#endif
+    if (!fSharedContext->dawnCaps()->supportsCommandBufferTimestamps() && fTimestampQueryBuffer) {
+        SkASSERT(fTimestampQuerySet);
+        wgpuTimestampWrites.querySet = fTimestampQuerySet;
+        if (!fWroteFirstPassTimestamps) {
+            wgpuTimestampWrites.beginningOfPassWriteIndex = 0;
+            fWroteFirstPassTimestamps = true;
+        }
+        wgpuTimestampWrites.endOfPassWriteIndex = 1;
+        wgpuComputePassDescriptor.timestampWrites = &wgpuTimestampWrites;
+    }
+#else
+    SkASSERT(!fTimestampQueryBuffer);
+#endif
+    fActiveComputePassEncoder = fCommandEncoder.BeginComputePass(&wgpuComputePassDescriptor);
 }
 
 void DawnCommandBuffer::bindComputePipeline(const ComputePipeline* computePipeline) {
@@ -813,9 +1140,9 @@ void DawnCommandBuffer::bindDispatchResources(const DispatchGroup& group,
     for (const ResourceBinding& binding : dispatch.fBindings) {
         wgpu::BindGroupEntry& entry = entries.push_back();
         entry.binding = binding.fIndex;
-        if (const BufferView* buffer = std::get_if<BufferView>(&binding.fResource)) {
-            entry.buffer = static_cast<const DawnBuffer*>(buffer->fInfo.fBuffer)->dawnBuffer();
-            entry.offset = buffer->fInfo.fOffset;
+        if (const BindBufferInfo* buffer = std::get_if<BindBufferInfo>(&binding.fResource)) {
+            entry.buffer = static_cast<const DawnBuffer*>(buffer->fBuffer)->dawnBuffer();
+            entry.offset = buffer->fOffset;
             entry.size = buffer->fSize;
         } else if (const TextureIndex* texIdx = std::get_if<TextureIndex>(&binding.fResource)) {
             const DawnTexture* texture =
@@ -846,6 +1173,15 @@ void DawnCommandBuffer::dispatchWorkgroups(const WorkgroupSize& globalSize) {
 
     fActiveComputePassEncoder.DispatchWorkgroups(
             globalSize.fWidth, globalSize.fHeight, globalSize.fDepth);
+}
+
+void DawnCommandBuffer::dispatchWorkgroupsIndirect(const Buffer* indirectBuffer,
+                                                   size_t indirectBufferOffset) {
+    SkASSERT(fActiveComputePassEncoder);
+    SkASSERT(fActiveComputePipeline);
+
+    auto& wgpuIndirectBuffer = static_cast<const DawnBuffer*>(indirectBuffer)->dawnBuffer();
+    fActiveComputePassEncoder.DispatchWorkgroupsIndirect(wgpuIndirectBuffer, indirectBufferOffset);
 }
 
 void DawnCommandBuffer::endComputePass() {
@@ -880,18 +1216,15 @@ bool DawnCommandBuffer::onCopyTextureToBuffer(const Texture* texture,
     const auto* wgpuTexture = static_cast<const DawnTexture*>(texture);
     auto& wgpuBuffer = static_cast<const DawnBuffer*>(buffer)->dawnBuffer();
 
-    wgpu::ImageCopyTexture src;
+    wgpu::TexelCopyTextureInfo src;
     src.texture = wgpuTexture->dawnTexture();
     src.origin.x = srcRect.x();
     src.origin.y = srcRect.y();
-    src.aspect = wgpuTexture->textureInfo().dawnTextureSpec().fAspect;
+    src.aspect = wgpuTexture->dawnTextureInfo().fAspect;
 
-    wgpu::ImageCopyBuffer dst;
+    wgpu::TexelCopyBufferInfo dst;
     dst.buffer = wgpuBuffer;
     dst.layout.offset = bufferOffset;
-    // Dawn requires buffer's alignment to be multiples of 256.
-    // https://b.corp.google.com/issues/259264489
-    SkASSERT((bufferRowBytes & 0xFF) == 0);
     dst.layout.bytesPerRow = bufferRowBytes;
 
     wgpu::Extent3D copySize = {
@@ -911,17 +1244,14 @@ bool DawnCommandBuffer::onCopyBufferToTexture(const Buffer* buffer,
     auto& wgpuTexture = static_cast<const DawnTexture*>(texture)->dawnTexture();
     auto& wgpuBuffer = static_cast<const DawnBuffer*>(buffer)->dawnBuffer();
 
-    wgpu::ImageCopyBuffer src;
+    wgpu::TexelCopyBufferInfo src;
     src.buffer = wgpuBuffer;
 
-    wgpu::ImageCopyTexture dst;
+    wgpu::TexelCopyTextureInfo dst;
     dst.texture = wgpuTexture;
 
     for (int i = 0; i < count; ++i) {
         src.layout.offset = copyData[i].fBufferOffset;
-        // Dawn requires buffer's alignment to be multiples of 256.
-        // https://b.corp.google.com/issues/259264489
-        SkASSERT((copyData[i].fBufferRowBytes & 0xFF) == 0);
         src.layout.bytesPerRow = copyData[i].fBufferRowBytes;
 
         dst.origin.x = copyData[i].fRect.x();
@@ -948,12 +1278,12 @@ bool DawnCommandBuffer::onCopyTextureToTexture(const Texture* src,
     auto& wgpuTextureSrc = static_cast<const DawnTexture*>(src)->dawnTexture();
     auto& wgpuTextureDst = static_cast<const DawnTexture*>(dst)->dawnTexture();
 
-    wgpu::ImageCopyTexture srcArgs;
+    wgpu::TexelCopyTextureInfo srcArgs;
     srcArgs.texture = wgpuTextureSrc;
     srcArgs.origin.x = srcRect.fLeft;
     srcArgs.origin.y = srcRect.fTop;
 
-    wgpu::ImageCopyTexture dstArgs;
+    wgpu::TexelCopyTextureInfo dstArgs;
     dstArgs.texture = wgpuTextureDst;
     dstArgs.origin.x = dstPoint.fX;
     dstArgs.origin.y = dstPoint.fY;

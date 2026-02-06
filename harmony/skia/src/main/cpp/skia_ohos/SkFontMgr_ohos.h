@@ -7,12 +7,13 @@
 #ifndef SKFONTMGR_OHOS_H
 #define SKFONTMGR_OHOS_H
 
-#include "src/core/SkFontDescriptor.h"
-#include "include/core/SkFontMgr.h"
-
+#include "core/SkFontDescriptor.h"
+#include "core/SkFontMgr.h"
+#include "ports/SkFontScanner_FreeType.h"
 #include "FontConfig_ohos.h"
 #include "SkFontStyleSet_ohos.h"
-
+#include "ports/SkFontHost_FreeType_common.h"
+#include "ports/SkFontScanner_FreeType_priv.h"
 /*!
  * \brief To implement the SkFontMgr for ohos platform
  */

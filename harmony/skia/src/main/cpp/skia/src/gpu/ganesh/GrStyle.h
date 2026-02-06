@@ -9,10 +9,22 @@
 #define GrStyle_DEFINED
 
 #include "include/core/SkMatrix.h"
+#include "include/core/SkPaint.h"
+#include "include/core/SkPathEffect.h"
+#include "include/core/SkRect.h"
+#include "include/core/SkRefCnt.h"
+#include "include/core/SkScalar.h"
 #include "include/core/SkStrokeRec.h"
-#include "include/gpu/GrTypes.h"
+#include "include/private/base/SkAssert.h"
+#include "include/private/base/SkMalloc.h"
 #include "include/private/base/SkTemplates.h"
+#include "include/private/base/SkTo.h"
 #include "src/core/SkPathEffectBase.h"
+
+#include <cstdint>
+#include <utility>
+
+class SkPath;
 
 /**
  * Represents the various ways that a GrStyledShape can be styled. It has fill/stroking information
@@ -123,7 +135,7 @@ public:
 
     bool hasNonDashPathEffect() const { return fPathEffect.get() && !this->isDashed(); }
 
-    bool isDashed() const { return SkPathEffect::kDash_DashType == fDashInfo.fType; }
+    bool isDashed() const { return DashType::kDash == fDashInfo.fType; }
     SkScalar dashPhase() const {
         SkASSERT(this->isDashed());
         return fDashInfo.fPhase;
@@ -178,7 +190,7 @@ public:
             *dst = src;
         }
 
-        // This may not be the correct SkStrokeRec to use if there's a path effect: skbug.com/5299
+        // This may not be the correct SkStrokeRec to use if there's a path effect: skbug.com/40036474
         // It happens to work for dashing.
         SkScalar radius = fStrokeRec.getInflationRadius();
         dst->outset(radius, radius);
@@ -187,8 +199,13 @@ public:
 private:
     void initPathEffect(sk_sp<SkPathEffect> pe);
 
+    enum class DashType {
+        kNone,
+        kDash,
+    };
+
     struct DashInfo {
-        DashInfo() : fType(SkPathEffectBase::kNone_DashType) {}
+        DashInfo() : fType(DashType::kNone) {}
         DashInfo(const DashInfo& that) { *this = that; }
         DashInfo& operator=(const DashInfo& that) {
             fType = that.fType;
@@ -199,11 +216,11 @@ private:
             return *this;
         }
         void reset() {
-            fType = SkPathEffect::kNone_DashType;
+            fType = DashType::kNone;
             fIntervals.reset(0);
         }
-        SkPathEffect::DashType      fType;
-        SkScalar                    fPhase{0};
+        DashType      fType;
+        SkScalar      fPhase{0};
         skia_private::AutoSTArray<4, SkScalar>  fIntervals;
     };
 

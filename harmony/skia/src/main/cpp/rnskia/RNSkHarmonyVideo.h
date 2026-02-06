@@ -19,6 +19,7 @@
 #include <atomic>
 #include <thread>
 #include <unistd.h>
+#include <atomic>  // 添加原子操作支持
 
 #include "decoder.h"
 #include "demuxer.h"
@@ -56,8 +57,6 @@ public:
     void ReleaseAudio();
     void ReleaseThread();
     
-    void SetLoop(int32_t loops = 1) { loops_ = loops; }
-    
     RNSkPlatformContext *context;
     const NativeResourceManager *nativeResMgr;
     
@@ -66,12 +65,11 @@ public:
 private:
     
     static RNSkHarmonyVideo HarmonyVideo;
-    int32_t loops_ = 1;
+    std::atomic<int32_t> loops_{0};  // 默认循环1次，使用原子变量确保线程安全
     uint32_t flags;
     std::string URI;
     int32_t frameCount = 0;
     int64_t milliseconds = 0;
-    int32_t loops = 1;
     
     SampleInfo sampleInfo_;
     
@@ -119,7 +117,8 @@ private:
     static constexpr int32_t ONEK = 1024;
     static constexpr int32_t AUDIO_SLEEP_TIME = 300;
     static constexpr int64_t MICROSECOND = 1000000;
-    
+    std::atomic<bool> videoDecoderStopStatus{false}; // 修改为原子变量    
+
 public:
     
     sk_sp<SkImage> nextImage(double *timeStamp = nullptr) override;
@@ -131,6 +130,11 @@ public:
     void play() override;
     void pause() override;
     void setVolume(float volume) override;
+    void setLoop(bool loop) override;
+    void stop() override;
+    
+    // 获取当前循环次数
+    int32_t GetLoop() const { return loops_.load(); }
     
 };
 

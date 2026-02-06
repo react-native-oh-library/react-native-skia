@@ -10,11 +10,11 @@
 
 #include <GLES2/gl2ext.h>
 
-#include "include/gpu/GrBackendSurface.h"
-#include "include/gpu/GrDirectContext.h"
-#include "include/gpu/ganesh/gl/GrGLBackendSurface.h"
-#include "include/gpu/gl/GrGLTypes.h"
-#include "src/gpu/ganesh/gl/GrGLDefines.h"
+#include "gpu/ganesh/GrBackendSurface.h"
+#include "gpu/ganesh/GrDirectContext.h"
+#include "gpu/ganesh/gl/GrGLBackendSurface.h"
+#include "gpu/ganesh/gl/GrGLTypes.h"
+#include "gpu/ganesh/gl/GrGLDefines.h"
 #include <EGL/egl.h>
 #include <EGL/eglext.h>
 

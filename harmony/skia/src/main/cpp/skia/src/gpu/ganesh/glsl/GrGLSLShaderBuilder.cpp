@@ -4,9 +4,10 @@
  * Use of this source code is governed by a BSD-style license that can be
  * found in the LICENSE file.
  */
-
 #include "src/gpu/ganesh/glsl/GrGLSLShaderBuilder.h"
 
+#include "include/private/gpu/ganesh/GrTypesPriv.h"
+#include "modules/skcms/skcms.h"
 #include "src/core/SkSLTypeShared.h"
 #include "src/gpu/Blend.h"
 #include "src/gpu/Swizzle.h"
@@ -14,7 +15,8 @@
 #include "src/gpu/ganesh/GrShaderVar.h"
 #include "src/gpu/ganesh/glsl/GrGLSLColorSpaceXformHelper.h"
 #include "src/gpu/ganesh/glsl/GrGLSLProgramBuilder.h"
-#include "src/sksl/ir/SkSLVarDeclarations.h"
+#include "src/gpu/ganesh/glsl/GrGLSLProgramDataManager.h"
+#include "src/sksl/SkSLGLSL.h"
 
 using namespace skia_private;
 
@@ -150,8 +152,9 @@ void GrGLSLShaderBuilder::appendColorGamutXform(SkString* out,
     // function, one for the (inverse) destination transfer function, and one for the gamut xform.
     // Any combination of these may be present, although some configurations are much more likely.
 
-    auto emitTFFunc = [=](const char* name, GrGLSLProgramDataManager::UniformHandle uniform,
-                          skcms_TFType tfType) {
+    auto emitTFFunc = [this, &uniformHandler](const char* name,
+                                              GrGLSLProgramDataManager::UniformHandle uniform,
+                                              skcms_TFType tfType) {
         const GrShaderVar gTFArgs[] = { GrShaderVar("x", SkSLType::kFloat) };
         const char* coeffs = uniformHandler->getUniformCStr(uniform);
         SkString body;
@@ -202,6 +205,29 @@ void GrGLSLShaderBuilder::appendColorGamutXform(SkString* out,
                                    colorXformHelper->dstTFType());
     }
 
+    auto emitOOTFFunc = [this, &uniformHandler](const char* name,
+                                                GrGLSLProgramDataManager::UniformHandle uniform) {
+        const GrShaderVar gTFArgs[] = { GrShaderVar("color", SkSLType::kFloat3) };
+        const char* coeffs = uniformHandler->getUniformCStr(uniform);
+        SkString body;
+        body.appendf("float Y = dot(color, %s.rgb);", coeffs);
+        body.appendf("return color * sign(Y) * pow(abs(Y), %s.a);", coeffs);
+        SkString funcName = this->getMangledFunctionName(name);
+        this->emitFunction(SkSLType::kFloat3, funcName.c_str(), {gTFArgs, std::size(gTFArgs)},
+                           body.c_str());
+        return funcName;
+    };
+
+    SkString srcOOTFFuncName;
+    if (colorXformHelper->applySrcOOTF()) {
+        srcOOTFFuncName = emitOOTFFunc("src_ootf", colorXformHelper->srcOOTFUniform());
+    }
+
+    SkString dstOOTFFuncName;
+    if (colorXformHelper->applyDstOOTF()) {
+        dstOOTFFuncName = emitOOTFFunc("dst_ootf", colorXformHelper->dstOOTFUniform());
+    }
+
     SkString gamutXformFuncName;
     if (colorXformHelper->applyGamutXform()) {
         const GrShaderVar gGamutXformArgs[] = { GrShaderVar("color", SkSLType::kFloat4) };
@@ -226,8 +252,14 @@ void GrGLSLShaderBuilder::appendColorGamutXform(SkString* out,
             body.appendf("color.g = %s(color.g);", srcTFFuncName.c_str());
             body.appendf("color.b = %s(color.b);", srcTFFuncName.c_str());
         }
+        if (colorXformHelper->applySrcOOTF()) {
+            body.appendf("color.rgb = %s(color.rgb);", srcOOTFFuncName.c_str());
+        }
         if (colorXformHelper->applyGamutXform()) {
             body.appendf("color = %s(color);", gamutXformFuncName.c_str());
+        }
+        if (colorXformHelper->applyDstOOTF()) {
+            body.appendf("color.rgb = %s(color.rgb);", dstOOTFFuncName.c_str());
         }
         if (colorXformHelper->applyDstTF()) {
             body.appendf("color.r = %s(color.r);", dstTFFuncName.c_str());

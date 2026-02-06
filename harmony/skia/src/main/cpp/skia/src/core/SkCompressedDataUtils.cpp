@@ -9,14 +9,14 @@
 
 #include "include/core/SkBitmap.h"
 #include "include/core/SkColor.h"
-#include "include/core/SkColorPriv.h"
 #include "include/core/SkData.h"
 #include "include/core/SkScalar.h"
 #include "include/core/SkSize.h"
-#include "include/private/SkColorData.h"
 #include "include/private/base/SkTPin.h"
 #include "include/private/base/SkTo.h"
 #include "src/base/SkMathPriv.h"
+#include "src/core/SkColorData.h"
+#include "src/core/SkColorPriv.h"
 #include "src/core/SkMipmap.h"
 
 #include <algorithm>
@@ -253,11 +253,11 @@ bool SkDecompress(sk_sp<SkData> data,
 
 size_t SkCompressedDataSize(SkTextureCompressionType type, SkISize dimensions,
                             TArray<size_t>* individualMipOffsets, bool mipmapped) {
-    SkASSERT(!individualMipOffsets || !individualMipOffsets->size());
+    SkASSERT(!individualMipOffsets || individualMipOffsets->empty());
 
     int numMipLevels = 1;
     if (mipmapped) {
-        numMipLevels = SkMipmap::ComputeLevelCount(dimensions.width(), dimensions.height()) + 1;
+        numMipLevels = SkMipmap::ComputeLevelCount(dimensions) + 1;
     }
 
     size_t totalSize = 0;

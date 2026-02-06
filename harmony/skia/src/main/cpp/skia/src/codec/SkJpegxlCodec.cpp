@@ -289,6 +289,9 @@ SkCodec::Result SkJpegxlCodec::onGetPixels(const SkImageInfo& dstInfo, void* dst
 }
 
 bool SkJpegxlCodec::onRewind() {
+    if (!this->rewindStream()) {
+        return false;
+    }
     JxlDecoderRewind(fCodec->fDecoder.get());
     return true;
 }
@@ -439,6 +442,11 @@ int SkJpegxlCodec::onGetRepetitionCount() {
 
     // Largest "non-infinite" value.
     return std::numeric_limits<int>::max();
+}
+
+SkCodec::IsAnimated SkJpegxlCodec::onIsAnimated() {
+    JxlBasicInfo& info = fCodec->fInfo;
+    return info.have_animation ? IsAnimated::kYes : IsAnimated::kNo;
 }
 
 const SkFrameHolder* SkJpegxlCodec::getFrameHolder() const {

@@ -10,24 +10,28 @@
 
 #include "include/core/SkTypes.h"
 
-#if defined(GR_TEST_UTILS)
+#if defined(GPU_TEST_UTILS)
 
+#include "include/core/SkString.h"
+#include "include/private/base/SkNoncopyable.h"
 #include "include/private/base/SkTArray.h"
-#include "src/base/SkArenaAlloc.h"
-#include "src/gpu/ganesh/GrSurfaceProxyView.h"
-#include "src/gpu/ganesh/GrTestUtils.h"
-#include "src/gpu/ganesh/GrTextureProxy.h"
+#include "src/gpu/ganesh/GrFragmentProcessor.h"
+#include "src/gpu/ganesh/GrSurfaceProxyView.h"  // IWYU pragma: keep
 
+#include <memory>
 #include <tuple>
 
 class GrCaps;
-class GrFragmentProcessor;
 class GrGeometryProcessor;
 class GrProcessorTestData;
 class GrProxyProvider;
-class GrTexture;
+class GrRecordingContext;
 class GrXPFactory;
-class SkMatrix;
+class SkArenaAlloc;
+class SkRandom;
+enum SkAlphaType : int;
+enum class GrColorType;
+namespace skgpu::ganesh { class SurfaceDrawContext; }
 
 namespace GrProcessorUnitTest {
 
@@ -50,15 +54,16 @@ class GrProcessorTestData {
 public:
     using ViewInfo = std::tuple<GrSurfaceProxyView, GrColorType, SkAlphaType>;
 
-    GrProcessorTestData(SkRandom* random, GrRecordingContext* context, int maxTreeDepth,
-                        int numViews, const ViewInfo views[]);
-    GrProcessorTestData(SkRandom* random, GrRecordingContext* context, int maxTreeDepth,
-                        int numViews, const ViewInfo views[],
+    GrProcessorTestData(SkRandom* random, skgpu::ganesh::SurfaceDrawContext* sdc,
+                        int maxTreeDepth, int numViews, const ViewInfo views[]);
+    GrProcessorTestData(SkRandom* random, skgpu::ganesh::SurfaceDrawContext* sdc,
+                        int maxTreeDepth, int numViews, const ViewInfo views[],
                         std::unique_ptr<GrFragmentProcessor> inputFP);
     GrProcessorTestData(const GrProcessorTestData&) = delete;
     ~GrProcessorTestData();
 
     GrRecordingContext* context() { return fContext; }
+    skgpu::ganesh::SurfaceDrawContext* surfaceDrawContext() { return fDrawContext; }
     GrProxyProvider* proxyProvider();
     const GrCaps* caps();
     SkArenaAlloc* allocator() { return fArena.get(); }
@@ -73,13 +78,11 @@ public:
 
 private:
     GrRecordingContext* fContext;
+    skgpu::ganesh::SurfaceDrawContext* fDrawContext;
     skia_private::TArray<ViewInfo> fViews;
     std::unique_ptr<SkArenaAlloc> fArena;
     std::unique_ptr<GrFragmentProcessor> fInputFP;
 };
-
-class GrProcessor;
-class GrTexture;
 
 template <class ProcessorSmartPtr>
 class GrProcessorTestFactory : private SkNoncopyable {
@@ -178,7 +181,7 @@ private:
 #define GR_DEFINE_XP_FACTORY_TEST(X)
 
 #endif  // !SK_ALLOW_STATIC_GLOBAL_INITIALIZERS
-#else   // defined(GR_TEST_UTILS)
+#else   // defined(GPU_TEST_UTILS)
     #define GR_DECLARE_GEOMETRY_PROCESSOR_TEST
     #define GR_DECLARE_FRAGMENT_PROCESSOR_TEST
     #define GR_DECLARE_XP_FACTORY_TEST
@@ -191,5 +194,5 @@ private:
     #define GR_DEFINE_GEOMETRY_PROCESSOR_TEST(...)
     #define GR_DECLARE_XP_FACTORY_TEST
     #define GR_DEFINE_XP_FACTORY_TEST(...)
-#endif  // defined(GR_TEST_UTILS)
+#endif  // defined(GPU_TEST_UTILS)
 #endif  // GrProcessorUnitTest_DEFINED

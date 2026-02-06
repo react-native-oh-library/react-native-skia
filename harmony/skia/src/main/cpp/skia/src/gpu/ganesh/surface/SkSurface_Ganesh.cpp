@@ -16,11 +16,11 @@
 #include "include/core/SkSurface.h"
 #include "include/core/SkSurfaceProps.h"
 #include "include/gpu/GpuTypes.h"
-#include "include/gpu/GrBackendSurface.h"
-#include "include/gpu/GrContextThreadSafeProxy.h"
-#include "include/gpu/GrDirectContext.h"
-#include "include/gpu/GrRecordingContext.h"
-#include "include/gpu/GrTypes.h"
+#include "include/gpu/ganesh/GrBackendSurface.h"
+#include "include/gpu/ganesh/GrContextThreadSafeProxy.h"
+#include "include/gpu/ganesh/GrDirectContext.h"
+#include "include/gpu/ganesh/GrRecordingContext.h"
+#include "include/gpu/ganesh/GrTypes.h"
 #include "include/gpu/ganesh/SkSurfaceGanesh.h"
 #include "include/private/base/SkTo.h"
 #include "include/private/chromium/GrDeferredDisplayList.h"
@@ -47,11 +47,6 @@
 #include "src/gpu/ganesh/GrTextureProxy.h"
 #include "src/gpu/ganesh/image/SkImage_Ganesh.h"
 #include "src/image/SkImage_Base.h"
-
-#ifdef SK_IN_RENDERENGINE
-#include "include/gpu/ganesh/gl/GrGLBackendSurface.h"
-#include "include/gpu/gl/GrGLTypes.h"
-#endif
 
 #include <algorithm>
 #include <cstddef>
@@ -431,6 +426,7 @@ static bool validate_backend_texture(const GrCaps* caps,
                                      GrColorType grCT,
                                      bool texturable) {
     if (!tex.isValid()) {
+        RENDERENGINE_ABORTF("%s failed due to input texture being invalid", __func__);
         return false;
     }
 
@@ -504,7 +500,8 @@ bool SkSurface_Ganesh::replaceBackendTexture(const GrBackendTexture& backendText
     int sampleCnt = oldTexture->asRenderTarget()->numSamples();
     GrColorType grColorType = SkColorTypeToGrColorType(this->getCanvas()->imageInfo().colorType());
     if (!validate_backend_texture(
-                rContext->priv().caps(), backendTexture, sampleCnt, grColorType, true)) {
+                rContext->priv().caps(), backendTexture, sampleCnt, grColorType,
+                /* texturable= */ true)) {
         return false;
     }
 
@@ -657,27 +654,7 @@ sk_sp<SkSurface> WrapBackendTexture(GrRecordingContext* rContext,
             GrWrapCacheable::kNo,
             std::move(releaseHelper)));
     if (!proxy) {
-        // TODO(scroggo,kjlubick) inline this into Android's AutoBackendTexture.cpp so we
-        // don't have a sometimes-dependency on the GL backend.
-#ifdef SK_IN_RENDERENGINE
-        GrGLTextureInfo textureInfo;
-        bool retrievedTextureInfo = GrBackendTextures::GetGLTextureInfo(tex, &textureInfo);
-        RENDERENGINE_ABORTF(
-                "%s failed to wrap the texture into a renderable target "
-                "\n\tGrBackendTexture: (%i x %i) hasMipmaps: %i isProtected: %i texType: %i"
-                "\n\t\tGrGLTextureInfo: success: %i fTarget: %u fFormat: %u"
-                "\n\tmaxRenderTargetSize: %d",
-                __func__,
-                tex.width(),
-                tex.height(),
-                tex.hasMipmaps(),
-                tex.isProtected(),
-                static_cast<int>(tex.textureType()),
-                retrievedTextureInfo,
-                textureInfo.fTarget,
-                textureInfo.fFormat,
-                rContext->priv().caps()->maxRenderTargetSize());
-#endif
+        RENDERENGINE_ABORTF("%s failed to wrap the texture into a renderable target", __func__);
         return nullptr;
     }
 
@@ -705,7 +682,7 @@ sk_sp<SkSurface> WrapBackendRenderTarget(GrRecordingContext* rContext,
                                          ReleaseContext releaseContext) {
     auto releaseHelper = skgpu::RefCntedCallback::Make(relProc, releaseContext);
 
-    if (!rContext) {
+    if (!rContext || !rt.isValid()) {
         return nullptr;
     }
 

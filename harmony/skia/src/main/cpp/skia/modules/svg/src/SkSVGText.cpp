@@ -7,22 +7,41 @@
 
 #include "modules/svg/include/SkSVGText.h"
 
-#include <limits>
-
 #include "include/core/SkCanvas.h"
 #include "include/core/SkContourMeasure.h"
 #include "include/core/SkFont.h"
 #include "include/core/SkFontMgr.h"
 #include "include/core/SkFontStyle.h"
+#include "include/core/SkFontTypes.h"
+#include "include/core/SkMatrix.h"
+#include "include/core/SkPaint.h"
 #include "include/core/SkPathBuilder.h"
+#include "include/core/SkPoint.h"
 #include "include/core/SkRSXform.h"
+#include "include/core/SkScalar.h"
 #include "include/core/SkString.h"
+#include "include/core/SkTextBlob.h"
+#include "include/core/SkTypeface.h"
+#include "include/core/SkTypes.h"
+#include "include/private/base/SkTArray.h"
+#include "include/private/base/SkTemplates.h"
+#include "include/private/base/SkTo.h"
 #include "modules/skshaper/include/SkShaper.h"
+#include "modules/svg/include/SkSVGAttribute.h"
+#include "modules/svg/include/SkSVGAttributeParser.h"
 #include "modules/svg/include/SkSVGRenderContext.h"
-#include "modules/svg/include/SkSVGValue.h"
 #include "modules/svg/src/SkSVGTextPriv.h"
 #include "src/base/SkUTF.h"
 #include "src/core/SkTextBlobPriv.h"
+
+#include <algorithm>
+#include <cstddef>
+#include <cstdint>
+#include <functional>
+#include <limits>
+#include <memory>
+#include <tuple>
+#include <utility>
 
 using namespace skia_private;
 
@@ -220,23 +239,70 @@ void SkSVGTextContext::ShapeBuffer::append(SkUnichar ch, PositionAdjustment pos)
     fUtf8PosAdjust.push_back_n(utf8_len, pos);
 }
 
-void SkSVGTextContext::shapePendingBuffer(const SkFont& font) {
-    // TODO: directionality hints?
-    const auto LTR  = true;
+void SkSVGTextContext::shapePendingBuffer(const SkSVGRenderContext& ctx, const SkFont& font) {
+    const char* utf8 = fShapeBuffer.fUtf8.data();
+    size_t utf8Bytes = fShapeBuffer.fUtf8.size();
 
-    // Initiate shaping: this will generate a series of runs via callbacks.
-    fShaper->shape(fShapeBuffer.fUtf8.data(), fShapeBuffer.fUtf8.size(),
-                   font, LTR, SK_ScalarMax, this);
+    std::unique_ptr<SkShaper::FontRunIterator> font_runs =
+            SkShaper::MakeFontMgrRunIterator(utf8, utf8Bytes, font, ctx.fontMgr());
+    if (!font_runs) {
+        return;
+    }
+    if (!fForcePrimitiveShaping) {
+        // Try to use the passed in shaping callbacks to shape, for example, using harfbuzz and ICU.
+        const uint8_t defaultLTR = 0;
+        std::unique_ptr<SkShaper::BiDiRunIterator> bidi =
+                ctx.makeBidiRunIterator(utf8, utf8Bytes, defaultLTR);
+        std::unique_ptr<SkShaper::LanguageRunIterator> language =
+                SkShaper::MakeStdLanguageRunIterator(utf8, utf8Bytes);
+        std::unique_ptr<SkShaper::ScriptRunIterator> script = ctx.makeScriptRunIterator(utf8, utf8Bytes);
+
+        if (bidi && script && language) {
+            fShaper->shape(utf8,
+                           utf8Bytes,
+                           *font_runs,
+                           *bidi,
+                           *script,
+                           *language,
+                           nullptr,
+                           0,
+                           SK_ScalarMax,
+                           this);
+            fShapeBuffer.reset();
+            return;
+        }  // If any of the callbacks fail, we'll fallback to the primitive shaping.
+    }
+
+    // bidi, script, and lang are all unused so we can construct them with empty data.
+    SkShaper::TrivialBiDiRunIterator trivial_bidi{0, 0};
+    SkShaper::TrivialScriptRunIterator trivial_script{0, 0};
+    SkShaper::TrivialLanguageRunIterator trivial_lang{nullptr, 0};
+    fShaper->shape(utf8,
+                   utf8Bytes,
+                   *font_runs,
+                   trivial_bidi,
+                   trivial_script,
+                   trivial_lang,
+                   nullptr,
+                   0,
+                   SK_ScalarMax,
+                   this);
     fShapeBuffer.reset();
 }
 
-SkSVGTextContext::SkSVGTextContext(const SkSVGRenderContext& ctx, const ShapedTextCallback& cb,
+SkSVGTextContext::SkSVGTextContext(const SkSVGRenderContext& ctx,
+                                   const ShapedTextCallback& cb,
                                    const SkSVGTextPath* tpath)
-    : fRenderContext(ctx)
-    , fCallback(cb)
-    , fShaper(SkShaper::Make(ctx.fontMgr()))
-    , fChunkAlignmentFactor(ComputeAlignmentFactor(ctx.presentationContext()))
-{
+        : fRenderContext(ctx)
+        , fCallback(cb)
+        , fShaper(ctx.makeShaper())
+        , fChunkAlignmentFactor(ComputeAlignmentFactor(ctx.presentationContext())) {
+    // If the shaper callback returns null, fallback to the primitive shaper and
+    // signal that we should not use the other callbacks in shapePendingBuffer
+    if (!fShaper) {
+        fShaper = SkShapers::Primitive::PrimitiveText();
+        fForcePrimitiveShaping = true;
+    }
     if (tpath) {
         fPathData = std::make_unique<PathData>(ctx, *tpath);
 
@@ -325,7 +391,7 @@ void SkSVGTextContext::shapeFragment(const SkString& txt, const SkSVGRenderConte
         // Absolute position adjustments define a new chunk.
         // (https://www.w3.org/TR/SVG11/text.html#TextLayoutIntroduction)
         if (pos.has(PosAttrs::kX) || pos.has(PosAttrs::kY)) {
-            this->shapePendingBuffer(font);
+            this->shapePendingBuffer(ctx, font);
             this->flushChunk(ctx);
 
             // New chunk position.
@@ -348,7 +414,7 @@ void SkSVGTextContext::shapeFragment(const SkString& txt, const SkSVGRenderConte
         fPrevCharSpace = (ch == ' ');
     }
 
-    this->shapePendingBuffer(font);
+    this->shapePendingBuffer(ctx, font);
 
     // Note: at this point we have shaped and buffered RunRecs for the current fragment.
     // The active text chunk continues until an explicit or implicit flush.
@@ -397,8 +463,7 @@ SkRSXform SkSVGTextContext::computeGlyphXform(SkGlyphID glyph, const SkFont& fon
     // (https://www.w3.org/TR/SVG11/text.html#TextpathLayoutRules)
 
     // Path positioning is based on the glyph center (horizontal component).
-    float glyph_width;
-    font.getWidths(&glyph, 1, &glyph_width);
+    float glyph_width = font.getWidth(glyph);
     auto path_offset = pos.fX + glyph_width * .5f;
 
     // In addition to the path matrix, the final glyph matrix also includes:
@@ -441,8 +506,8 @@ SkShaper::RunHandler::Buffer SkSVGTextContext::runBuffer(const RunInfo& ri) {
 
     fRuns.push_back({
         ri.fFont,
-        fCurrentFill.isValid()   ? std::make_unique<SkPaint>(*fCurrentFill)   : nullptr,
-        fCurrentStroke.isValid() ? std::make_unique<SkPaint>(*fCurrentStroke) : nullptr,
+        fCurrentFill.has_value()   ? std::make_unique<SkPaint>(*fCurrentFill)   : nullptr,
+        fCurrentStroke.has_value() ? std::make_unique<SkPaint>(*fCurrentStroke) : nullptr,
         std::make_unique<SkGlyphID[]         >(ri.glyphCount),
         std::make_unique<SkPoint[]           >(ri.glyphCount),
         std::make_unique<PositionAdjustment[]>(ri.glyphCount),
@@ -471,9 +536,14 @@ void SkSVGTextContext::commitRunBuffer(const RunInfo& ri) {
         current_run.glyhPosAdjust[i] = fShapeBuffer.fUtf8PosAdjust[SkToInt(utf8_index)];
     }
 
-    // Offset adjustments are cumulative - we only need to advance the current chunk
-    // with the last value.
-    fChunkAdvance += ri.fAdvance + fShapeBuffer.fUtf8PosAdjust.back().offset;
+    fChunkAdvance += ri.fAdvance;
+}
+
+void SkSVGTextContext::commitLine() {
+    if (!fShapeBuffer.fUtf8PosAdjust.empty()) {
+        // Offset adjustments are cumulative - only advance the current chunk with the last value.
+        fChunkAdvance += fShapeBuffer.fUtf8PosAdjust.back().offset;
+    }
 }
 
 void SkSVGTextFragment::renderText(const SkSVGRenderContext& ctx, SkSVGTextContext* tctx,
@@ -567,7 +637,7 @@ void SkSVGText::onRender(const SkSVGRenderContext& ctx) const {
     this->onShapeText(ctx, &tctx, this->getXmlSpace());
 }
 
-SkRect SkSVGText::onObjectBoundingBox(const SkSVGRenderContext& ctx) const {
+SkRect SkSVGText::onTransformableObjectBoundingBox(const SkSVGRenderContext& ctx) const {
     SkRect bounds = SkRect::MakeEmpty();
 
     const SkSVGTextContext::ShapedTextCallback compute_bounds =
@@ -580,8 +650,9 @@ SkRect SkSVGText::onObjectBoundingBox(const SkSVGRenderContext& ctx) const {
             AutoSTArray<64, SkRect> glyphBounds;
 
             for (SkTextBlobRunIterator it(blob.get()); !it.done(); it.next()) {
-                glyphBounds.reset(SkToInt(it.glyphCount()));
-                it.font().getBounds(it.glyphs(), it.glyphCount(), glyphBounds.get(), nullptr);
+                const auto nglyphs = it.glyphCount();
+                glyphBounds.reset(SkToInt(nglyphs));
+                it.font().getBounds({it.glyphs(), nglyphs}, {glyphBounds.get(), nglyphs}, nullptr);
 
                 SkASSERT(it.positioning() == SkTextBlobRunIterator::kRSXform_Positioning);
                 SkMatrix m;
@@ -616,9 +687,9 @@ SkPath SkSVGText::onAsPath(const SkSVGRenderContext& ctx) const {
                     const SkRSXform* xform;
                 } get_paths_ctx {builder, it.xforms()};
 
-                it.font().getPaths(it.glyphs(), it.glyphCount(), [](const SkPath* path,
-                                                                    const SkMatrix& matrix,
-                                                                    void* raw_ctx) {
+                it.font().getPaths({it.glyphs(), it.glyphCount()}, [](const SkPath* path,
+                                                                      const SkMatrix& matrix,
+                                                                      void* raw_ctx) {
                     auto* get_paths_ctx = static_cast<GetPathsCtx*>(raw_ctx);
                     const auto& glyph_rsx = *get_paths_ctx->xform++;
 
@@ -640,10 +711,7 @@ SkPath SkSVGText::onAsPath(const SkSVGRenderContext& ctx) const {
         this->onShapeText(ctx, &tctx, this->getXmlSpace());
     }
 
-    auto path = builder.detach();
-    this->mapToParent(&path);
-
-    return path;
+    return this->mapToParent(builder.detach());
 }
 
 void SkSVGTextPath::onShapeText(const SkSVGRenderContext& ctx, SkSVGTextContext* parent_tctx,

@@ -11,6 +11,7 @@
 #include "src/gpu/graphite/CommandBuffer.h"
 #include "src/gpu/graphite/DrawPass.h"
 #include "src/gpu/graphite/Log.h"
+#include "src/gpu/graphite/mtl/MtlResourceProvider.h"
 
 #include <memory>
 
@@ -24,7 +25,6 @@ class ComputePipeline;
 class MtlBlitCommandEncoder;
 class MtlComputeCommandEncoder;
 class MtlRenderCommandEncoder;
-class MtlResourceProvider;
 class MtlSharedContext;
 struct WorkgroupSize;
 
@@ -66,17 +66,21 @@ private:
                      const MtlSharedContext* sharedContext,
                      MtlResourceProvider* resourceProvider);
 
+    ResourceProvider* resourceProvider() const override { return fResourceProvider; }
+
     bool createNewMTLCommandBuffer();
 
     void onResetCommandBuffer() override;
 
     bool onAddRenderPass(const RenderPassDesc&,
+                         SkIRect renderPassBounds,
                          const Texture* colorTexture,
                          const Texture* resolveTexture,
                          const Texture* depthStencilTexture,
-                         SkRect viewport,
+                         SkIPoint resolveOffset,
+                         SkIRect viewport,
                          const DrawPassList&) override;
-    bool onAddComputePass(const DispatchGroupList&) override;
+    bool onAddComputePass(DispatchGroupSpan) override;
 
     // Methods for populating a MTLRenderCommandEncoder:
     bool beginRenderPass(const RenderPassDesc&,
@@ -85,25 +89,21 @@ private:
                          const Texture* depthStencilTexture);
     void endRenderPass();
 
-    void addDrawPass(const DrawPass*);
+    [[nodiscard]] bool addDrawPass(DrawPass*);
+
+    void updateIntrinsicUniforms(SkIRect viewport);
 
     void bindGraphicsPipeline(const GraphicsPipeline*);
-    void setBlendConstants(float* blendConstants);
+    void setBlendConstants(std::array<float, 4> blendConstants);
 
     void bindUniformBuffer(const BindBufferInfo& info, UniformSlot);
-    void bindDrawBuffers(const BindBufferInfo& vertices,
-                         const BindBufferInfo& instances,
-                         const BindBufferInfo& indices,
-                         const BindBufferInfo& indirect);
-    void bindVertexBuffers(const Buffer* vertexBuffer, size_t vertexOffset,
-                           const Buffer* instanceBuffer, size_t instanceOffset);
+    void bindInputBuffer(const Buffer* buffer, size_t offset, uint32_t bindingIndex);
     void bindIndexBuffer(const Buffer* indexBuffer, size_t offset);
     void bindIndirectBuffer(const Buffer* indirectBuffer, size_t offset);
 
     void bindTextureAndSampler(const Texture*, const Sampler*, unsigned int bindIndex);
 
-    void setScissor(unsigned int left, unsigned int top,
-                    unsigned int width, unsigned int height);
+    void setScissor(const Scissor&);
     void setViewport(float x, float y, float width, float height,
                      float minDepth, float maxDepth);
 
@@ -126,6 +126,9 @@ private:
     void bindTexture(const Texture* texture, unsigned int index);
     void bindSampler(const Sampler* sampler, unsigned int index);
     void dispatchThreadgroups(const WorkgroupSize& globalSize, const WorkgroupSize& localSize);
+    void dispatchThreadgroupsIndirect(const WorkgroupSize& localSize,
+                                      const Buffer* indirectBuffer,
+                                      size_t indirectBufferOffset);
     void endComputePass();
 
     // Methods for populating a MTLBlitCommandEncoder:

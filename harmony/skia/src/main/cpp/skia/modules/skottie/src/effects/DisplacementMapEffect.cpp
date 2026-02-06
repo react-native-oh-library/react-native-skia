@@ -5,22 +5,43 @@
  * found in the LICENSE file.
  */
 
-#include "modules/skottie/src/effects/Effects.h"
-
 #include "include/core/SkCanvas.h"
+#include "include/core/SkM44.h"
+#include "include/core/SkMatrix.h"
+#include "include/core/SkPaint.h"
+#include "include/core/SkPicture.h"
 #include "include/core/SkPictureRecorder.h"
-#include "include/effects/SkColorMatrix.h"
-#include "include/effects/SkImageFilters.h"
+#include "include/core/SkRect.h"
+#include "include/core/SkRefCnt.h"
+#include "include/core/SkSamplingOptions.h"
+#include "include/core/SkScalar.h"
+#include "include/core/SkShader.h"
+#include "include/core/SkSize.h"
+#include "include/core/SkString.h"
+#include "include/core/SkTileMode.h"
 #include "include/effects/SkRuntimeEffect.h"
-#include "include/private/SkColorData.h"
+#include "include/private/base/SkAssert.h"
+#include "modules/jsonreader/SkJSONReader.h"
 #include "modules/skottie/src/Adapter.h"
 #include "modules/skottie/src/SkottieJson.h"
+#include "modules/skottie/src/SkottiePriv.h"
 #include "modules/skottie/src/SkottieValue.h"
-#include "modules/sksg/include/SkSGRenderEffect.h"
+#include "modules/skottie/src/effects/Effects.h"
+#include "modules/sksg/include/SkSGNode.h"
 #include "modules/sksg/include/SkSGRenderNode.h"
+#include "src/core/SkColorData.h"
 
+#include <algorithm>
 #include <cmath>
-#include <tuple>
+#include <cstdio>
+#include <utility>
+#include <vector>
+
+struct SkPoint;
+
+namespace sksg {
+class InvalidationController;
+}
 
 namespace skottie::internal {
 namespace {
@@ -321,18 +342,15 @@ public:
                 .bind(kExpandOutput_Index    , fExpandOutput      );
     }
 
-    static std::tuple<sk_sp<sksg::RenderNode>, SkSize> GetDisplacementSource(
+    static EffectBuilder::LayerContent GetDisplacementSource(
             const skjson::ArrayValue& jprops,
             const EffectBuilder* ebuilder) {
 
         if (const skjson::ObjectValue* jv = EffectBuilder::GetPropValue(jprops, kMapLayer_Index)) {
-            auto* map_builder = ebuilder->getLayerBuilder(ParseDefault((*jv)["k"], -1));
-            if (map_builder) {
-                return std::make_tuple(map_builder->contentTree(), map_builder->size());
-            }
+            return ebuilder->getLayerContent(ParseDefault((*jv)["k"], -1));
         }
 
-        return std::make_tuple<sk_sp<sksg::RenderNode>, SkSize>(nullptr, {0,0});
+        return { nullptr, {0,0} };
     }
 
 private:
@@ -386,9 +404,12 @@ private:
 
 sk_sp<sksg::RenderNode> EffectBuilder::attachDisplacementMapEffect(
         const skjson::ArrayValue& jprops, sk_sp<sksg::RenderNode> layer) const {
-    auto [ displ, displ_size ] = DisplacementMapAdapter::GetDisplacementSource(jprops, this);
+    const LayerContent displ = DisplacementMapAdapter::GetDisplacementSource(jprops, this);
 
-    auto displ_node = DisplacementNode::Make(layer, fLayerSize, std::move(displ), displ_size);
+    auto displ_node = DisplacementNode::Make(layer,
+                                             fLayerSize,
+                                             std::move(displ.fContent),
+                                             displ.fSize);
 
     if (!displ_node) {
         return layer;

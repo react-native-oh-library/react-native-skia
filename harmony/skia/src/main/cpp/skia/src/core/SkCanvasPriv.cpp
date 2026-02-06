@@ -159,19 +159,6 @@ bool SkCanvasPriv::ImageToColorFilter(SkPaint* paint) {
     return true;
 }
 
-#if defined(GRAPHITE_TEST_UTILS)
-#include "src/gpu/graphite/Device.h"
-
-skgpu::graphite::TextureProxy* SkCanvasPriv::TopDeviceGraphiteTargetProxy(SkCanvas* canvas) {
-    if (auto gpuDevice = canvas->topDevice()->asGraphiteDevice()) {
-        return gpuDevice->target();
-    }
-    return nullptr;
-}
-
-#endif // defined(GRAPHITE_TEST_UTILS)
-
-
 AutoLayerForImageFilter::AutoLayerForImageFilter(SkCanvas* canvas,
                                                  const SkPaint& paint,
                                                  const SkRect* rawBounds,
@@ -211,7 +198,24 @@ AutoLayerForImageFilter::~AutoLayerForImageFilter() {
         fCanvas->fSaveCount -= 1;
         fCanvas->internalRestore();
     }
-    SkASSERT(fCanvas->getSaveCount() == fSaveCount);
+    // Negative save count occurs when this layer was moved.
+    SkASSERT(fSaveCount < 0 || fCanvas->getSaveCount() == fSaveCount);
+}
+
+AutoLayerForImageFilter::AutoLayerForImageFilter(AutoLayerForImageFilter&& other) {
+    *this = std::move(other);
+}
+
+AutoLayerForImageFilter& AutoLayerForImageFilter::operator=(AutoLayerForImageFilter&& other) {
+    fPaint = std::move(other.fPaint);
+    fCanvas = other.fCanvas;
+    fTempLayersForFilters = other.fTempLayersForFilters;
+    SkDEBUGCODE(fSaveCount = other.fSaveCount;)
+
+    other.fTempLayersForFilters = 0;
+    SkDEBUGCODE(other.fSaveCount = -1;)
+
+    return *this;
 }
 
 void AutoLayerForImageFilter::addImageFilterLayer(const SkRect* drawBounds) {
@@ -243,8 +247,8 @@ void AutoLayerForImageFilter::addMaskFilterLayer(const SkRect* drawBounds) {
     SkASSERT(!fPaint.getImageFilter());
 
     // TODO: Eventually all SkMaskFilters will implement this method so this can switch to an assert
-    sk_sp<SkImageFilter> maskFilterAsImageFilter =
-            as_MFB(fPaint.getMaskFilter())->asImageFilter(fCanvas->getTotalMatrix());
+    auto [maskFilterAsImageFilter, appliesShading] = as_MFB(
+        fPaint.getMaskFilter())->asImageFilter(fCanvas->getTotalMatrix(), fPaint);
     if (!maskFilterAsImageFilter) {
         // This is a legacy mask filter that can be handled by raster and Ganesh directly, but will
         // be ignored by Graphite. Return now, leaving the paint with the mask filter so that the
@@ -255,12 +259,16 @@ void AutoLayerForImageFilter::addMaskFilterLayer(const SkRect* drawBounds) {
     // The restore paint for the coverage layer takes over all shading effects that had been on the
     // original paint, which will be applied to the alpha-only output image from the mask filter
     // converted to an image filter.
+    // If we know our mask filter will affect shading, we don't want to add the original shading
+    // into the restore paint.
     SkPaint restorePaint;
-    restorePaint.setColor4f(fPaint.getColor4f());
-    restorePaint.setShader(fPaint.refShader());
-    restorePaint.setColorFilter(fPaint.refColorFilter());
+    if (!appliesShading) {
+        restorePaint.setColor4f(fPaint.getColor4f());
+        restorePaint.setShader(fPaint.refShader());
+        restorePaint.setColorFilter(fPaint.refColorFilter());
+        restorePaint.setDither(fPaint.isDither());
+    }
     restorePaint.setBlender(fPaint.refBlender());
-    restorePaint.setDither(fPaint.isDither());
     restorePaint.setImageFilter(maskFilterAsImageFilter);
 
     // Remove all shading effects from the "working" paint so that the layer's alpha channel
@@ -273,7 +281,7 @@ void AutoLayerForImageFilter::addMaskFilterLayer(const SkRect* drawBounds) {
     fPaint.setDither(false);
     fPaint.setBlendMode(SkBlendMode::kSrcOver);
 
-    this->addLayer(restorePaint, drawBounds, /*coverageOnly=*/true);
+    this->addLayer(restorePaint, drawBounds, /*coverageOnly=*/!appliesShading);
 }
 
 void AutoLayerForImageFilter::addLayer(const SkPaint& restorePaint,

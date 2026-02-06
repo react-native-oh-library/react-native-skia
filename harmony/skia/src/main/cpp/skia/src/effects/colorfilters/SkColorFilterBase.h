@@ -12,7 +12,7 @@
 #include "include/core/SkColorFilter.h"
 #include "include/core/SkFlattenable.h"
 #include "include/core/SkRefCnt.h"
-#include "include/private/SkColorData.h"
+#include "src/core/SkColorData.h"
 
 #include <cstddef>
 
@@ -52,7 +52,8 @@ public:
     virtual Type type() const = 0;
 
     bool affectsTransparentBlack() const {
-        return this->filterColor(SK_ColorTRANSPARENT) != SK_ColorTRANSPARENT;
+        return this->filterColor4f(SkColors::kTransparent, nullptr, nullptr) !=
+               SkColors::kTransparent;
     }
 
     virtual SkRuntimeEffect* asRuntimeEffect() const { return nullptr; }

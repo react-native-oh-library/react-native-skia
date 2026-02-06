@@ -7,7 +7,7 @@
 #ifndef SKFONTSTYLESET_OHOS_H
 #define SKFONTSTYLESET_OHOS_H
 
-#include "include/core/SkFontMgr.h"
+#include "core/SkFontMgr.h"
 
 #include "FontConfig_ohos.h"
 #include "SkTypeface_ohos.h"

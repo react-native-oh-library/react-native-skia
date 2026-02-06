@@ -145,8 +145,6 @@ bool SkBitmap::setInfo(const SkImageInfo& info, size_t rowBytes) {
     return true;
 }
 
-
-
 bool SkBitmap::setAlphaType(SkAlphaType newAlphaType) {
     if (!SkColorTypeValidateAlphaType(this->colorType(), newAlphaType, &newAlphaType)) {
         return false;
@@ -157,6 +155,14 @@ bool SkBitmap::setAlphaType(SkAlphaType newAlphaType) {
     }
     SkDEBUGCODE(this->validate();)
     return true;
+}
+
+void SkBitmap::setColorSpace(sk_sp<SkColorSpace> newColorSpace) {
+    if (this->colorSpace() != newColorSpace.get()) {
+        SkImageInfo newInfo = fPixmap.info().makeColorSpace(std::move(newColorSpace));
+        fPixmap.reset(std::move(newInfo), fPixmap.addr(), fPixmap.rowBytes());
+    }
+    SkDEBUGCODE(this->validate();)
 }
 
 SkIPoint SkBitmap::pixelRefOrigin() const {
@@ -653,7 +659,7 @@ sk_sp<SkShader> SkBitmap::makeShader(const SkSamplingOptions& sampling,
 sk_sp<SkShader> SkBitmap::makeShader(SkTileMode tmx, SkTileMode tmy,
                                      const SkSamplingOptions& sampling,
                                      const SkMatrix& lm) const {
-    if (!lm.invert(nullptr)) {
+    if (!lm.invert()) {
         return nullptr;
     }
     return SkImageShader::Make(SkMakeImageFromRasterBitmap(*this, kIfMutable_SkCopyPixelsMode),
@@ -663,7 +669,7 @@ sk_sp<SkShader> SkBitmap::makeShader(SkTileMode tmx, SkTileMode tmy,
 sk_sp<SkShader> SkBitmap::makeShader(SkTileMode tmx, SkTileMode tmy,
                                      const SkSamplingOptions& sampling,
                                      const SkMatrix* lm) const {
-    if (lm && !lm->invert(nullptr)) {
+    if (lm && !lm->invert()) {
         return nullptr;
     }
     return SkImageShader::Make(SkMakeImageFromRasterBitmap(*this, kIfMutable_SkCopyPixelsMode),

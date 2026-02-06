@@ -12,7 +12,7 @@
 #include <string>
 
 
-#include "RNSkDomView.h"
+#include "RNSkPictureView.h"
 #include "RNSkHarmonyView.h"
 #include "common.h"
 #include "plugin_manager.h"
@@ -25,7 +25,7 @@ std::unordered_map<std::string,std::shared_ptr<PluginRender>>PluginRender::m_ins
 PluginRender::PluginRender(std::shared_ptr<RNSkia::RNSkPlatformContext> context)
 {
     _context = context;
-    _harmonyView = std::make_shared<RNSkHarmonyView<RNSkia::RNSkDomView>>(context);
+    _harmonyView = std::make_shared<RNSkHarmonyView<RNSkia::RNSkPictureView>>(context);
 }
 
 
@@ -275,14 +275,14 @@ void PluginRender::OnTouchEvent(OH_NativeXComponent *component, void *window) {
 
     std::string id(idStr);
     auto render = PluginRender::GetInstance(id);
-    RNSkTouchInfo info;
-    std::vector<RNSkTouchInfo> touches;
-    if (render != nullptr && touchEvent.type == OH_NativeXComponent_TouchEventType::OH_NATIVEXCOMPONENT_UP) {
-        info.x = tiltX;
-        info.y = tiltY;
-        touches.push_back(info);
-        render->_harmonyView->updateTouchPoints(touches);
-    }
+//    RNSkTouchInfo info;
+//    std::vector<RNSkTouchInfo> touches;
+//    if (render != nullptr && touchEvent.type == OH_NativeXComponent_TouchEventType::OH_NATIVEXCOMPONENT_UP) {
+//        info.x = tiltX;
+//        info.y = tiltY;
+//        touches.push_back(info);
+//        render->_harmonyView->updateTouchPoints(touches);
+//    }
 }
 
 void PluginRender::RegisterCallback(OH_NativeXComponent *nativeXComponent) {

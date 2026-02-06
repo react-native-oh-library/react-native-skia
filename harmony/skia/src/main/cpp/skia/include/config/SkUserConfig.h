@@ -31,7 +31,7 @@
     based on the presence or absence of NDEBUG, but that decision can be changed
     here.
 */
-#define SK_DEBUG
+//#define SK_DEBUG
 //#define SK_RELEASE
 
 /*  To write debug messages to a console, skia will call SkDebugf(...) following
@@ -74,15 +74,11 @@
 */
 //#define SK_R32_SHIFT    16
 
-/* Determines whether to build code that supports the Ganesh GPU backend. Some classes
-   that are not GPU-specific, such as SkShader subclasses, have optional code
-   that is used allows them to interact with this GPU backend. If you'd like to
-   include this code, include -DSK_GANESH in your cflags or uncomment below.
-   Defaults to not set (No Ganesh GPU backend).
-   This define affects the ABI of Skia, so make sure it matches the client which uses
-   the compiled version of Skia.
+/*  This controls how much space should be pre-allocated in an SkCanvas object
+    to store the SkMatrix and clip via calls to SkCanvas::save() (and balanced with
+    SkCanvas::restore()).
 */
-//#define SK_GANESH
+//#define SK_CANVAS_SAVE_RESTORE_PREALLOC_COUNT 32
 
 /* Skia makes use of histogram logging macros to trace the frequency of
    events. By default, Skia provides no-op versions of these macros.
@@ -90,9 +86,17 @@
    integrate with their histogram collection backend.
 */
 //#define SK_HISTOGRAM_BOOLEAN(name, sample)
-//#define SK_HISTOGRAM_ENUMERATION(name, sample, enum_size)
-//#define SK_HISTOGRAM_EXACT_LINEAR(name, sample, value_max)
+//#define SK_HISTOGRAM_ENUMERATION(name, sampleEnum, enumSize)
+//#define SK_HISTOGRAM_EXACT_LINEAR(name, sample, valueMax)
+//#define SK_HISTOGRAM_CUSTOM_EXACT_LINEAR(name, sample, value_min, value_max, bucket_count)
 //#define SK_HISTOGRAM_MEMORY_KB(name, sample)
+//#define SK_HISTOGRAM_CUSTOM_COUNTS(name, sample, countMin, countMax, bucketCount)
+//#define SK_HISTOGRAM_CUSTOM_MICROSECONDS_TIMES(name, sampleUSec, minUSec, maxUSec, bucketCount)
+
+/*
+ * Skia can provide extensive logging of Graphite Pipeline lifetimes.
+ */
+//#define SK_PIPELINE_LIFETIME_LOGGING
 
 // To use smaller but slower mipmap builder
 //#define SK_USE_DRAWING_MIPMAP_DOWNSAMPLER
@@ -117,5 +121,13 @@
  * this file.
  */
 //#define SK_API __declspec(dllexport)
+
+/*
+ * If using DNG support, set the version of the dng_sdk being compiled against here
+ * following the versioning scheme of dng_tag_valus.h
+ * eg, DNG 1.4 is 0x01040000, DNG 1.7.1 is 0x01070100, etc...
+ * If unspecified, DNG SDK 1.4 is assumed
+ */
+// #define SK_DNG_VERSION 0x01040000
 
 #endif

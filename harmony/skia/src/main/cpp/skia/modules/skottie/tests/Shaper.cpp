@@ -5,8 +5,15 @@
  * found in the LICENSE file.
  */
 
+#include <cstddef>
+#include <initializer_list>
+#include <memory>
+
+#include "include/core/SkData.h"
 #include "include/core/SkFontMgr.h"
 #include "modules/skottie/include/TextShaper.h"
+#include "modules/skshaper/utils/FactoryHelpers.h"
+#include "modules/skunicode/include/SkUnicode.h"
 #include "tests/Test.h"
 #include "tools/ToolUtils.h"
 #include "tools/fonts/FontToolUtils.h"
@@ -36,7 +43,8 @@ DEF_TEST(Skottie_Shaper_Clusters, r) {
             nullptr,
         };
         const auto result =
-                Shaper::Shape(text, desc, SkRect::MakeWH(1000, 1000), ToolUtils::TestFontMgr());
+                Shaper::Shape(text, desc, SkRect::MakeWH(1000, 1000), ToolUtils::TestFontMgr(),
+                    SkShapers::BestAvailable());
         REPORTER_ASSERT(r, !result.fFragments.empty());
 
         size_t i = 0;
@@ -114,7 +122,7 @@ DEF_TEST(Skottie_Shaper_HAlign, reporter) {
             };
 
             const auto shape_result =
-                    Shaper::Shape(text, desc, text_point, ToolUtils::TestFontMgr());
+                    Shaper::Shape(text, desc, text_point, ToolUtils::TestFontMgr(), SkShapers::BestAvailable());
             REPORTER_ASSERT(reporter, shape_result.fFragments.size() == 1ul);
             REPORTER_ASSERT(reporter, !shape_result.fFragments[0].fGlyphs.fRuns.empty());
 
@@ -186,7 +194,7 @@ DEF_TEST(Skottie_Shaper_VAlign, reporter) {
                 nullptr
             };
 
-            const auto shape_result = Shaper::Shape(text, desc, text_box, ToolUtils::TestFontMgr());
+            const auto shape_result = Shaper::Shape(text, desc, text_box, ToolUtils::TestFontMgr(), SkShapers::BestAvailable());
             REPORTER_ASSERT(reporter, shape_result.fFragments.size() == 1ul);
             REPORTER_ASSERT(reporter, !shape_result.fFragments[0].fGlyphs.fRuns.empty());
 
@@ -198,13 +206,13 @@ DEF_TEST(Skottie_Shaper_VAlign, reporter) {
             const auto expected_t = text_box.top() + v_diff * talign.topFactor;
             REPORTER_ASSERT(reporter,
                             std::fabs(shape_bounds.top() - expected_t) < tsize.tolerance,
-                            "%f %f %f %f %d", shape_bounds.top(), expected_t, tsize.tolerance,
+                            "%f %f %f %f %u", shape_bounds.top(), expected_t, tsize.tolerance,
                                               tsize.text_size, SkToU32(talign.align));
 
             const auto expected_b = text_box.bottom() - v_diff * (1 - talign.topFactor);
             REPORTER_ASSERT(reporter,
                             std::fabs(shape_bounds.bottom() - expected_b) < tsize.tolerance,
-                            "%f %f %f %f %d", shape_bounds.bottom(), expected_b, tsize.tolerance,
+                            "%f %f %f %f %u", shape_bounds.bottom(), expected_b, tsize.tolerance,
                                               tsize.text_size, SkToU32(talign.align));
         }
     }
@@ -233,19 +241,21 @@ DEF_TEST(Skottie_Shaper_FragmentGlyphs, reporter) {
     const auto text_box = SkRect::MakeWH(100, 100);
 
     {
-        const auto shape_result = Shaper::Shape(text, desc, text_box, ToolUtils::TestFontMgr());
+        const auto shape_result = Shaper::Shape(text, desc, text_box, ToolUtils::TestFontMgr(), SkShapers::BestAvailable());
         // Default/consolidated mode => single blob result.
         REPORTER_ASSERT(reporter, shape_result.fFragments.size() == 1ul);
+        SkASSERT(!shape_result.fFragments.empty());
         REPORTER_ASSERT(reporter, !shape_result.fFragments[0].fGlyphs.fRuns.empty());
     }
 
     {
         desc.fFlags = Shaper::Flags::kFragmentGlyphs;
         const auto shape_result =
-                skottie::Shaper::Shape(text, desc, text_box, ToolUtils::TestFontMgr());
+                skottie::Shaper::Shape(text, desc, text_box, ToolUtils::TestFontMgr(), SkShapers::BestAvailable());
         // Fragmented mode => one blob per glyph.
         const size_t expectedSize = text.size();
         REPORTER_ASSERT(reporter, shape_result.fFragments.size() == expectedSize);
+        SkASSERT(!shape_result.fFragments.empty());
         for (size_t i = 0; i < expectedSize; ++i) {
             REPORTER_ASSERT(reporter, !shape_result.fFragments[i].fGlyphs.fRuns.empty());
         }
@@ -327,7 +337,7 @@ DEF_TEST(Skottie_Shaper_ExplicitFontMgr, reporter) {
     const auto text_box = SkRect::MakeWH(100, 100);
 
     {
-        const auto shape_result = Shaper::Shape(SkString("foo bar"), desc, text_box, fontmgr);
+        const auto shape_result = Shaper::Shape(SkString("foo bar"), desc, text_box, fontmgr, SkShapers::BestAvailable());
 
         REPORTER_ASSERT(reporter, shape_result.fFragments.size() == 1ul);
         REPORTER_ASSERT(reporter, !shape_result.fFragments[0].fGlyphs.fRuns.empty());
@@ -338,13 +348,147 @@ DEF_TEST(Skottie_Shaper_ExplicitFontMgr, reporter) {
     {
         // An unassigned codepoint should trigger fallback.
         const auto shape_result = skottie::Shaper::Shape(SkString("foo\U000DFFFFbar"),
-                                                         desc, text_box, fontmgr);
+                                                         desc, text_box, fontmgr, SkShapers::BestAvailable());
 
         REPORTER_ASSERT(reporter, shape_result.fFragments.size() == 1ul);
         REPORTER_ASSERT(reporter, !shape_result.fFragments[0].fGlyphs.fRuns.empty());
         REPORTER_ASSERT(reporter, fontmgr->fallbackCount() == 1ul);
         REPORTER_ASSERT(reporter, shape_result.fMissingGlyphCount == 1ul);
     }
+}
+
+namespace skottie {
+std::unique_ptr<SkBreakIterator> MakeIntersectingBreakIteratorForTesting(
+    std::unique_ptr<SkBreakIterator>, std::unique_ptr<SkBreakIterator>);
+}
+
+DEF_TEST(Skottie_Shaper_breakiter, r) {
+    class MockBreakIterator final : public SkBreakIterator {
+    public:
+        explicit MockBreakIterator(std::vector<Position> brks) : fBreaks(std::move(brks)) {}
+
+        Position first() override {
+            this->reset();
+            return fCurrent;
+        }
+
+        Position current() override {
+            return fCurrent;
+        }
+        Position next() override {
+            if (fIndex < fBreaks.size()) {
+                fCurrent = fBreaks[fIndex++];
+            } else {
+                fCurrent = -1;
+                fDone = true;
+            }
+            return fCurrent;
+        }
+        Status status() override { return 0; }
+        bool isDone() override { return fDone; }
+        bool setText(const char[], int) override {
+            this->reset();
+            return true;
+        }
+        bool setText(const char16_t[], int) override {
+            this->reset();
+            return true;
+        }
+
+    private:
+        void reset() {
+            fCurrent = 0;
+            fIndex = 0;
+            fDone = false;
+        }
+
+        const std::vector<Position> fBreaks;
+        Position                    fCurrent = 0;
+        bool                        fDone    = false;
+        size_t                      fIndex   = 0;
+    };
+
+    auto do_do_check = [&](const std::unique_ptr<SkBreakIterator>& it,
+                           std::initializer_list<SkBreakIterator::Position> expected) {
+        // Initial state.
+        REPORTER_ASSERT(r, it);
+        REPORTER_ASSERT(r, !it->isDone());
+        REPORTER_ASSERT(r, it->current() == 0);
+
+        for (const auto& pos : expected) {
+            REPORTER_ASSERT(r, it->next() == pos);
+            REPORTER_ASSERT(r, it->current() == pos);
+            REPORTER_ASSERT(r, !it->isDone());
+        }
+
+        // Final state.
+        REPORTER_ASSERT(r, it->next() < 0);
+        REPORTER_ASSERT(r, it->current() < 0);
+        REPORTER_ASSERT(r, it->isDone());
+
+        // One more time for good measure.
+        REPORTER_ASSERT(r, it->next() < 0);
+        REPORTER_ASSERT(r, it->current() < 0);
+        REPORTER_ASSERT(r, it->isDone());
+    };
+
+    auto do_check = [&](std::initializer_list<SkBreakIterator::Position> a,
+                        std::initializer_list<SkBreakIterator::Position> b,
+                        std::initializer_list<SkBreakIterator::Position> expected) {
+        auto it = MakeIntersectingBreakIteratorForTesting(
+            std::make_unique<MockBreakIterator>(std::vector(a)),
+            std::make_unique<MockBreakIterator>(std::vector(b)));
+
+        do_do_check(it, expected);
+
+        // first() resets state.
+        REPORTER_ASSERT(r, it->first() == 0);
+        do_do_check(it, expected);
+
+        // as does setText()
+        REPORTER_ASSERT(r, it->setText("foo", 3));
+        do_do_check(it, expected);
+    };
+
+    auto check = [&](std::initializer_list<SkBreakIterator::Position> a,
+                     std::initializer_list<SkBreakIterator::Position> b,
+                     std::initializer_list<SkBreakIterator::Position> expected) {
+        // Order should not matter.
+        do_check(a, b, expected);
+        do_check(b, a, expected);
+    };
+
+    check({  }, {  },   {  });
+    check({42}, {  },   {  });
+    check({42}, {43},   {  });
+    check({42}, {42},   {42});
+
+    check({1, 3   }, {1, 3},   {1, 3});
+    check({1, 3, 5}, {1, 3},   {1, 3});
+    check({1, 3, 5}, {3, 5},   {3, 5});
+    check({1, 3, 5}, {1, 5},   {1, 5});
+
+    check({1, 3, 5, 7}, {2, 4, 6, 8},   {       });
+    check({1, 3, 5, 7}, {1         },   {1      });
+    check({1, 3, 5, 7}, {1, 5      },   {1, 5   });
+    check({1, 3, 5, 7}, {3, 7      },   {3, 7   });
+    check({1, 3, 5, 7}, {1, 7      },   {1, 7   });
+    check({1, 3, 5, 7}, {1, 3, 7   },   {1, 3, 7});
+    check({1, 3, 5, 7}, {1, 5, 7   },   {1, 5, 7});
+
+    check({1, 5, 9}, {2, 3, 4   },   {       });
+    check({1, 5, 9}, {6, 7, 8   },   {       });
+    check({1, 5, 9}, {2, 3, 7, 8},   {       });
+    check({1, 5, 9}, {1, 2, 3   },   {1      });
+    check({1, 5, 9}, {7, 8, 9   },   {9      });
+    check({1, 5, 9}, {2, 3, 5, 7},   {5      });
+    check({1, 5, 9}, {4, 5, 7, 8},   {5      });
+    check({1, 5, 9}, {1, 2, 3, 5},   {1, 5   });
+    check({1, 5, 9}, {1, 3, 5, 7},   {1, 5   });
+    check({1, 5, 9}, {5, 7, 8, 9},   {5, 9   });
+    check({1, 5, 9}, {3, 5, 7, 9},   {5, 9   });
+    check({1, 5, 9}, {1, 3, 5, 9},   {1, 5, 9});
+    check({1, 5, 9}, {1, 5, 7, 9},   {1, 5, 9});
 }
 
 #endif

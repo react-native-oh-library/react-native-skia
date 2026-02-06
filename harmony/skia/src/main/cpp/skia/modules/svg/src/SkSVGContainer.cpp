@@ -9,6 +9,10 @@
 
 #include "include/core/SkPath.h"
 #include "include/pathops/SkPathOps.h"
+#include "include/private/base/SkAssert.h"
+
+#include <utility>
+class SkSVGRenderContext;
 
 SkSVGContainer::SkSVGContainer(SkSVGTag t) : INHERITED(t) { }
 
@@ -33,14 +37,15 @@ SkPath SkSVGContainer::onAsPath(const SkSVGRenderContext& ctx) const {
     for (int i = 0; i < fChildren.size(); ++i) {
         const SkPath childPath = fChildren[i]->asPath(ctx);
 
-        Op(path, childPath, kUnion_SkPathOp, &path);
+        if (auto result = Op(path, childPath, kUnion_SkPathOp)) {
+            path = *result;
+        }
     }
 
-    this->mapToParent(&path);
-    return path;
+    return this->mapToParent(path);
 }
 
-SkRect SkSVGContainer::onObjectBoundingBox(const SkSVGRenderContext& ctx) const {
+SkRect SkSVGContainer::onTransformableObjectBoundingBox(const SkSVGRenderContext& ctx) const {
     SkRect bounds = SkRect::MakeEmpty();
 
     for (int i = 0; i < fChildren.size(); ++i) {

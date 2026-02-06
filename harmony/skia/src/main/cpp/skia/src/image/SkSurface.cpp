@@ -34,11 +34,23 @@ class SkPaint;
 class GrSurfaceCharacterization;
 namespace skgpu { namespace graphite { class Recorder; } }
 
-SkSurfaceProps::SkSurfaceProps() : fFlags(0), fPixelGeometry(kUnknown_SkPixelGeometry) {}
+SkSurfaceProps::SkSurfaceProps()
+    : fFlags(0)
+    , fPixelGeometry(kUnknown_SkPixelGeometry)
+    , fTextContrast(SK_GAMMA_CONTRAST)
+    , fTextGamma(SK_GAMMA_EXPONENT) {}
 
 SkSurfaceProps::SkSurfaceProps(uint32_t flags, SkPixelGeometry pg)
-    : fFlags(flags), fPixelGeometry(pg)
-{}
+    : fFlags(flags)
+    , fPixelGeometry(pg)
+    , fTextContrast(SK_GAMMA_CONTRAST)
+    , fTextGamma(SK_GAMMA_EXPONENT) {}
+
+SkSurfaceProps::SkSurfaceProps(uint32_t flags,
+                               SkPixelGeometry pg,
+                               SkScalar textContrast,
+                               SkScalar textGamma)
+    : fFlags(flags), fPixelGeometry(pg), fTextContrast(textContrast), fTextGamma(textGamma) {}
 
 SkSurface::SkSurface(int width, int height, const SkSurfaceProps* props)
     : fProps(SkSurfacePropsCopyOrDefault(props)), fWidth(width), fHeight(height)
@@ -91,6 +103,10 @@ sk_sp<SkImage> SkSurface::makeImageSnapshot(const SkIRect& srcBounds) {
     } else {
         return asSB(this)->onNewImageSnapshot(&bounds);
     }
+}
+
+sk_sp<SkImage> SkSurface::makeTemporaryImage() {
+    return asSB(this)->onMakeTemporaryImage();
 }
 
 sk_sp<SkSurface> SkSurface::makeSurface(const SkImageInfo& info) {
@@ -218,6 +234,8 @@ GrRecordingContext* SkSurface::recordingContext() const {
 }
 
 skgpu::graphite::Recorder* SkSurface::recorder() const { return asConstSB(this)->onGetRecorder(); }
+
+SkRecorder* SkSurface::baseRecorder() const { return asConstSB(this)->onGetBaseRecorder(); }
 
 bool SkSurface::wait(int numSemaphores, const GrBackendSemaphore* waitSemaphores,
                      bool deleteSemaphoresAfterWait) {

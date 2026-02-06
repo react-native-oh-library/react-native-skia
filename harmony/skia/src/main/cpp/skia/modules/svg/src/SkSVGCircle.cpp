@@ -5,10 +5,15 @@
  * found in the LICENSE file.
  */
 
-#include "include/core/SkCanvas.h"
 #include "modules/svg/include/SkSVGCircle.h"
+
+#include "include/core/SkCanvas.h"
+#include "include/core/SkPathTypes.h"
+#include "include/core/SkPoint.h"
+#include "modules/svg/include/SkSVGAttributeParser.h"
 #include "modules/svg/include/SkSVGRenderContext.h"
-#include "modules/svg/include/SkSVGValue.h"
+
+class SkPaint;
 
 SkSVGCircle::SkSVGCircle() : INHERITED(SkSVGTag::kCircle) {}
 
@@ -42,13 +47,10 @@ SkPath SkSVGCircle::onAsPath(const SkSVGRenderContext& ctx) const {
     SkScalar r;
     std::tie(pos, r) = this->resolve(ctx.lengthContext());
 
-    SkPath path = SkPath::Circle(pos.x(), pos.y(), r);
-    this->mapToParent(&path);
-
-    return path;
+    return this->mapToParent(SkPath::Circle(pos.x(), pos.y(), r));
 }
 
-SkRect SkSVGCircle::onObjectBoundingBox(const SkSVGRenderContext& ctx) const {
+SkRect SkSVGCircle::onTransformableObjectBoundingBox(const SkSVGRenderContext& ctx) const {
     const auto [pos, r] = this->resolve(ctx.lengthContext());
     return SkRect::MakeXYWH(pos.fX - r, pos.fY - r, 2 * r, 2 * r);
 }

@@ -5,16 +5,26 @@
  * found in the LICENSE file.
  */
 
-#include "src/core/SkScan.h"
-
-#include "include/private/SkColorData.h"
+#include "include/core/SkPoint.h"
+#include "include/core/SkRect.h"
+#include "include/core/SkRegion.h"
+#include "include/core/SkScalar.h"
+#include "include/private/base/SkAssert.h"
+#include "include/private/base/SkCPUTypes.h"
+#include "include/private/base/SkDebug.h"
+#include "include/private/base/SkFixed.h"
+#include "include/private/base/SkMath.h"
+#include "include/private/base/SkSafe32.h"
 #include "include/private/base/SkTo.h"
 #include "src/core/SkBlitter.h"
+#include "src/core/SkColorPriv.h"
 #include "src/core/SkFDot6.h"
 #include "src/core/SkLineClipper.h"
 #include "src/core/SkRasterClip.h"
+#include "src/core/SkScan.h"
 
-#include <utility>
+#include <algorithm>
+#include <cstdint>
 
 /*  Our attempt to compute the worst case "bounds" for the horizontal and
     vertical cases has some numerical bug in it, and we sometimes undervalue
@@ -930,6 +940,16 @@ void SkScan::AntiFrameRect(const SkRect& r, const SkPoint& strokeSize,
     SkScalar rx = SkScalarHalf(strokeSize.fX);
     SkScalar ry = SkScalarHalf(strokeSize.fY);
 
+    // If we're empty on either axis, we remove the outset amount, to be sure
+    // we stroke the same way a polygon would (i.e. it would just see a "line"
+    // and not extend it for the miter join).
+    if (r.width() == 0) {
+        ry = 0;
+    }
+    if (r.height() == 0) {
+        rx = 0;
+    }
+
     // outset by the radius
     FDot8 outerL = SkScalarToFDot8(r.fLeft - rx);
     FDot8 outerT = SkScalarToFDot8(r.fTop - ry);
@@ -939,6 +959,7 @@ void SkScan::AntiFrameRect(const SkRect& r, const SkPoint& strokeSize,
     SkIRect outer;
     // set outer to the outer rect of the outer section
     outer.setLTRB(FDot8Floor(outerL), FDot8Floor(outerT), FDot8Ceil(outerR), FDot8Ceil(outerB));
+
 
     SkBlitterClipper clipper;
     if (clip) {

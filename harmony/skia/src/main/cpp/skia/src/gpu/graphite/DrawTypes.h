@@ -8,15 +8,13 @@
 #ifndef skgpu_graphite_DrawTypes_DEFINED
 #define skgpu_graphite_DrawTypes_DEFINED
 
-#include "include/gpu/graphite/GraphiteTypes.h"
+#include "include/private/base/SkAssert.h"
+#include "src/base/SkEnumBitMask.h"
 
-#include "src/gpu/graphite/ResourceTypes.h"
-
-#include <array>
+#include <cstddef>
+#include <cstdint>
 
 namespace skgpu::graphite {
-
-class Buffer;
 
 /**
  * Geometric primitives used for drawing.
@@ -42,6 +40,7 @@ enum class VertexAttribType : uint8_t {
     kInt2,   // vector of 2 32-bit ints
     kInt3,   // vector of 3 32-bit ints
     kInt4,   // vector of 4 32-bit ints
+    kUInt2,  // vector of 2 32-bit unsigned ints
 
     kByte,  // signed byte
     kByte2, // vector of 2 8-bit signed bytes
@@ -70,7 +69,6 @@ enum class VertexAttribType : uint8_t {
 };
 static const int kVertexAttribTypeCount = (int)(VertexAttribType::kLast) + 1;
 
-
 /**
  * Returns the size of the attrib type in bytes.
  */
@@ -96,6 +94,8 @@ static constexpr inline size_t VertexAttribTypeSize(VertexAttribType type) {
             return 3 * sizeof(int32_t);
         case VertexAttribType::kInt4:
             return 4 * sizeof(int32_t);
+        case VertexAttribType::kUInt2:
+            return 2 * sizeof(uint32_t);
         case VertexAttribType::kByte:
             return 1 * sizeof(char);
         case VertexAttribType::kByte2:
@@ -139,6 +139,8 @@ enum class UniformSlot {
     kRenderStep,
     // Meant for uniforms that are defined and used by the paint parameters (ie SkPaint subset)
     kPaint,
+    // Meant for gradient storage buffer.
+    kGradient
 };
 
 /*
@@ -169,6 +171,22 @@ enum class StencilOp : uint8_t {
     kDecClamp
 };
 static constexpr int kStencilOpCount = 1 + (int)StencilOp::kDecClamp;
+
+// These barrier types are not utilized by all backends, but we define them at this level anyhow
+// since it impacts the logic used to group & sort draws.
+enum class BarrierType : uint8_t {
+    kAdvancedNoncoherentBlend,
+    kReadDstFromInput,
+};
+
+enum class RenderStateFlags : unsigned {
+    kNone                   = 0b0000,
+    kFixed                  = 0b0001,   // Uses explicit DrawWriter::draw functions
+    kAppendVertices         = 0b0010,   // Appends vertices
+    kAppendInstances        = 0b0100,   // Appends instances with static vertex count
+    kAppendDynamicInstances = 0b1000,   // Appends instances with a flexible vertex count
+};
+SK_MAKE_BITMASK_OPS(RenderStateFlags)
 
 struct DepthStencilSettings {
     // Per-face settings for stencil

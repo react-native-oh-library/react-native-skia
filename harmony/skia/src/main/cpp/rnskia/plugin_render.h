@@ -46,7 +46,7 @@ public:
         DLOG(INFO) << "napi RegisterView";
         // 获取参数
         NFuncArg funcArg(env, info);
-        if (!funcArg.InitArgs(NARG_CNT::TWO)) {
+        if (!funcArg.InitArgs(NARG_CNT::THREE)) {
             return nullptr;
         }
         napi_value v1 = funcArg.GetArg(NARG_POS::FIRST);
@@ -63,17 +63,24 @@ public:
             DLOG(ERROR) << "napi RegisterView get nValNativeId fail";
             return nullptr;
         }
-        DLOG(INFO) << "napi RegisterView xComponentId: " << xComponentId << " nativeId: " << nativeId;
+        napi_value v3 = funcArg.GetArg(NARG_POS::THIRD);
+        NVal nValIsColorSpace(env, v3);
+        auto [v3Succ, isColorSpace] = nValIsColorSpace.ToBool();
+        if (!v3Succ) {
+            DLOG(ERROR) << "napi RegisterView get nValIsColorSpace fail";
+            return nullptr;
+        }
+        DLOG(INFO) << "napi RegisterView xComponentId: " << xComponentId << " nativeId: " << nativeId << " isColorSpace: " << isColorSpace;
         std::string id(xComponentId.get());
         if (m_instance.find(id) != m_instance.end()) {
             auto instance = m_instance[id];
             instance->_context->runOnMainThread(
-                [instance = std::move(instance), nativeId = std::move(nativeId), id = std::move(id)]() {
+                [instance = std::move(instance), nativeId = std::move(nativeId), id = std::move(id), isColorSpace = std::move(isColorSpace)]() {
                     auto view = instance->_harmonyView;
                     std::shared_ptr<RNSkView> rNSkView = view->getSkiaView();
                     size_t nId = static_cast<size_t>(nativeId);
                     SkiaManager::getInstance().getManager()->registerSkiaView(nId, rNSkView);
-                    view->surfaceAvailable(instance->m_window, 1, 1);
+                    view->surfaceAvailable(instance->m_window, 1, 1, isColorSpace);
                     DLOG(INFO) << "napi RegisterView finish XComponentId: " << id
                                << " threadId: " << std::this_thread::get_id();
                 });
@@ -105,22 +112,11 @@ public:
         DLOG(INFO) << "napi DropInstance xComponentId: " << xComponentId << " nativeId: " << nativeId << " m_instance: " << m_instance.size();
         std::string id(xComponentId.get());
         if (m_instance.find(id) != m_instance.end()) {
-            auto instance = m_instance[id];
             size_t nId = static_cast<size_t>(nativeId);
             SkiaManager::getInstance().getManager()->setSkiaView(nId, nullptr);
             SkiaManager::getInstance().getManager()->unregisterSkiaView(nId);
-            instance->_harmonyView->viewDidUnmount();
             DLOG(INFO) << "napi DropInstance finish XComponentId: " << id
                        << " threadId: " << std::this_thread::get_id();
-            //             instance->_context->runOnMainThread(
-            //                 [instance = std::move(instance), nativeId = std::move(nativeId), id = std::move(id)]() {
-            //                     size_t nId = static_cast<size_t>(nativeId);
-            //                     SkiaManager::getInstance().getManager()->setSkiaView(nId, nullptr);
-            //                     SkiaManager::getInstance().getManager()->unregisterSkiaView(nId);
-            //                     instance->_harmonyView->viewDidUnmount();
-            //                     DLOG(INFO) << "napi DropInstance finish XComponentId: " << id
-            //                                << " threadId: " << std::this_thread::get_id();
-            //                 });
         }
         return nullptr;
     }
@@ -161,7 +157,7 @@ public:
         if (m_instance.find(id) != m_instance.end()) {
             auto instance = m_instance[id];
             auto view = instance->_harmonyView;
-            view->setMode(modeStr);
+//            view->setMode(modeStr);
             view->setShowDebugInfo(showDebug);
             DLOG(INFO) << "napi SetModeAndDebug finish XComponentId: " << id
                        << " threadId: " << std::this_thread::get_id();

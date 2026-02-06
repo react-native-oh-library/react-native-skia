@@ -4,28 +4,66 @@
  * Use of this source code is governed by a BSD-style license that can be
  * found in the LICENSE file.
  */
-
 #include "src/gpu/ganesh/gradients/GrGradientShader.h"
 
+#include "include/core/SkAlphaType.h"
+#include "include/core/SkBitmap.h"
 #include "include/core/SkColorSpace.h"
-#include "include/gpu/GrRecordingContext.h"
-#include "include/private/SkColorData.h"
+#include "include/core/SkColorType.h"
+#include "include/core/SkMatrix.h"
+#include "include/core/SkRect.h"
+#include "include/core/SkSamplingOptions.h"
+#include "include/core/SkString.h"
+#include "include/core/SkTileMode.h"
+#include "include/effects/SkGradientShader.h"
+#include "include/effects/SkRuntimeEffect.h"
+#include "include/gpu/GpuTypes.h"
+#include "include/gpu/ganesh/GrBackendSurface.h"
+#include "include/gpu/ganesh/GrTypes.h"
+#include "include/private/base/SkAssert.h"
+#include "include/private/base/SkDebug.h"
+#include "include/private/base/SkMath.h"
+#include "include/private/base/SkOnce.h"
+#include "include/private/base/SkSpan_impl.h"
+#include "include/private/base/SkTemplates.h"
+#include "include/private/gpu/ganesh/GrTypesPriv.h"
+#include "src/base/SkArenaAlloc.h"
 #include "src/base/SkMathPriv.h"
+#include "src/base/SkVx.h"
+#include "src/core/SkColorData.h"
 #include "src/core/SkColorSpacePriv.h"
 #include "src/core/SkRasterPipeline.h"
+#include "src/core/SkRasterPipelineOpContexts.h"
 #include "src/core/SkRasterPipelineOpList.h"
 #include "src/core/SkRuntimeEffectPriv.h"
 #include "src/gpu/ganesh/GrCaps.h"
-#include "src/gpu/ganesh/GrColor.h"
 #include "src/gpu/ganesh/GrColorInfo.h"
 #include "src/gpu/ganesh/GrColorSpaceXform.h"
-#include "src/gpu/ganesh/GrRecordingContextPriv.h"
+#include "src/gpu/ganesh/GrFPArgs.h"
+#include "src/gpu/ganesh/GrFragmentProcessor.h"
+#include "src/gpu/ganesh/GrSamplerState.h"
+#include "src/gpu/ganesh/GrShaderCaps.h"
 #include "src/gpu/ganesh/SkGr.h"
+#include "src/gpu/ganesh/SurfaceDrawContext.h"
 #include "src/gpu/ganesh/effects/GrMatrixEffect.h"
 #include "src/gpu/ganesh/effects/GrSkSLFP.h"
 #include "src/gpu/ganesh/effects/GrTextureEffect.h"
 #include "src/gpu/ganesh/gradients/GrGradientBitmapCache.h"
+#include "src/shaders/SkShaderBase.h"
 #include "src/shaders/gradients/SkGradientBaseShader.h"
+
+#include <algorithm>
+#include <array>
+#include <cstddef>
+#include <tuple>
+#include <utility>
+
+struct SkV4;
+
+#if defined(GPU_TEST_UTILS)
+#include "src/base/SkRandom.h"
+#include "src/gpu/ganesh/GrTestUtils.h"
+#endif
 
 using namespace skia_private;
 
@@ -56,7 +94,7 @@ static std::unique_ptr<GrFragmentProcessor> make_textured_colorizer(
     // TODO: Use 1010102 for opaque gradients, at least if destination is 1010102?
     SkColorType colorType = kRGBA_8888_SkColorType;
     if (GrColorTypeIsWiderThan(args.fDstColorInfo->colorType(), 8)) {
-        auto f16Format = args.fContext->priv().caps()->getDefaultBackendFormat(
+        auto f16Format = args.fSurfaceDrawContext->caps()->getDefaultBackendFormat(
                 GrColorType::kRGBA_F16, GrRenderable::kNo);
         if (f16Format.isValid()) {
             colorType = kRGBA_F16_SkColorType;
@@ -80,7 +118,8 @@ static std::unique_ptr<GrFragmentProcessor> make_textured_colorizer(
     SkASSERT(bitmap.isImmutable());
 
     auto view = std::get<0>(GrMakeCachedBitmapProxyView(
-            args.fContext, bitmap, /*label=*/"MakeTexturedColorizer", skgpu::Mipmapped::kNo));
+            args.fSurfaceDrawContext->recordingContext(), bitmap, /*label=*/"MakeTexturedColorizer",
+            skgpu::Mipmapped::kNo));
     if (!view) {
         SkDebugf("Gradient won't draw. Could not create texture.");
         return nullptr;
@@ -303,12 +342,12 @@ static std::unique_ptr<GrFragmentProcessor> make_looping_colorizer(int intervalC
         int loopCount = SkNextLog2(intervalChunks);
         sksl.appendf(
         "#version 300\n" // important space to separate token.
-        "uniform half4 thresholds[%d];"
+        "uniform float4 thresholds[%d];"
         "uniform float4 scale[%d];"
         "uniform float4 bias[%d];"
 
         "half4 main(float2 coord) {"
-            "half t = half(coord.x);"
+            "float t = coord.x;"
 
             // Choose a chunk from thresholds via binary search in a loop.
             "int low = 0;"
@@ -485,7 +524,7 @@ static std::unique_ptr<GrFragmentProcessor> make_uniform_colorizer(const SkPMCol
         return make_single_interval_colorizer(colors[0], colors[1]);
     }
 
-    const GrShaderCaps* caps = args.fContext->priv().caps()->shaderCaps();
+    const GrShaderCaps* caps = args.fSurfaceDrawContext->caps()->shaderCaps();
     auto intervalsExceedPrecisionLimit = [&]() -> bool {
         // The remaining analytic colorizers use scale*t+bias, and the scale/bias values can become
         // quite large when thresholds are close (but still outside the hardstop limit). If float
@@ -629,7 +668,7 @@ static std::unique_ptr<GrFragmentProcessor> make_tiled_gradient(
         "uniform int useFloorAbsWorkaround;"   // specialized
 
         "half4 main(float2 coord) {"
-            "half4 t = gradLayout.eval(coord);"
+            "float4 t = gradLayout.eval(coord);"
 
             "if (!bool(layoutPreservesOpacity) && t.y < 0) {"
                 // layout has rejected this fragment (rely on sksl to remove this branch if the
@@ -637,8 +676,8 @@ static std::unique_ptr<GrFragmentProcessor> make_tiled_gradient(
                 "return half4(0);"
             "} else {"
                 "if (bool(mirror)) {"
-                    "half t_1 = t.x - 1;"
-                    "half tiled_t = t_1 - 2 * floor(t_1 * 0.5) - 1;"
+                    "float t_1 = t.x - 1;"
+                    "float tiled_t = t_1 - 2 * floor(t_1 * 0.5) - 1;"
                     "if (bool(useFloorAbsWorkaround)) {"
                         // At this point the expected value of tiled_t should between -1 and 1, so
                         // this clamp has no effect other than to break up the floor and abs calls
@@ -668,7 +707,7 @@ static std::unique_ptr<GrFragmentProcessor> make_tiled_gradient(
         optFlags |= GrSkSLFP::OptFlags::kPreservesOpaqueInput;
     }
     const bool useFloorAbsWorkaround =
-            args.fContext->priv().caps()->shaderCaps()->fMustDoOpBetweenFloorAndAbs;
+            args.fSurfaceDrawContext->caps()->shaderCaps()->fMustDoOpBetweenFloorAndAbs;
 
     return GrSkSLFP::Make(effect, "TiledGradient", /*inputFP=*/nullptr, optFlags,
                           "colorizer", GrSkSLFP::IgnoreOptFlags(std::move(colorizer)),
@@ -891,7 +930,7 @@ std::unique_ptr<GrFragmentProcessor> MakeGradientFP(const SkGradientBaseShader& 
             SkPMColor4f borderColors[2] = { colors[0], colors[colorCount - 1] };
             SkArenaAlloc alloc(/*firstHeapAllocation=*/0);
             SkRasterPipeline p(&alloc);
-            SkRasterPipeline_MemoryCtx ctx = { borderColors, 0 };
+            SkRasterPipelineContexts::MemoryCtx ctx = {borderColors, 0};
 
             p.append(SkRasterPipelineOp::load_f32, &ctx);
             SkGradientBaseShader::AppendInterpolatedToDstStages(
@@ -932,7 +971,7 @@ std::unique_ptr<GrFragmentProcessor> MakeLinear(const SkLinearGradient& shader,
     // If/when we add filtering of the gradient this can be removed.
     static const SkRuntimeEffect* effect = SkMakeRuntimeEffect(SkRuntimeEffect::MakeForShader,
         "half4 main(float2 coord) {"
-            "return half4(half(coord.x) + 0.00001, 1, 0, 0);" // y = 1 for always valid
+            "return half4(half(coord.x + 0.00001), 1, 0, 0);" // y = 1 for always valid
         "}"
     );
     // The linear gradient never rejects a pixel so it doesn't change opacity
@@ -941,7 +980,7 @@ std::unique_ptr<GrFragmentProcessor> MakeLinear(const SkLinearGradient& shader,
     return MakeGradientFP(shader, args, mRec, std::move(fp));
 }
 
-#if defined(GR_TEST_UTILS)
+#if defined(GPU_TEST_UTILS)
 RandomParams::RandomParams(SkRandom* random) {
     // Set color count to min of 2 so that we don't trigger the const color optimization and make
     // a non-gradient processor.

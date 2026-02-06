@@ -6,6 +6,7 @@
  */
 #include "include/core/SkShader.h"
 
+#include "include/core/SkColorFilter.h"
 #include "include/core/SkMatrix.h"
 #include "include/core/SkRefCnt.h"
 #include "src/shaders/SkColorFilterShader.h"
@@ -15,7 +16,6 @@
 
 #include <utility>
 
-class SkColorFilter;
 class SkImage;
 enum class SkTileMode;
 
@@ -24,10 +24,6 @@ SkImage* SkShader::isAImage(SkMatrix* localMatrix, SkTileMode xy[2]) const {
 }
 
 sk_sp<SkShader> SkShader::makeWithLocalMatrix(const SkMatrix& localMatrix) const {
-    if (localMatrix.isIdentity()) {
-        return sk_ref_sp(const_cast<SkShader*>(this));
-    }
-
     const SkMatrix* lm = &localMatrix;
 
     sk_sp<SkShader> baseShader;
@@ -45,17 +41,11 @@ sk_sp<SkShader> SkShader::makeWithLocalMatrix(const SkMatrix& localMatrix) const
 }
 
 sk_sp<SkShader> SkShader::makeWithColorFilter(sk_sp<SkColorFilter> filter) const {
-    SkShader* base = const_cast<SkShader*>(this);
-    if (!filter) {
-        return sk_ref_sp(base);
-    }
-    return sk_make_sp<SkColorFilterShader>(sk_ref_sp(base), 1.0f, std::move(filter));
+    return SkColorFilterShader::Make(sk_ref_sp(this), 1.0f, std::move(filter));
 }
 
-sk_sp<SkShader> SkShader::makeWithWorkingColorSpace(sk_sp<SkColorSpace> workingSpace) const {
-    SkShader* base = const_cast<SkShader*>(this);
-    if (!workingSpace) {
-        return sk_ref_sp(base);
-    }
-    return sk_make_sp<SkWorkingColorSpaceShader>(sk_ref_sp(base), std::move(workingSpace));
+sk_sp<SkShader> SkShader::makeWithWorkingColorSpace(sk_sp<SkColorSpace> inputCS,
+                                                    sk_sp<SkColorSpace> outputCS) const {
+    return SkWorkingColorSpaceShader::Make(
+            sk_ref_sp(this), std::move(inputCS), std::move(outputCS), /*workInUnpremul=*/false);
 }

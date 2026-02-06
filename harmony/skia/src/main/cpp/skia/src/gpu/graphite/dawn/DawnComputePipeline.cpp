@@ -7,15 +7,16 @@
 
 #include "src/gpu/graphite/dawn/DawnComputePipeline.h"
 
-#include "src/gpu/PipelineUtils.h"
+#include "include/gpu/GpuTypes.h"
+#include "src/gpu/SkSLToBackend.h"
 #include "src/gpu/graphite/Caps.h"
 #include "src/gpu/graphite/ComputePipelineDesc.h"
 #include "src/gpu/graphite/ContextUtils.h"
+#include "src/gpu/graphite/TextureInfoPriv.h"
 #include "src/gpu/graphite/dawn/DawnAsyncWait.h"
 #include "src/gpu/graphite/dawn/DawnErrorChecker.h"
-#include "src/gpu/graphite/dawn/DawnGraphiteUtilsPriv.h"
+#include "src/gpu/graphite/dawn/DawnGraphiteUtils.h"
 #include "src/gpu/graphite/dawn/DawnSharedContext.h"
-#include "src/gpu/graphite/dawn/DawnUtilsPriv.h"
 #include "src/sksl/SkSLProgramSettings.h"
 
 namespace skgpu::graphite {
@@ -40,19 +41,19 @@ static ShaderInfo compile_shader_module(const DawnSharedContext* sharedContext,
 
     if (step->supportsNativeShader()) {
         auto nativeShader = step->nativeShaderSource(ComputeStep::NativeShaderFormat::kWGSL);
-        if (!DawnCompileWGSLShaderModule(sharedContext,
-                                         std::string(nativeShader.fSource),
-                                         &info.fModule,
-                                         errorHandler)) {
+        SkSL::NativeShader wgsl;
+        wgsl.fText = nativeShader.fSource;
+        if (!DawnCompileWGSLShaderModule(
+                    sharedContext, step->name(), wgsl, &info.fModule, errorHandler)) {
             return {};
         }
         info.fEntryPoint = std::move(nativeShader.fEntryPoint);
     } else {
-        std::string wgsl;
+        SkSL::NativeShader wgsl;
         SkSL::Program::Interface interface;
         SkSL::ProgramSettings settings;
 
-        std::string sksl = BuildComputeSkSL(caps, step);
+        std::string sksl = BuildComputeSkSL(caps, step, BackendApi::kDawn);
         if (skgpu::SkSLToWGSL(caps->shaderCaps(),
                               sksl,
                               SkSL::ProgramKind::kCompute,
@@ -60,7 +61,8 @@ static ShaderInfo compile_shader_module(const DawnSharedContext* sharedContext,
                               &wgsl,
                               &interface,
                               errorHandler)) {
-            if (!DawnCompileWGSLShaderModule(sharedContext, wgsl, &info.fModule, errorHandler)) {
+            if (!DawnCompileWGSLShaderModule(sharedContext, step->name(), wgsl,
+                                             &info.fModule, errorHandler)) {
                 return {};
             }
             info.fEntryPoint = "main";
@@ -86,8 +88,9 @@ sk_sp<DawnComputePipeline> DawnComputePipeline::Make(const DawnSharedContext* sh
     // backend-specific semantics. The semantics on Dawn is to assign the index number in increasing
     // order.
     //
-    // All resources get assigned to a single bind group at index 0.
-    SkASSERT(!sharedContext->caps()->resourceBindingRequirements().fDistinctIndexRanges);
+    // For compute pipelines, all resources get assigned to a single bind group at index 0 (ignoring
+    // bind group indices assigned in by DawnCaps's ResourceBindingRequirements, which are for
+    // non-compute shaders).
     std::vector<wgpu::BindGroupLayoutEntry> bindGroupLayoutEntries;
     auto resources = step->resources();
 
@@ -114,7 +117,11 @@ sk_sp<DawnComputePipeline> DawnComputePipeline::Make(const DawnSharedContext* sh
                 entry.buffer.type = wgpu::BufferBindingType::Uniform;
                 break;
             case ComputeStep::ResourceType::kStorageBuffer:
+            case ComputeStep::ResourceType::kIndirectBuffer:
                 entry.buffer.type = wgpu::BufferBindingType::Storage;
+                break;
+            case ComputeStep::ResourceType::kReadOnlyStorageBuffer:
+                entry.buffer.type = wgpu::BufferBindingType::ReadOnlyStorage;
                 break;
             case ComputeStep::ResourceType::kReadOnlyTexture:
                 entry.texture.sampleType = wgpu::TextureSampleType::Float;
@@ -126,7 +133,8 @@ sk_sp<DawnComputePipeline> DawnComputePipeline::Make(const DawnSharedContext* sh
 
                 auto [_, colorType] = step->calculateTextureParameters(declarationIndex, r);
                 auto textureInfo = sharedContext->caps()->getDefaultStorageTextureInfo(colorType);
-                entry.storageTexture.format = textureInfo.dawnTextureSpec().fFormat;
+                entry.storageTexture.format =
+                        TextureInfoPriv::Get<DawnTextureInfo>(textureInfo).getViewFormat();
                 break;
             }
             case ComputeStep::ResourceType::kSampledTexture: {
@@ -157,7 +165,9 @@ sk_sp<DawnComputePipeline> DawnComputePipeline::Make(const DawnSharedContext* sh
     }
 
     wgpu::PipelineLayoutDescriptor pipelineLayoutDesc;
-    pipelineLayoutDesc.label = step->name();
+    if (sharedContext->caps()->setBackendLabels()) {
+        pipelineLayoutDesc.label = step->name();
+    }
     pipelineLayoutDesc.bindGroupLayoutCount = 1;
     pipelineLayoutDesc.bindGroupLayouts = &bindGroupLayout;
     wgpu::PipelineLayout layout = device.CreatePipelineLayout(&pipelineLayoutDesc);
@@ -166,6 +176,7 @@ sk_sp<DawnComputePipeline> DawnComputePipeline::Make(const DawnSharedContext* sh
     }
 
     wgpu::ComputePipelineDescriptor descriptor;
+    // Always set the label for pipelines, dawn may need it for tracing.
     descriptor.label = step->name();
     descriptor.compute.module = std::move(shaderModule);
     descriptor.compute.entryPoint = entryPointName.c_str();

@@ -11,16 +11,20 @@
 #include "include/core/SkColor.h"
 #include "include/core/SkPaint.h"
 #include "src/gpu/graphite/Caps.h"
-#include <functional>  // std::function
+#include "src/gpu/graphite/Renderer.h"
+#include "src/gpu/graphite/geom/NonMSAAClip.h"
 
 class SkColorInfo;
 class SkShader;
 
 namespace skgpu::graphite {
 
+class DrawContext;
 class KeyContext;
+class FloatStorageManager;
 class PaintParamsKeyBuilder;
 class PipelineDataGatherer;
+class Recorder;
 class TextureProxy;
 
 // TBD: If occlusion culling is eliminated as a phase, we can easily move the paint conversion
@@ -33,8 +37,10 @@ class PaintParams {
 public:
     explicit PaintParams(const SkPaint&,
                          sk_sp<SkBlender> primitiveBlender,
+                         const NonMSAAClip& nonMSAAClip,
                          sk_sp<SkShader> clipShader,
-                         DstReadRequirement dstReadReq,
+                         Coverage coverage,
+                         TextureFormat targetFormat,
                          bool skipColorXform);
 
     PaintParams(const PaintParams&);
@@ -57,24 +63,27 @@ public:
     SkBlender* primitiveBlender() const { return fPrimitiveBlender.get(); }
     sk_sp<SkBlender> refPrimitiveBlender() const;
 
-    DstReadRequirement dstReadRequirement() const { return fDstReadReq; }
-    bool skipColorXform() const { return fSkipColorXform; }
-    bool dither() const { return fDither; }
+    TextureFormat targetFormat() const { return fTargetFormat;   }
+    bool skipColorXform()        const { return fSkipColorXform; }
+    bool dither()                const { return fDither;         }
 
     /** Converts an SkColor4f to the destination color space. */
     static SkColor4f Color4fPrepForDst(SkColor4f srgb, const SkColorInfo& dstColorInfo);
 
-    void toKey(const KeyContext&, PaintParamsKeyBuilder*, PipelineDataGatherer*) const;
+    using Result = std::tuple</*dependsOnDst*/bool, /*dstReadRequired*/bool,
+                              /*usesAdvancedBlend*/bool>;
+    std::optional<Result> toKey(const KeyContext&) const;
+
+    void notifyImagesInUse(Recorder*, DrawContext*) const;
 
 private:
-    void addPaintColorToKey(const KeyContext&, PaintParamsKeyBuilder*, PipelineDataGatherer*) const;
-    void handlePrimitiveColor(const KeyContext&,
-                              PaintParamsKeyBuilder*,
-                              PipelineDataGatherer*) const;
-    void handlePaintAlpha(const KeyContext&, PaintParamsKeyBuilder*, PipelineDataGatherer*) const;
-    void handleColorFilter(const KeyContext&, PaintParamsKeyBuilder*, PipelineDataGatherer*) const;
-    void handleDithering(const KeyContext&, PaintParamsKeyBuilder*, PipelineDataGatherer*) const;
-    void handleDstRead(const KeyContext&, PaintParamsKeyBuilder*, PipelineDataGatherer*) const;
+    bool addPaintColorToKey(const KeyContext&) const;
+    bool handlePrimitiveColor(const KeyContext&) const;
+    bool handlePaintAlpha(const KeyContext&) const;
+    bool handleColorFilter(const KeyContext&) const;
+    bool handleDithering(const KeyContext&) const;
+    bool handleDstRead(const KeyContext&) const;
+    void handleClipping(const KeyContext&) const;
 
     SkColor4f            fColor;
     sk_sp<SkBlender>     fFinalBlender; // A nullptr here means SrcOver blending
@@ -84,30 +93,19 @@ private:
     // In the case where there is primitive blending, the primitive color is the source color and
     // the dest is the paint's color (or the paint's shader's computed color).
     sk_sp<SkBlender>     fPrimitiveBlender;
+    NonMSAAClip          fNonMSAAClip;
     sk_sp<SkShader>      fClipShader;
-    DstReadRequirement   fDstReadReq;
+    Coverage             fRendererCoverage;
+    TextureFormat        fTargetFormat;
     bool                 fSkipColorXform;
     bool                 fDither;
 };
 
-using AddToKeyFn = std::function<void()>;
-
-void Blend(const KeyContext&, PaintParamsKeyBuilder*, PipelineDataGatherer*,
-           AddToKeyFn addBlendToKey, AddToKeyFn addSrcToKey, AddToKeyFn addDstToKey);
-void Compose(const KeyContext&, PaintParamsKeyBuilder*, PipelineDataGatherer*,
-             AddToKeyFn addInnerToKey, AddToKeyFn addOuterToKey);
-// Add a blend mode node for a specific SkBlendMode.
-void AddKnownModeBlend(const KeyContext&,
-                       PaintParamsKeyBuilder*,
-                       PipelineDataGatherer*,
-                       SkBlendMode);
+// Add a fixed blend mode node for a specific SkBlendMode.
+void AddFixedBlendMode(const KeyContext&, SkBlendMode);
 // Add a blend mode node for an SkBlendMode that can vary
-void AddModeBlend(const KeyContext&, PaintParamsKeyBuilder*, PipelineDataGatherer*, SkBlendMode);
-void AddDstReadBlock(const KeyContext&,
-                     PaintParamsKeyBuilder*,
-                     PipelineDataGatherer*,
-                     DstReadRequirement);
-void AddDitherBlock(const KeyContext&, PaintParamsKeyBuilder*, PipelineDataGatherer*, SkColorType);
+void AddBlendMode(const KeyContext&, SkBlendMode);
+void AddDitherBlock(const KeyContext&, SkColorType);
 
 } // namespace skgpu::graphite
 
