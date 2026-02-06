@@ -15,6 +15,7 @@
 #include "src/effects/colorfilters/SkColorFilterBase.h"
 #include "src/gpu/Blend.h"
 #include "src/gpu/DitherUtils.h"
+#include "src/gpu/graphite/ContextUtils.h"
 #include "src/gpu/graphite/KeyContext.h"
 #include "src/gpu/graphite/KeyHelpers.h"
 #include "src/gpu/graphite/Log.h"
@@ -48,22 +49,58 @@ bool should_dither(const PaintParams& p, SkColorType dstCT) {
     return p.shader() && !as_SB(p.shader())->isConstant();
 }
 
+bool blendmode_depends_on_dst(SkBlendMode blendMode, bool srcIsOpaque) {
+    if (blendMode == SkBlendMode::kSrc || blendMode == SkBlendMode::kClear) {
+        // src and clear blending never depends on dst
+        return false;
+    }
+
+    if (blendMode == SkBlendMode::kSrcOver || blendMode == SkBlendMode::kDstOut) {
+        // src-over depends on dst if src is transparent (a != 1)
+        // dst-out simplifies to kClear if a == 1
+        return !srcIsOpaque;
+    }
+
+    return true;
+}
+
 } // anonymous namespace
 
 PaintParams::PaintParams(const SkPaint& paint,
                          sk_sp<SkBlender> primitiveBlender,
+                         const NonMSAAClip& nonMSAAClip,
                          sk_sp<SkShader> clipShader,
-                         DstReadRequirement dstReadReq,
+                         Coverage coverage,
+                         TextureFormat targetFormat,
                          bool skipColorXform)
         : fColor(paint.getColor4f())
         , fFinalBlender(paint.refBlender())
         , fShader(paint.refShader())
         , fColorFilter(paint.refColorFilter())
         , fPrimitiveBlender(std::move(primitiveBlender))
+        , fNonMSAAClip(nonMSAAClip)
         , fClipShader(std::move(clipShader))
-        , fDstReadReq(dstReadReq)
+        , fRendererCoverage(coverage)
+        , fTargetFormat(targetFormat)
         , fSkipColorXform(skipColorXform)
-        , fDither(paint.isDither()) {}
+        , fDither(paint.isDither()) {
+    if (!fPrimitiveBlender) {
+        SkColor4f constantColor;   // if filled in, will be un-premul sRGB
+        // fColor is un-premul sRGB
+        if (fShader && as_SB(fShader)->isConstant(&constantColor)) {
+            float origA = fColor.fA;
+            fColor = constantColor;
+            fColor.fA *= origA;
+            fShader = nullptr;
+        }
+        if (!fShader && fColorFilter) {
+            fColor = fColorFilter->filterColor4f(fColor,
+                                                 sk_srgb_singleton(),
+                                                 sk_srgb_singleton());
+            fColorFilter = nullptr;
+        }
+    }
+}
 
 PaintParams::PaintParams(const PaintParams& other) = default;
 PaintParams::~PaintParams() = default;
@@ -92,104 +129,52 @@ SkColor4f PaintParams::Color4fPrepForDst(SkColor4f srcColor, const SkColorInfo& 
     return result;
 }
 
-void Blend(const KeyContext& keyContext,
-           PaintParamsKeyBuilder* keyBuilder,
-           PipelineDataGatherer* gatherer,
-           AddToKeyFn addBlendToKey,
-           AddToKeyFn addSrcToKey,
-           AddToKeyFn addDstToKey) {
-    BlendShaderBlock::BeginBlock(keyContext, keyBuilder, gatherer);
-
-        addSrcToKey();
-
-        addDstToKey();
-
-        addBlendToKey();
-
-    keyBuilder->endBlock();  // BlendShaderBlock
-}
-
-void Compose(const KeyContext& keyContext,
-             PaintParamsKeyBuilder* keyBuilder,
-             PipelineDataGatherer* gatherer,
-             AddToKeyFn addInnerToKey,
-             AddToKeyFn addOuterToKey) {
-    ComposeBlock::BeginBlock(keyContext, keyBuilder, gatherer);
-
-        addInnerToKey();
-
-        addOuterToKey();
-
-    keyBuilder->endBlock();  // ComposeBlock
-}
-
-void AddKnownModeBlend(const KeyContext& keyContext,
-                       PaintParamsKeyBuilder* builder,
-                       PipelineDataGatherer* gatherer,
-                       SkBlendMode bm) {
-    SkASSERT(bm <= SkBlendMode::kLastCoeffMode);
-    BuiltInCodeSnippetID id = static_cast<BuiltInCodeSnippetID>(kFixedFunctionBlendModeIDOffset +
+void AddFixedBlendMode(const KeyContext& keyContext, SkBlendMode bm) {
+    SkASSERT(bm <= SkBlendMode::kLastMode);
+    BuiltInCodeSnippetID id = static_cast<BuiltInCodeSnippetID>(kFixedBlendIDOffset +
                                                                 static_cast<int>(bm));
-    builder->addBlock(id);
+    keyContext.paintParamsKeyBuilder()->addBlock(id);
 }
 
-void AddModeBlend(const KeyContext& keyContext,
-                  PaintParamsKeyBuilder* builder,
-                  PipelineDataGatherer* gatherer,
-                  SkBlendMode bm) {
+void AddBlendMode(const KeyContext& keyContext, SkBlendMode bm) {
+    // For non-fixed blends, coefficient blend modes are combined into the same shader snippet.
+    // The same goes for the HSLC advanced blends. The remaining advanced blends are fairly unique
+    // in their implementations. To avoid having to compile all of their SkSL, they are treated as
+    // fixed blend modes.
     SkSpan<const float> coeffs = skgpu::GetPorterDuffBlendConstants(bm);
     if (!coeffs.empty()) {
-        CoeffBlenderBlock::AddBlock(keyContext, builder, gatherer, coeffs);
+        PorterDuffBlenderBlock::AddBlock(keyContext, coeffs);
+    } else if (bm >= SkBlendMode::kHue) {
+        ReducedBlendModeInfo blendInfo = GetReducedBlendModeInfo(bm);
+        HSLCBlenderBlock::AddBlock(keyContext, blendInfo.fUniformData);
     } else {
-        BlendModeBlenderBlock::AddBlock(keyContext, builder, gatherer, bm);
+        AddFixedBlendMode(keyContext, bm);
     }
 }
 
-void AddDstReadBlock(const KeyContext& keyContext,
-                     PaintParamsKeyBuilder* builder,
-                     PipelineDataGatherer* gatherer,
-                     DstReadRequirement dstReadReq) {
-    switch(dstReadReq) {
-        case DstReadRequirement::kNone:
-            SkASSERT(false);            // This should never be reached
-            return;
-        case DstReadRequirement::kTextureCopy:
-            [[fallthrough]];
-        case DstReadRequirement::kTextureSample:
-            DstReadSampleBlock::AddBlock(keyContext, builder, gatherer, keyContext.dstTexture(),
-                                         keyContext.dstOffset());
-            break;
-        case DstReadRequirement::kFramebufferFetch:
-            builder->addBlock(BuiltInCodeSnippetID::kDstReadFetch);
-            break;
-    }
-}
-
-void AddDitherBlock(const KeyContext& keyContext,
-                    PaintParamsKeyBuilder* builder,
-                    PipelineDataGatherer* gatherer,
-                    SkColorType ct) {
+void AddDitherBlock(const KeyContext& keyContext, SkColorType ct) {
     static const SkBitmap gLUT = skgpu::MakeDitherLUT();
 
-    sk_sp<TextureProxy> proxy = RecorderPriv::CreateCachedProxy(keyContext.recorder(), gLUT);
+    sk_sp<TextureProxy> proxy = RecorderPriv::CreateCachedProxy(keyContext.recorder(), gLUT,
+                                                                "DitherLUT");
     if (keyContext.recorder() && !proxy) {
         SKGPU_LOG_W("Couldn't create dither shader's LUT");
-        builder->addBlock(BuiltInCodeSnippetID::kPriorOutput);
+        keyContext.paintParamsKeyBuilder()->addBlock(BuiltInCodeSnippetID::kPriorOutput);
         return;
     }
 
     DitherShaderBlock::DitherData data(skgpu::DitherRangeForConfig(ct), std::move(proxy));
 
-    DitherShaderBlock::AddBlock(keyContext, builder, gatherer, data);
+    DitherShaderBlock::AddBlock(keyContext, data);
 }
 
-void PaintParams::addPaintColorToKey(const KeyContext& keyContext,
-                                     PaintParamsKeyBuilder* keyBuilder,
-                                     PipelineDataGatherer* gatherer) const {
+bool PaintParams::addPaintColorToKey(const KeyContext& keyContext) const {
     if (fShader) {
-        AddToKey(keyContext, keyBuilder, gatherer, fShader.get());
+        AddToKey(keyContext, fShader.get());
+        return fShader->isOpaque();
     } else {
-        RGBPaintColorBlock::AddBlock(keyContext, keyBuilder, gatherer);
+        RGBPaintColorBlock::AddBlock(keyContext);
+        return true; // rgb1, always opaque
     }
 }
 
@@ -198,140 +183,239 @@ void PaintParams::addPaintColorToKey(const KeyContext& keyContext,
  * with a primitive color emitted by certain draw geometry calls (drawVertices, drawAtlas, etc.).
  * Dst: primitiveColor Src: Paint color/shader output
  */
-void PaintParams::handlePrimitiveColor(const KeyContext& keyContext,
-                                       PaintParamsKeyBuilder* keyBuilder,
-                                       PipelineDataGatherer* gatherer) const {
-    if (fPrimitiveBlender) {
-        Blend(keyContext, keyBuilder, gatherer,
-              /* addBlendToKey= */ [&] () -> void {
-                  AddToKey(keyContext, keyBuilder, gatherer, fPrimitiveBlender.get());
-              },
-              /* addSrcToKey= */ [&]() -> void {
-                  this->addPaintColorToKey(keyContext, keyBuilder, gatherer);
-              },
-              /* addDstToKey= */ [&]() -> void {
-                  keyBuilder->addBlock(BuiltInCodeSnippetID::kPrimitiveColor);
-              });
-    } else {
-        this->addPaintColorToKey(keyContext, keyBuilder, gatherer);
+bool PaintParams::handlePrimitiveColor(const KeyContext& keyContext) const {
+    /**
+     * If no primitive blending is required, simply add the paint color.
+    */
+    if (!fPrimitiveBlender) {
+        return this->addPaintColorToKey(keyContext);
     }
+
+    /**
+     * If no color space conversion is required and the primitive blend mode is kDst, the src
+     * branch of the blend does not matter and we can simply emit the primitive color.
+    */
+    const bool canSkipBlendStep =
+        fSkipColorXform &&
+        as_BB(fPrimitiveBlender.get())->asBlendMode().has_value() &&
+        as_BB(fPrimitiveBlender.get())->asBlendMode().value() == SkBlendMode::kDst;
+
+    if (canSkipBlendStep) {
+        AddPrimitiveColor(keyContext, fSkipColorXform);
+        return false;
+    }
+
+    bool srcIsOpaque = false;
+    Blend(keyContext,
+        /* addBlendToKey= */ [&] () -> void {
+            AddToKey(keyContext, fPrimitiveBlender.get());
+        },
+        /* addSrcToKey= */ [&] () -> void {
+            srcIsOpaque = this->addPaintColorToKey(keyContext);
+        },
+        /* addDstToKey= */ [&] () -> void {
+            AddPrimitiveColor(keyContext, fSkipColorXform);
+        });
+    std::optional<SkBlendMode> primBlend = as_BB(fPrimitiveBlender.get())->asBlendMode();
+    if (primBlend.has_value() && srcIsOpaque) {
+        // If the input paint/shader is opaque, the result is only opaque if the primitive blend
+        // mode is kSrc or kSrcOver. All other modes can introduce transparency.
+        return primBlend.value() == SkBlendMode::kSrc || primBlend.value() == SkBlendMode::kSrcOver;
+    }
+
+    // If the input was already transparent, or if it's a runtime/complex blend mode,
+    // the result cannot be considered opaque.
+    return false;
 }
 
 // Apply the paint's alpha value.
-void PaintParams::handlePaintAlpha(const KeyContext& keyContext,
-                                   PaintParamsKeyBuilder* keyBuilder,
-                                   PipelineDataGatherer* gatherer) const {
-
+bool PaintParams::handlePaintAlpha(const KeyContext& keyContext) const {
     if (!fShader && !fPrimitiveBlender) {
         // If there is no shader and no primitive blending the input to the colorFilter stage
         // is just the premultiplied paint color.
         SkPMColor4f paintColor = PaintParams::Color4fPrepForDst(fColor,
                                                                 keyContext.dstColorInfo()).premul();
-        SolidColorShaderBlock::AddBlock(keyContext, keyBuilder, gatherer, paintColor);
-        return;
+        SolidColorShaderBlock::AddBlock(keyContext, paintColor);
+        return fColor.isOpaque();
     }
 
-    if (fColor.fA != 1.0f) {
-        Blend(keyContext, keyBuilder, gatherer,
+    if (!fColor.isOpaque()) {
+        Blend(keyContext,
               /* addBlendToKey= */ [&] () -> void {
-                  AddKnownModeBlend(keyContext, keyBuilder, gatherer, SkBlendMode::kSrcIn);
+                  AddFixedBlendMode(keyContext, SkBlendMode::kSrcIn);
               },
               /* addSrcToKey= */ [&]() -> void {
-                  this->handlePrimitiveColor(keyContext, keyBuilder, gatherer);
+                  this->handlePrimitiveColor(keyContext);
               },
               /* addDstToKey= */ [&]() -> void {
-                  AlphaOnlyPaintColorBlock::AddBlock(keyContext, keyBuilder, gatherer);
+                  AlphaOnlyPaintColorBlock::AddBlock(keyContext);
               });
+        // The result is guaranteed to be non-opaque because we're blending with fColor's alpha.
+        return false;
     } else {
-        this->handlePrimitiveColor(keyContext, keyBuilder, gatherer);
+        return this->handlePrimitiveColor(keyContext);
     }
 }
 
-void PaintParams::handleColorFilter(const KeyContext& keyContext,
-                                    PaintParamsKeyBuilder* builder,
-                                    PipelineDataGatherer* gatherer) const {
+bool PaintParams::handleColorFilter(const KeyContext& keyContext) const {
     if (fColorFilter) {
-        Compose(keyContext, builder, gatherer,
+        bool srcIsOpaque = false;
+        Compose(keyContext,
                 /* addInnerToKey= */ [&]() -> void {
-                    this->handlePaintAlpha(keyContext, builder, gatherer);
+                    srcIsOpaque = this->handlePaintAlpha(keyContext);
                 },
                 /* addOuterToKey= */ [&]() -> void {
-                    AddToKey(keyContext, builder, gatherer, fColorFilter.get());
+                    AddToKey(keyContext, fColorFilter.get());
                 });
+        return srcIsOpaque && fColorFilter->isAlphaUnchanged();
     } else {
-        this->handlePaintAlpha(keyContext, builder, gatherer);
+        return this->handlePaintAlpha(keyContext);
     }
 }
 
-void PaintParams::handleDithering(const KeyContext& keyContext,
-                                  PaintParamsKeyBuilder* builder,
-                                  PipelineDataGatherer* gatherer) const {
+bool PaintParams::handleDithering(const KeyContext& keyContext) const {
 
 #ifndef SK_IGNORE_GPU_DITHER
     SkColorType ct = keyContext.dstColorInfo().colorType();
     if (should_dither(*this, ct)) {
-        Compose(keyContext, builder, gatherer,
+        bool srcIsOpaque = false;
+        Compose(keyContext,
                 /* addInnerToKey= */ [&]() -> void {
-                    this->handleColorFilter(keyContext, builder, gatherer);
+                    srcIsOpaque = this->handleColorFilter(keyContext);
                 },
                 /* addOuterToKey= */ [&]() -> void {
-                    AddDitherBlock(keyContext, builder, gatherer, ct);
+                    AddDitherBlock(keyContext, ct);
                 });
+        return srcIsOpaque;
     } else
 #endif
     {
-        this->handleColorFilter(keyContext, builder, gatherer);
+        return this->handleColorFilter(keyContext);
     }
 }
 
-void PaintParams::handleDstRead(const KeyContext& keyContext,
-                                PaintParamsKeyBuilder* builder,
-                                PipelineDataGatherer* gatherer) const {
-    if (fDstReadReq != DstReadRequirement::kNone) {
-        Blend(keyContext, builder, gatherer,
-              /* addBlendToKey= */ [&] () -> void {
-                  if (fFinalBlender) {
-                      AddToKey(keyContext, builder, gatherer, fFinalBlender.get());
-                  } else {
-                      AddKnownModeBlend(keyContext, builder, gatherer, SkBlendMode::kSrcOver);
-                  }
-              },
-              /* addSrcToKey= */ [&]() -> void {
-                  this->handleDithering(keyContext, builder, gatherer);
-              },
-              /* addDstToKey= */ [&]() -> void {
-                  AddDstReadBlock(keyContext, builder, gatherer, fDstReadReq);
-              });
-    } else {
-        this->handleDithering(keyContext, builder, gatherer);
+void PaintParams::handleClipping(const KeyContext& keyContext) const {
+    if (!fNonMSAAClip.isEmpty()) {
+        const AnalyticClip& analyticClip = fNonMSAAClip.fAnalyticClip;
+        SkPoint radiusPair;
+        SkRect analyticBounds;
+        if (!analyticClip.isEmpty()) {
+            float radius = analyticClip.fRadius + 0.5f;
+            // N.B.: Because the clip data is normally used with depth-based clipping,
+            // the shape is inverted from its usual state. We re-invert here to
+            // match what the shader snippet expects.
+            radiusPair = {(analyticClip.fInverted) ? radius : -radius, 1.0f/radius};
+            analyticBounds = analyticClip.fBounds.makeOutset(0.5f).asSkRect();
+        } else {
+            // This will generate no analytic clip.
+            radiusPair = { -0.5f, 1.f };
+            analyticBounds = { 0, 0, 0, 0 };
+        }
+
+        const AtlasClip& atlasClip = fNonMSAAClip.fAtlasClip;
+        SkISize maskSize = atlasClip.fMaskBounds.size();
+        SkRect texMaskBounds = SkRect::MakeXYWH(atlasClip.fOutPos.x(), atlasClip.fOutPos.y(),
+                                                maskSize.width(), maskSize.height());
+        // Outset bounds to capture some of the padding (necessary for inverse clip)
+        texMaskBounds.outset(0.5f, 0.5f);
+        SkPoint texCoordOffset = SkPoint::Make(atlasClip.fOutPos.x() - atlasClip.fMaskBounds.left(),
+                                               atlasClip.fOutPos.y() - atlasClip.fMaskBounds.top());
+
+        NonMSAAClipBlock::NonMSAAClipData data(
+                analyticBounds,
+                radiusPair,
+                analyticClip.edgeSelectRect(),
+                texCoordOffset,
+                texMaskBounds,
+                atlasClip.fAtlasTexture);
+        if (fClipShader) {
+            // For both an analytic clip and clip shader, we need to compose them together into
+            // a single clipping root node.
+            Blend(keyContext,
+                  /* addBlendToKey= */ [&]() -> void {
+                      AddFixedBlendMode(keyContext, SkBlendMode::kModulate);
+                  },
+                  /* addSrcToKey= */ [&]() -> void {
+                      NonMSAAClipBlock::AddBlock(keyContext, data);
+                  },
+                  /* addDstToKey= */ [&]() -> void {
+                      AddToKey(keyContext, fClipShader.get());
+                  });
+        } else {
+            // Without a clip shader, the analytic clip can be the clipping root node.
+            NonMSAAClipBlock::AddBlock(keyContext, data);
+        }
+    } else if (fClipShader) {
+        // Since there's no analytic clip, the clipping root node can be fClipShader directly.
+        AddToKey(keyContext, fClipShader.get());
     }
 }
 
-void PaintParams::toKey(const KeyContext& keyContext,
-                        PaintParamsKeyBuilder* builder,
-                        PipelineDataGatherer* gatherer) const {
-    this->handleDstRead(keyContext, builder, gatherer);
+std::optional<PaintParams::Result> PaintParams::toKey(const KeyContext& keyContext) const {
+    // Root Node 0 is the source color, which is the output of all effects post dithering
+    bool isOpaque = this->handleDithering(keyContext);
 
+    // Root Node 1 is the final blender
     std::optional<SkBlendMode> finalBlendMode = this->asFinalBlendMode();
-    if (fDstReadReq != DstReadRequirement::kNone) {
-        // In this case the blend will have been handled by shader-based blending with the dstRead.
-        finalBlendMode = SkBlendMode::kSrc;
+    bool usesAdvancedBlend = finalBlendMode.has_value() &&
+                             (int)finalBlendMode.value() > (int)SkBlendMode::kLastCoeffMode;
+
+    Coverage finalCoverage = fRendererCoverage;
+    if ((fClipShader || !fNonMSAAClip.isEmpty()) && fRendererCoverage == Coverage::kNone) {
+        finalCoverage = Coverage::kSingleChannel;
     }
 
+    bool dependsOnDst = fClipShader || !fNonMSAAClip.isEmpty();
+    bool dstReadReq = !CanUseHardwareBlending(keyContext.recorder()->priv().caps(),
+                                              fTargetFormat,
+                                              finalBlendMode,
+                                              finalCoverage);
+
+    if (finalBlendMode.has_value()) {
+        if (!dstReadReq) {
+            // With no shader blending, be as explicit as possible about the final blend
+            AddFixedBlendMode(keyContext, finalBlendMode.value());
+        } else {
+            // With shader blending, use AddBlendMode() to select the more universal blend functions
+            // when possible. Technically we could always use a fixed blend mode but would then
+            // over-generate when encountering certain classes of blends. This is most problematic
+            // on devices that wouldn't support dual-source blending, so help them out by at least
+            // not requiring lots of pipelines.
+            AddBlendMode(keyContext, finalBlendMode.value());
+        }
+
+        // Blend modes can be analyzed to determine if specific src colors still depend on the dst.
+        dependsOnDst |= blendmode_depends_on_dst(finalBlendMode.value(), isOpaque);
+    } else {
+        AddToKey(keyContext, fFinalBlender.get());
+        // Cannot inspect runtime blenders to pessimistically assume they will always use the dst.
+        dependsOnDst = true;
+    }
+
+    // Optional Root Node 2 is the clip
+    this->handleClipping(keyContext);
+
+    return Result{dependsOnDst, dstReadReq, usesAdvancedBlend};
+}
+
+// TODO(b/330864257): Can be deleted once keys are determined by the Device draw.
+void PaintParams::notifyImagesInUse(Recorder* recorder,
+                                    DrawContext* drawContext) const {
+    if (fShader) {
+        NotifyImagesInUse(recorder, drawContext, fShader.get());
+    }
+    if (fPrimitiveBlender) {
+        NotifyImagesInUse(recorder, drawContext, fPrimitiveBlender.get());
+    }
+    if (fColorFilter) {
+        NotifyImagesInUse(recorder, drawContext, fColorFilter.get());
+    }
+    if (fFinalBlender) {
+        NotifyImagesInUse(recorder, drawContext, fFinalBlender.get());
+    }
     if (fClipShader) {
-        ClipShaderBlock::BeginBlock(keyContext, builder, gatherer);
-
-            AddToKey(keyContext, builder, gatherer, fClipShader.get());
-
-        builder->endBlock();
+        NotifyImagesInUse(recorder, drawContext, fClipShader.get());
     }
-
-    // Set the hardware blend mode.
-    SkASSERT(finalBlendMode);
-    BuiltInCodeSnippetID fixedFuncBlendModeID = static_cast<BuiltInCodeSnippetID>(
-            kFixedFunctionBlendModeIDOffset + static_cast<int>(*finalBlendMode));
-
-    builder->addBlock(fixedFuncBlendModeID);
 }
 
 } // namespace skgpu::graphite

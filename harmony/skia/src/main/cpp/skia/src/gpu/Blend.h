@@ -10,7 +10,10 @@
 
 #include "include/core/SkSpan.h"
 #include "include/core/SkTypes.h"
-#include "include/private/SkColorData.h"
+#include "include/private/base/SkDebug.h"
+#include "src/core/SkColorData.h"
+
+#include <cstdint>
 
 enum class SkBlendMode;
 class SkString;

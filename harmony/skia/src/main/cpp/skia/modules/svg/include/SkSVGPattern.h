@@ -8,9 +8,15 @@
 #ifndef SkSVGPattern_DEFINED
 #define SkSVGPattern_DEFINED
 
+#include "include/core/SkRefCnt.h"
+#include "include/private/base/SkAPI.h"
 #include "modules/svg/include/SkSVGHiddenContainer.h"
+#include "modules/svg/include/SkSVGNode.h"
 #include "modules/svg/include/SkSVGTypes.h"
 
+#include <optional>
+
+class SkPaint;
 class SkSVGRenderContext;
 
 class SK_API SkSVGPattern final : public SkSVGHiddenContainer {
@@ -35,11 +41,11 @@ protected:
 
 private:
     struct PatternAttributes {
-        SkTLazy<SkSVGLength>        fX,
+        std::optional<SkSVGLength>  fX,
                                     fY,
                                     fWidth,
                                     fHeight;
-        SkTLazy<SkSVGTransformType> fPatternTransform;
+        std::optional<SkSVGTransformType> fPatternTransform;
     };
 
     const SkSVGPattern* resolveHref(const SkSVGRenderContext&, PatternAttributes*) const;

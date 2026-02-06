@@ -8,15 +8,26 @@
 #ifndef SkottieComposition_DEFINED
 #define SkottieComposition_DEFINED
 
-#include "modules/skottie/src/SkottiePriv.h"
-
+#include "include/core/SkRefCnt.h"
+#include "include/core/SkSize.h"
+#include "include/private/base/SkNoncopyable.h"
 #include "modules/skottie/src/Layer.h"
 #include "src/core/SkTHash.h"
 
+#include <cstddef>
 #include <vector>
+
+namespace skjson {
+class ObjectValue;
+}
+namespace sksg {
+class RenderNode;
+class Transform;
+}  // namespace sksg
 
 namespace skottie {
 namespace internal {
+class AnimationBuilder;
 
 class CompositionBuilder final : SkNoncopyable {
 public:
@@ -26,6 +37,8 @@ public:
     sk_sp<sksg::RenderNode> build(const AnimationBuilder&);
 
     LayerBuilder* layerBuilder(int layer_index);
+
+    sk_sp<sksg::RenderNode> layerContent(const AnimationBuilder&, int layer_index);
 
 private:
     const sk_sp<sksg::Transform>& getCameraTransform() const { return fCameraTransform; }
@@ -38,10 +51,6 @@ private:
     skia_private::THashMap<int, size_t>   fLayerIndexMap; // Maps layer "ind" to layer builder index.
 
     sk_sp<sksg::Transform>    fCameraTransform;
-
-    size_t                    fMotionBlurSamples = 1;
-    float                     fMotionBlurAngle   = 0,
-                              fMotionBlurPhase   = 0;
 };
 
 } // namespace internal

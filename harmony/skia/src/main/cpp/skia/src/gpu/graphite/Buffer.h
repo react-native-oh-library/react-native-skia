@@ -8,15 +8,23 @@
 #ifndef skgpu_graphite_Buffer_DEFINED
 #define skgpu_graphite_Buffer_DEFINED
 
-#include "include/gpu/GpuTypes.h"
+#include "include/gpu/graphite/GraphiteTypes.h"
 #include "src/gpu/graphite/Resource.h"
 #include "src/gpu/graphite/ResourceTypes.h"
 
+#include <cstddef>
+
+namespace skgpu {
+enum class Protected : bool;
+}
+
 namespace skgpu::graphite {
+class SharedContext;
 
 class Buffer : public Resource {
 public:
     size_t size() const { return fSize; }
+    Protected isProtected() const { return fIsProtected; }
 
     // TODO(b/262249983): Separate into mapRead(), mapWrite() methods.
     // If the buffer is already mapped then pointer is returned. If an asyncMap() was started then
@@ -37,14 +45,14 @@ public:
 protected:
     Buffer(const SharedContext* sharedContext,
            size_t size,
-           bool commandBufferRefsAsUsageRefs = false)
+           Protected isProtected,
+           bool reusableRequiresPurgeable = false)
             : Resource(sharedContext,
                        Ownership::kOwned,
-                       skgpu::Budgeted::kYes,
                        size,
-                       /*label=*/"Buffer",
-                       /*commandBufferRefsAsUsageRefs=*/commandBufferRefsAsUsageRefs)
-            , fSize(size) {}
+                       reusableRequiresPurgeable)
+            , fSize(size)
+            , fIsProtected(isProtected) {}
 
     void* fMapPtr = nullptr;
 
@@ -53,10 +61,10 @@ private:
     virtual void onAsyncMap(GpuFinishedProc, GpuFinishedContext);
     virtual void onUnmap() = 0;
 
-    size_t             fSize;
+    size_t    fSize;
+    Protected fIsProtected;
 };
 
 } // namespace skgpu::graphite
 
 #endif // skgpu_graphite_Buffer_DEFINED
-

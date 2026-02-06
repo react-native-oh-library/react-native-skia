@@ -4,32 +4,69 @@
  * Use of this source code is governed by a BSD-style license that can be
  * found in the LICENSE file.
  */
-
 #include "src/gpu/ganesh/ops/DefaultPathRenderer.h"
 
+#include "include/core/SkMatrix.h"
+#include "include/core/SkPath.h"
+#include "include/core/SkPathTypes.h"
+#include "include/core/SkRect.h"
+#include "include/core/SkRefCnt.h"
+#include "include/core/SkScalar.h"
 #include "include/core/SkString.h"
 #include "include/core/SkStrokeRec.h"
-#include "src/base/SkTLazy.h"
+#include "include/gpu/ganesh/GrRecordingContext.h"
+#include "include/private/base/SkAssert.h"
+#include "include/private/base/SkDebug.h"
+#include "include/private/base/SkPoint_impl.h"
+#include "include/private/base/SkTArray.h"
+#include "include/private/base/SkTDArray.h"
+#include "include/private/base/SkTo.h"
+#include "include/private/gpu/ganesh/GrTypesPriv.h"
+#include "src/core/SkColorData.h"
 #include "src/core/SkGeometry.h"
 #include "src/core/SkMatrixPriv.h"
-#include "src/core/SkTraceEvent.h"
+#include "src/gpu/ganesh/GrAppliedClip.h"
 #include "src/gpu/ganesh/GrAuditTrail.h"
+#include "src/gpu/ganesh/GrBuffer.h"
 #include "src/gpu/ganesh/GrCaps.h"
 #include "src/gpu/ganesh/GrClip.h"
 #include "src/gpu/ganesh/GrDefaultGeoProcFactory.h"
-#include "src/gpu/ganesh/GrDrawOpTest.h"
+#include "src/gpu/ganesh/GrGeometryProcessor.h"
+#include "src/gpu/ganesh/GrMeshDrawTarget.h"
 #include "src/gpu/ganesh/GrOpFlushState.h"
+#include "src/gpu/ganesh/GrPaint.h"
+#include "src/gpu/ganesh/GrProcessorAnalysis.h"
+#include "src/gpu/ganesh/GrProcessorSet.h"
 #include "src/gpu/ganesh/GrProgramInfo.h"
+#include "src/gpu/ganesh/GrRecordingContextPriv.h"
+#include "src/gpu/ganesh/GrRenderTargetProxy.h"
 #include "src/gpu/ganesh/GrSimpleMesh.h"
 #include "src/gpu/ganesh/GrStyle.h"
+#include "src/gpu/ganesh/GrTestUtils.h"
+#include "src/gpu/ganesh/GrUserStencilSettings.h"
 #include "src/gpu/ganesh/GrUtil.h"
 #include "src/gpu/ganesh/SurfaceDrawContext.h"
 #include "src/gpu/ganesh/effects/GrDisableColorXP.h"
 #include "src/gpu/ganesh/geometry/GrPathUtils.h"
 #include "src/gpu/ganesh/geometry/GrStyledShape.h"
 #include "src/gpu/ganesh/ops/GrMeshDrawOp.h"
+#include "src/gpu/ganesh/ops/GrOp.h"
 #include "src/gpu/ganesh/ops/GrPathStencilSettings.h"
 #include "src/gpu/ganesh/ops/GrSimpleMeshDrawOpHelperWithStencil.h"
+
+#if defined(GPU_TEST_UTILS)
+#include "src/base/SkRandom.h"
+#include "src/gpu/ganesh/GrDrawOpTest.h"
+#endif
+
+#include <cstddef>
+#include <cstdint>
+#include <utility>
+
+class GrDstProxyView;
+class GrSurfaceProxyView;
+class SkArenaAlloc;
+enum class GrXferBarrierFlags;
 
 using namespace skia_private;
 
@@ -155,31 +192,26 @@ public:
         SkScalar srcSpaceTolSqd = srcSpaceTol * srcSpaceTol;
 
         SkPath::Iter iter(path, false);
-        SkPoint pts[4];
-
-        bool done = false;
-        while (!done) {
-            SkPath::Verb verb = iter.next(pts);
-            switch (verb) {
-                case SkPath::kMove_Verb:
+        while (auto rec = iter.next()) {
+            const SkPoint* pts = rec->fPoints.data();
+            switch (rec->fVerb) {
+                case SkPathVerb::kMove:
                     this->moveTo(pts[0]);
                     break;
-                case SkPath::kLine_Verb:
+                case SkPathVerb::kLine:
                     this->addLine(pts);
                     break;
-                case SkPath::kConic_Verb:
-                    this->addConic(iter.conicWeight(), pts, srcSpaceTolSqd, srcSpaceTol);
+                case SkPathVerb::kConic:
+                    this->addConic(rec->conicWeight(), pts, srcSpaceTolSqd, srcSpaceTol);
                     break;
-                case SkPath::kQuad_Verb:
+                case SkPathVerb::kQuad:
                     this->addQuad(pts, srcSpaceTolSqd, srcSpaceTol);
                     break;
-                case SkPath::kCubic_Verb:
+                case SkPathVerb::kCubic:
                     this->addCubic(pts, srcSpaceTolSqd, srcSpaceTol);
                     break;
-                case SkPath::kClose_Verb:
+                case SkPathVerb::kClose:
                     break;
-                case SkPath::kDone_Verb:
-                    done = true;
             }
         }
     }
@@ -188,11 +220,8 @@ public:
         bool first = true;
 
         SkPath::Iter iter(path, false);
-        SkPath::Verb verb;
-
-        SkPoint pts[4];
-        while ((verb = iter.next(pts)) != SkPath::kDone_Verb) {
-            if (SkPath::kMove_Verb == verb && !first) {
+        while (auto rec = iter.next()) {
+            if (SkPathVerb::kMove == rec->fVerb && !first) {
                 return true;
             }
             first = false;
@@ -547,7 +576,7 @@ private:
         return CombineResult::kMerged;
     }
 
-#if defined(GR_TEST_UTILS)
+#if defined(GPU_TEST_UTILS)
     SkString onDumpInfo() const override {
         SkString string = SkStringPrintf("Color: 0x%08x Count: %d\n",
                                          fColor.toBytes_RGBA(), fPaths.size());
@@ -586,7 +615,7 @@ private:
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////
 
-#if defined(GR_TEST_UTILS)
+#if defined(GPU_TEST_UTILS)
 
 GR_DRAW_OP_TEST_DEFINE(DefaultPathOp) {
     SkMatrix viewMatrix = GrTest::TestMatrix(random);
@@ -628,8 +657,7 @@ bool DefaultPathRenderer::internalDrawPath(skgpu::ganesh::SurfaceDrawContext* sd
     auto context = sdc->recordingContext();
 
     SkASSERT(GrAAType::kCoverage != aaType);
-    SkPath path;
-    shape.asPath(&path);
+    SkPath path = shape.asPath();
 
     SkScalar hairlineCoverage;
     uint8_t newCoverage = 0xff;
@@ -793,6 +821,14 @@ PathRenderer::CanDrawPath DefaultPathRenderer::onCanDrawPath(const CanDrawPathAr
     if (args.fCaps->avoidLineDraws() && isHairline) {
         return CanDrawPath::kNo;
     }
+
+    SkPath path = args.fShape->asPath();
+    int verbCount = path.countVerbs();
+    // Don't use this path renderer if we exceed the max verb count.
+    if (verbCount > kMaxGPUPathRendererVerbs) {
+        return CanDrawPath::kNo;
+    }
+
     // This is the fallback renderer for when a path is too complicated for the others to draw.
     return CanDrawPath::kAsBackup;
 }

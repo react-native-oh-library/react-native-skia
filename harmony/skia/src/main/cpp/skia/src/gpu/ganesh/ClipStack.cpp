@@ -4,34 +4,75 @@
  * Use of this source code is governed by a BSD-style license that can be
  * found in the LICENSE file.
  */
-
 #include "src/gpu/ganesh/ClipStack.h"
 
+#include "include/core/SkAlphaType.h"
+#include "include/core/SkBlendMode.h"
+#include "include/core/SkClipOp.h"
 #include "include/core/SkColorSpace.h"
 #include "include/core/SkMatrix.h"
+#include "include/core/SkPath.h"
+#include "include/core/SkRRect.h"
+#include "include/core/SkRegion.h"
+#include "include/core/SkSamplingOptions.h"
+#include "include/core/SkScalar.h"
+#include "include/gpu/GpuTypes.h"
+#include "include/gpu/ganesh/GrBackendSurface.h"
+#include "include/gpu/ganesh/GrDirectContext.h"
+#include "include/gpu/ganesh/GrRecordingContext.h"
+#include "include/gpu/ganesh/GrTypes.h"
+#include "include/private/base/SkPoint_impl.h"
+#include "include/private/base/SkTArray.h"
+#include "include/private/base/SkTo.h"
+#include "include/private/gpu/ganesh/GrTypesPriv.h"
 #include "src/base/SkVx.h"
 #include "src/core/SkPathPriv.h"
 #include "src/core/SkRRectPriv.h"
 #include "src/core/SkRectPriv.h"
 #include "src/core/SkTaskGroup.h"
+#include "src/core/SkTraceEvent.h"
+#include "src/gpu/SkBackingFit.h"
+#include "src/gpu/Swizzle.h"
+#include "src/gpu/ganesh/GrAppliedClip.h"
+#include "src/gpu/ganesh/GrCaps.h"
 #include "src/gpu/ganesh/GrClip.h"
+#include "src/gpu/ganesh/GrColorInfo.h"
 #include "src/gpu/ganesh/GrDeferredProxyUploader.h"
 #include "src/gpu/ganesh/GrDirectContextPriv.h"
+#include "src/gpu/ganesh/GrDrawingManager.h"
 #include "src/gpu/ganesh/GrFPArgs.h"
 #include "src/gpu/ganesh/GrFragmentProcessor.h"
 #include "src/gpu/ganesh/GrFragmentProcessors.h"
 #include "src/gpu/ganesh/GrProxyProvider.h"
 #include "src/gpu/ganesh/GrRecordingContextPriv.h"
+#include "src/gpu/ganesh/GrRenderTargetProxy.h"
 #include "src/gpu/ganesh/GrSWMaskHelper.h"
+#include "src/gpu/ganesh/GrSamplerState.h"
+#include "src/gpu/ganesh/GrSurfaceProxy.h"
+#include "src/gpu/ganesh/GrSurfaceProxyView.h"
+#include "src/gpu/ganesh/GrTextureProxy.h"
+#include "src/gpu/ganesh/GrTextureProxyPriv.h"
+#include "src/gpu/ganesh/GrWindowRectangles.h"
+#include "src/gpu/ganesh/GrWindowRectsState.h"
 #include "src/gpu/ganesh/StencilMaskHelper.h"
 #include "src/gpu/ganesh/SurfaceDrawContext.h"
 #include "src/gpu/ganesh/effects/GrBlendFragmentProcessor.h"
 #include "src/gpu/ganesh/effects/GrConvexPolyEffect.h"
 #include "src/gpu/ganesh/effects/GrRRectEffect.h"
 #include "src/gpu/ganesh/effects/GrTextureEffect.h"
+#include "src/gpu/ganesh/geometry/GrQuad.h"
 #include "src/gpu/ganesh/geometry/GrQuadUtils.h"
 #include "src/gpu/ganesh/ops/AtlasPathRenderer.h"
 #include "src/gpu/ganesh/ops/GrDrawOp.h"
+
+#include <algorithm>
+#include <atomic>
+#include <functional>
+#include <tuple>
+#include <utility>
+
+class GrOp;
+struct GrShaderCaps;
 
 using namespace skia_private;
 
@@ -157,8 +198,7 @@ bool shape_contains_rect(const GrShape& a, const SkMatrix& aToDevice, const SkMa
     }
 
     for (int i = 0; i < 4; ++i) {
-        SkPoint cornerInA = deviceQuad.point(i);
-        deviceToA.mapPoints(&cornerInA, 1);
+        SkPoint cornerInA = deviceToA.mapPoint(deviceQuad.point(i));
         if (!a.conservativeContains(cornerInA)) {
             return false;
         }
@@ -229,9 +269,7 @@ GrFPResult analytic_clip_fp(const skgpu::ganesh::ClipStack::Element& e,
     // A convex hull can be transformed into device space (this will handle rect shapes with a
     // non-identity transform).
     if (e.fShape.segmentMask() == SkPath::kLine_SegmentMask && e.fShape.convex()) {
-        SkPath devicePath;
-        e.fShape.asPath(&devicePath);
-        devicePath.transform(e.fLocalToDevice);
+        SkPath devicePath = e.fShape.asPath().makeTransform(e.fLocalToDevice);
         return GrConvexPolyEffect::Make(std::move(fp), edgeType, devicePath);
     }
 
@@ -250,8 +288,7 @@ GrFPResult clip_atlas_fp(const skgpu::ganesh::SurfaceDrawContext* sdc,
     if (e.fAA != GrAA::kYes) {
         return GrFPFailure(std::move(inputFP));
     }
-    SkPath path;
-    e.fShape.asPath(&path);
+    SkPath path = e.fShape.asPath();
     SkASSERT(!path.isInverseFillType());
     if (e.fOp == SkClipOp::kDifference) {
         // Toggling fill type does not affect the path's "generationID" key.
@@ -453,7 +490,9 @@ ClipStack::RawElement::RawElement(const SkMatrix& localToDevice, const GrShape& 
         , fInnerBounds(SkIRect::MakeEmpty())
         , fOuterBounds(SkIRect::MakeEmpty())
         , fInvalidatedByIndex(-1) {
-    if (!localToDevice.invert(&fDeviceToLocal)) {
+    if (auto inv = localToDevice.invert()) {
+        fDeviceToLocal = *inv;
+    } else {
         // If the transform can't be inverted, it means that two dimensions are collapsed to 0 or
         // 1 dimension, making the device-space geometry effectively empty.
         fShape.reset();
@@ -512,7 +551,7 @@ bool ClipStack::RawElement::contains(const RawElement& e) const {
                     == e.fShape.rrect();
         } else if (fShape.isPath() && e.fShape.isPath()) {
             return fShape.path().getGenerationID() == e.fShape.path().getGenerationID() ||
-                   (fShape.path().getPoints(nullptr, 0) <= kMaxPathComparePoints &&
+                   (fShape.path().countPoints() <= kMaxPathComparePoints &&
                     fShape.path() == e.fShape.path());
         } // else fall through to shape_contains_rect
     }
@@ -581,9 +620,8 @@ void ClipStack::RawElement::simplify(const SkIRect& deviceBounds, bool forceAA) 
         } else if (fShape.isRRect()) {
             // Can't transform in place and must still check transform result since some very
             // ill-formed scale+translate matrices can cause invalid rrect radii.
-            SkRRect src;
-            if (fShape.rrect().transform(fLocalToDevice, &src)) {
-                fShape.rrect() = src;
+            if (auto rr = fShape.rrect().transform(fLocalToDevice)) {
+                fShape.rrect() = *rr;
                 fLocalToDevice.setIdentity();
                 fDeviceToLocal.setIdentity();
 
@@ -1300,7 +1338,7 @@ GrClip::Effect ClipStack::apply(GrRecordingContext* rContext,
         static const GrColorInfo kCoverageColorInfo{GrColorType::kUnknown, kPremul_SkAlphaType,
                                                     nullptr};
         GrFPArgs args(
-                rContext, &kCoverageColorInfo, sdc->surfaceProps(), GrFPArgs::Scope::kDefault);
+                sdc, &kCoverageColorInfo, sdc->surfaceProps(), GrFPArgs::Scope::kDefault);
         clipFP = GrFragmentProcessors::Make(cs.shader(), args, *fCTM);
         if (clipFP) {
             // The initial input is the coverage from the geometry processor, so this ensures it

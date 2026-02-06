@@ -8,45 +8,64 @@
 #ifndef GrGpu_DEFINED
 #define GrGpu_DEFINED
 
-#include "include/core/SkPath.h"
+#include "include/core/SkData.h"
+#include "include/core/SkRect.h"
+#include "include/core/SkRefCnt.h"
 #include "include/core/SkSpan.h"
-#include "include/core/SkSurface.h"
 #include "include/core/SkTypes.h"
-#include "include/gpu/GrTypes.h"
+#include "include/gpu/GpuTypes.h"
+#include "include/gpu/ganesh/GrBackendSurface.h"
+#include "include/gpu/ganesh/GrTypes.h"
 #include "include/private/base/SkTArray.h"
-#include "src/base/SkTInternalLList.h"
-#include "src/gpu/RefCntedCallback.h"
-#include "src/gpu/Swizzle.h"
-#include "src/gpu/ganesh/GrAttachment.h"
+#include "include/private/gpu/ganesh/GrTypesPriv.h"
 #include "src/gpu/ganesh/GrCaps.h"
-#include "src/gpu/ganesh/GrGpuBuffer.h"
+#include "src/gpu/ganesh/GrGpuBuffer.h"  // IWYU pragma: keep
 #include "src/gpu/ganesh/GrOpsRenderPass.h"
-#include "src/gpu/ganesh/GrPixmap.h"
+#include "src/gpu/ganesh/GrSamplerState.h"
 #include "src/gpu/ganesh/GrXferProcessor.h"
 
+#include <array>
+#include <cstddef>
+#include <cstdint>
+#include <memory>
+#include <optional>
+#include <string_view>
+
 class GrAttachment;
-class GrBackendRenderTarget;
 class GrBackendSemaphore;
-struct GrContextOptions;
 class GrDirectContext;
 class GrGLContext;
-class GrPipeline;
-class GrGeometryProcessor;
+class GrProgramDesc;
+class GrProgramInfo;
 class GrRenderTarget;
 class GrRingBuffer;
 class GrSemaphore;
 class GrStagingBufferManager;
-class GrStencilSettings;
 class GrSurface;
+class GrSurfaceProxy;
 class GrTexture;
 class GrThreadSafePipelineBuilder;
-struct GrVkDrawableInfo;
 class SkJSONWriter;
+class SkString;
 enum class SkTextureCompressionType;
+struct GrVkDrawableInfo;
+struct SkISize;
+struct SkImageInfo;
 
-namespace SkSL {
-    class Compiler;
+namespace SkSurfaces {
+enum class BackendSurfaceAccess;
 }
+namespace skgpu {
+class AutoCallback;
+class MutableTextureState;
+class RefCntedCallback;
+}  // namespace skgpu
+
+// This is sufficient for the GL implementation (which is all we have now). It can become a
+// "Backend" SkAnySubclass type to cover other backends in the future.
+struct GrTimerQuery {
+    uint32_t query;
+};
 
 class GrGpu {
 public:
@@ -389,6 +408,8 @@ public:
             const skia_private::TArray<GrSurfaceProxy*, true>& sampledProxies,
             GrXferBarrierFlags renderPassXferBarriers);
 
+    int getCurrentSubmitRenderPassCount() const { return fCurrentSubmitRenderPassCount; }
+
     // Called by GrDrawingManager when flushing.
     // Provides a hook for post-flush actions (e.g. Vulkan command buffer submits). This will also
     // insert any numSemaphore semaphores on the gpu and set the backendSemaphores to match the
@@ -396,12 +417,16 @@ public:
     void executeFlushInfo(SkSpan<GrSurfaceProxy*>,
                           SkSurfaces::BackendSurfaceAccess access,
                           const GrFlushInfo&,
+                          std::optional<GrTimerQuery> timerQuery,
                           const skgpu::MutableTextureState* newState);
 
     // Called before render tasks are executed during a flush.
     virtual void willExecute() {}
 
-    bool submitToGpu(GrSyncCpu sync);
+    bool submitToGpu() {
+        return this->submitToGpu(GrSubmitInfo());
+    }
+    bool submitToGpu(const GrSubmitInfo& info);
 
     virtual void submit(GrOpsRenderPass*) = 0;
 
@@ -412,9 +437,10 @@ public:
     virtual void insertSemaphore(GrSemaphore* semaphore) = 0;
     virtual void waitSemaphore(GrSemaphore* semaphore) = 0;
 
-    virtual void addFinishedProc(GrGpuFinishedProc finishedProc,
-                                 GrGpuFinishedContext finishedContext) = 0;
-    virtual void checkFinishProcs() = 0;
+    virtual std::optional<GrTimerQuery> startTimerQuery() { return {}; }
+
+    virtual void addFinishedCallback(skgpu::AutoCallback, std::optional<GrTimerQuery> = {}) = 0;
+    virtual void checkFinishedCallbacks() = 0;
     virtual void finishOutstandingGpuWork() = 0;
 
     // NOLINTNEXTLINE(performance-unnecessary-value-param)
@@ -493,7 +519,7 @@ public:
         int numReorderedDAGsOverBudget() const { return fNumReorderedDAGsOverBudget; }
         void incNumReorderedDAGsOverBudget() { fNumReorderedDAGsOverBudget++; }
 
-#if defined(GR_TEST_UTILS)
+#if defined(GPU_TEST_UTILS)
         void dump(SkString*);
         void dumpKeyValuePairs(
                 skia_private::TArray<SkString>* keys, skia_private::TArray<double>* values);
@@ -516,7 +542,7 @@ public:
 
 #else  // !GR_GPU_STATS
 
-#if defined(GR_TEST_UTILS)
+#if defined(GPU_TEST_UTILS)
         void dump(SkString*) {}
         void dumpKeyValuePairs(skia_private::TArray<SkString>*, skia_private::TArray<double>*) {}
 #endif
@@ -609,7 +635,7 @@ public:
 
     virtual bool precompileShader(const SkData& key, const SkData& data) { return false; }
 
-#if defined(GR_TEST_UTILS)
+#if defined(GPU_TEST_UTILS)
     /** Check a handle represents an actual texture in the backend API that has not been freed. */
     virtual bool isTestingOnlyBackendTexture(const GrBackendTexture&) const = 0;
 
@@ -669,7 +695,9 @@ public:
         }
     }
 
-    virtual void storeVkPipelineCacheData() {}
+    virtual bool canDetectNewVkPipelineCacheData() const { return false; }
+    virtual bool hasNewVkPipelineCacheData() const { return true; }
+    virtual void storeVkPipelineCacheData(size_t maxSize) {}
 
     // Called before certain draws in order to guarantee coherent results from dst reads.
     virtual void xferBarrier(GrRenderTarget*, GrXferBarrierType) = 0;
@@ -695,6 +723,8 @@ protected:
     void initCaps(sk_sp<const GrCaps> caps);
 
 private:
+    virtual void endTimerQuery(const GrTimerQuery&) { SK_ABORT("timer query not supported."); }
+
     virtual GrBackendTexture onCreateBackendTexture(SkISize dimensions,
                                                     const GrBackendFormat&,
                                                     GrRenderable,
@@ -832,7 +862,7 @@ private:
             SkSurfaces::BackendSurfaceAccess access,
             const skgpu::MutableTextureState* newState) {}
 
-    virtual bool onSubmitToGpu(GrSyncCpu sync) = 0;
+    virtual bool onSubmitToGpu(const GrSubmitInfo& info) = 0;
 
     void reportSubmitHistograms();
     virtual void onReportSubmitHistograms() {}
@@ -876,9 +906,7 @@ private:
 
     bool fOOMed = false;
 
-#if SK_HISTOGRAMS_ENABLED
     int fCurrentSubmitRenderPassCount = 0;
-#endif
 
     using INHERITED = SkRefCnt;
 };

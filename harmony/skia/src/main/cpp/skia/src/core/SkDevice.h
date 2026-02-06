@@ -20,9 +20,9 @@
 #include "include/core/SkRefCnt.h"
 #include "include/core/SkRegion.h"
 #include "include/core/SkSamplingOptions.h"
-#include "include/core/SkScalar.h"
 #include "include/core/SkShader.h"
 #include "include/core/SkSize.h"
+#include "include/core/SkSpan.h"
 #include "include/core/SkSurfaceProps.h"
 #include "include/private/base/SkAssert.h"
 #include "include/private/base/SkNoncopyable.h"
@@ -30,11 +30,10 @@
 #include "src/core/SkMatrixPriv.h"
 #include "src/shaders/SkShaderBase.h"
 
-#include <cstddef>
 #include <cstdint>
 #include <utility>
 
-class SkBitmap;
+struct SkArc;
 class SkColorSpace;
 class SkMesh;
 struct SkDrawShadowRec;
@@ -49,6 +48,7 @@ class SkPaint;
 class SkPath;
 class SkPixmap;
 class SkRRect;
+class SkRecorder;
 class SkSurface;
 class SkVertices;
 enum SkColorType : int;
@@ -72,7 +72,7 @@ class Device;
 class Recorder;
 }
 namespace sktext::gpu {
-class SDFTControl;
+class SubRunControl;
 class Slug;
 }
 
@@ -80,7 +80,7 @@ struct SkStrikeDeviceInfo {
     const SkSurfaceProps fSurfaceProps;
     const SkScalerContextFlags fScalerContextFlags;
     // This is a pointer so this can be compiled without SK_GPU_SUPPORT.
-    const sktext::gpu::SDFTControl* const fSDFTControl;
+    const sktext::gpu::SubRunControl* const fSubRunControl;
 };
 
 /**
@@ -206,7 +206,7 @@ public:
      * that device is drawn to the root device, the net effect will be that this device's contents
      * have been transformed by the global CTM.
      */
-    SkMatrix getRelativeTransform(const SkDevice&) const;
+    SkM44 getRelativeTransform(const SkDevice&) const;
 
     void setLocalToDevice(const SkM44& localToDevice) {
         fLocalToDevice = localToDevice;
@@ -275,7 +275,7 @@ public:
     // dedicated fast-paths for blurs on [r]rects and text).
     virtual bool useDrawCoverageMaskForMaskFilters() const { return false; }
 
-    // SkCanvas uses NoPixelsDevice when onCreateDevice fails; but then it needs to be able to
+    // SkCanvas uses NoPixelsDevice when createDevice fails; but then it needs to be able to
     // inspect a layer's device to know if calling drawDevice() later is allowed.
     virtual bool isNoPixelsDevice() const { return false; }
 
@@ -283,6 +283,7 @@ public:
 
     virtual GrRecordingContext* recordingContext() const { return nullptr; }
     virtual skgpu::graphite::Recorder* recorder() const { return nullptr; }
+    virtual SkRecorder* baseRecorder() const { return nullptr; }
 
     virtual skgpu::ganesh::Device* asGaneshDevice() { return nullptr; }
     virtual skgpu::graphite::Device* asGraphiteDevice() { return nullptr; }
@@ -326,18 +327,14 @@ public:
     // Ensure that non-RSXForm runs are passed to onDrawGlyphRunList.
     void drawGlyphRunList(SkCanvas*,
                           const sktext::GlyphRunList& glyphRunList,
-                          const SkPaint& initialPaint,
-                          const SkPaint& drawingPaint);
+                          const SkPaint& paint);
     // Slug handling routines.
     virtual sk_sp<sktext::gpu::Slug> convertGlyphRunListToSlug(
-            const sktext::GlyphRunList& glyphRunList,
-            const SkPaint& initialPaint,
-            const SkPaint& drawingPaint);
-    virtual void drawSlug(SkCanvas*, const sktext::gpu::Slug* slug, const SkPaint& drawingPaint);
+            const sktext::GlyphRunList& glyphRunList, const SkPaint& paint);
+    virtual void drawSlug(SkCanvas*, const sktext::gpu::Slug* slug, const SkPaint& paint);
 
     virtual void drawPaint(const SkPaint& paint) = 0;
-    virtual void drawPoints(SkCanvas::PointMode mode, size_t count,
-                            const SkPoint[], const SkPaint& paint) = 0;
+    virtual void drawPoints(SkCanvas::PointMode, SkSpan<const SkPoint>, const SkPaint&) = 0;
     virtual void drawRect(const SkRect& r,
                           const SkPaint& paint) = 0;
     virtual void drawRegion(const SkRegion& r,
@@ -345,8 +342,7 @@ public:
     virtual void drawOval(const SkRect& oval,
                           const SkPaint& paint) = 0;
     /** By the time this is called we know that abs(sweepAngle) is in the range [0, 360). */
-    virtual void drawArc(const SkRect& oval, SkScalar startAngle,
-                         SkScalar sweepAngle, bool useCenter, const SkPaint& paint);
+    virtual void drawArc(const SkArc& arc, const SkPaint& paint);
     virtual void drawRRect(const SkRRect& rr,
                            const SkPaint& paint) = 0;
 
@@ -362,11 +358,14 @@ public:
      */
     virtual void drawPath(const SkPath& path,
                           const SkPaint& paint,
-                          bool pathIsMutable = false) = 0;
+                          bool pathIsMutable) = 0;
 
     virtual void drawImageRect(const SkImage*, const SkRect* src, const SkRect& dst,
                                const SkSamplingOptions&, const SkPaint&,
                                SkCanvas::SrcRectConstraint) = 0;
+    // Return true if canvas calls to drawImage or drawImageRect should try to
+    // be drawn in a tiled way.
+    virtual bool shouldDrawAsTiledImageRect() const { return false; }
     virtual bool drawAsTiledImageRect(SkCanvas*,
                                       const SkImage*,
                                       const SkRect* src,
@@ -387,14 +386,14 @@ public:
                               const SkPaint&,
                               bool skipColorXform = false) = 0;
     virtual void drawMesh(const SkMesh& mesh, sk_sp<SkBlender>, const SkPaint&) = 0;
-    virtual void drawShadow(const SkPath&, const SkDrawShadowRec&);
+    virtual void drawShadow(SkCanvas*, const SkPath&, const SkDrawShadowRec&);
 
     // default implementation calls drawVertices
     virtual void drawPatch(const SkPoint cubics[12], const SkColor colors[4],
                            const SkPoint texCoords[4], sk_sp<SkBlender>, const SkPaint& paint);
 
     // default implementation calls drawVertices
-    virtual void drawAtlas(const SkRSXform[], const SkRect[], const SkColor[], int count,
+    virtual void drawAtlas(SkSpan<const SkRSXform>, SkSpan<const SkRect>, SkSpan<const SkColor>,
                            sk_sp<SkBlender>, const SkPaint&);
 
     virtual void drawAnnotation(const SkRect&, const char[], SkData*) {}
@@ -429,7 +428,7 @@ public:
 
     /**
      * The SkDevice passed will be an SkDevice which was returned by a call to
-     * onCreateDevice on this device with kNeverTile_TileExpectation.
+     * createDevice on this device with kNeverTile_TileExpectation.
      *
      * The default implementation calls snapSpecial() and drawSpecial() with the relative transform
      * from the input device to this device. The provided SkPaint cannot have a mask filter or
@@ -465,6 +464,13 @@ public:
                                   const SkSamplingOptions&, const SkPaint&);
 
     /**
+     * Draw rrect with an optimized path for analytic blurs, if provided by the device.
+     */
+    virtual bool drawBlurredRRect(const SkRRect&, const SkPaint&, float deviceSigma) {
+        return false;
+    }
+
+    /**
      * Evaluate 'filter' and draw the final output into this device using 'paint'. The 'mapping'
      * defines the parameter-to-layer space transform used to evaluate the image filter on 'src',
      * and the layer-to-device space transform that is used to draw the result into this device.
@@ -479,11 +485,6 @@ public:
                            const SkImageFilter*, const SkSamplingOptions&, const SkPaint&);
 
 protected:
-    // DEPRECATED: Can be deleted once SkCanvas::onDrawImage() uses skif::FilterResult so don't
-    // bother re-arranging.
-    virtual sk_sp<SkSpecialImage> makeSpecial(const SkBitmap&);
-    virtual sk_sp<SkSpecialImage> makeSpecial(const SkImage*);
-
     // Configure the device's coordinate spaces, specifying both how its device image maps back to
     // the global space (via 'deviceToGlobal') and the initial CTM of the device (via
     // 'localToDevice', i.e. what geometry drawn into this device will be transformed with).
@@ -533,13 +534,11 @@ private:
     // Only called with glyphRunLists that do not contain RSXForm.
     virtual void onDrawGlyphRunList(SkCanvas*,
                                     const sktext::GlyphRunList&,
-                                    const SkPaint& initialPaint,
-                                    const SkPaint& drawingPaint) = 0;
+                                    const SkPaint& paint) = 0;
 
     void simplifyGlyphRunRSXFormAndRedraw(SkCanvas*,
                                           const sktext::GlyphRunList&,
-                                          const SkPaint& initialPaint,
-                                          const SkPaint& drawingPaint);
+                                          const SkPaint& paint);
 
     const SkImageInfo    fInfo;
     const SkSurfaceProps fSurfaceProps;
@@ -595,7 +594,7 @@ public:
 protected:
 
     void drawPaint(const SkPaint& paint) override {}
-    void drawPoints(SkCanvas::PointMode, size_t, const SkPoint[], const SkPaint&) override {}
+    void drawPoints(SkCanvas::PointMode, SkSpan<const SkPoint>, const SkPaint&) override {}
     void drawImageRect(const SkImage*, const SkRect*, const SkRect&,
                        const SkSamplingOptions&, const SkPaint&,
                        SkCanvas::SrcRectConstraint) override {}
@@ -608,8 +607,7 @@ protected:
     void drawMesh(const SkMesh&, sk_sp<SkBlender>, const SkPaint&) override {}
 
     void drawSlug(SkCanvas*, const sktext::gpu::Slug*, const SkPaint&) override {}
-    void onDrawGlyphRunList(
-            SkCanvas*, const sktext::GlyphRunList&, const SkPaint&, const SkPaint&) override {}
+    void onDrawGlyphRunList(SkCanvas*, const sktext::GlyphRunList&, const SkPaint&) override {}
 
     bool isNoPixelsDevice() const override { return true; }
 
@@ -640,11 +638,11 @@ private:
 
 class SkAutoDeviceTransformRestore : SkNoncopyable {
 public:
-    SkAutoDeviceTransformRestore(SkDevice* device, const SkMatrix& localToDevice)
+    SkAutoDeviceTransformRestore(SkDevice* device, const SkM44& localToDevice)
         : fDevice(device)
         , fPrevLocalToDevice(device->localToDevice())
     {
-        fDevice->setLocalToDevice(SkM44(localToDevice));
+        fDevice->setLocalToDevice(localToDevice);
     }
     ~SkAutoDeviceTransformRestore() {
         fDevice->setLocalToDevice(fPrevLocalToDevice);

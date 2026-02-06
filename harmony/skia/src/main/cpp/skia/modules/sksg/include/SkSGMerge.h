@@ -8,16 +8,21 @@
 #ifndef SkSGMerge_DEFINED
 #define SkSGMerge_DEFINED
 
+#include "include/core/SkPath.h"
+#include "include/core/SkRect.h"
+#include "include/core/SkRefCnt.h"
 #include "modules/sksg/include/SkSGGeometryNode.h"
 
-#include "include/core/SkPath.h"
-
+#include <utility>
 #include <vector>
 
 class SkCanvas;
+class SkMatrix;
 class SkPaint;
+struct SkPoint;
 
 namespace sksg {
+class InvalidationController;
 
 /**
  * Concrete Geometry node, combining other geometries based on Mode.
@@ -56,7 +61,7 @@ protected:
     SkPath onAsPath() const override;
 
 private:
-    Merge(std::vector<Rec>&& recs);
+    explicit Merge(std::vector<Rec>&& recs);
 
     const std::vector<Rec> fRecs;
     SkPath                 fMerged;

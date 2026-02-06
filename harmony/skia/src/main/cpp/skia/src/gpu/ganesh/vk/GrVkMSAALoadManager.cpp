@@ -7,20 +7,40 @@
 
 #include "src/gpu/ganesh/vk/GrVkMSAALoadManager.h"
 
-#include "include/gpu/GrDirectContext.h"
+#include "include/core/SkRect.h"
+#include "include/core/SkRefCnt.h"
+#include "include/core/SkScalar.h"
+#include "include/gpu/ganesh/GrDirectContext.h"
+#include "include/private/base/SkAssert.h"
+#include "include/private/base/SkDebug.h"
+#include "include/private/gpu/ganesh/GrTypesPriv.h"
 #include "src/core/SkTraceEvent.h"
+#include "src/gpu/GpuRefCnt.h"
+#include "src/gpu/ganesh/GrAttachment.h"
+#include "src/gpu/ganesh/GrBuffer.h"
 #include "src/gpu/ganesh/GrDirectContextPriv.h"
+#include "src/gpu/ganesh/GrManagedResource.h"
 #include "src/gpu/ganesh/GrResourceProvider.h"
 #include "src/gpu/ganesh/vk/GrVkBuffer.h"
 #include "src/gpu/ganesh/vk/GrVkCommandBuffer.h"
 #include "src/gpu/ganesh/vk/GrVkDescriptorSet.h"
+#include "src/gpu/ganesh/vk/GrVkDescriptorSetManager.h"
 #include "src/gpu/ganesh/vk/GrVkGpu.h"
-#include "src/gpu/ganesh/vk/GrVkImageView.h"
+#include "src/gpu/ganesh/vk/GrVkImage.h"
 #include "src/gpu/ganesh/vk/GrVkPipeline.h"
-#include "src/gpu/ganesh/vk/GrVkRenderTarget.h"
 #include "src/gpu/ganesh/vk/GrVkResourceProvider.h"
+#include "src/gpu/ganesh/vk/GrVkUniformHandler.h"
 #include "src/gpu/ganesh/vk/GrVkUtil.h"
 #include "src/sksl/SkSLProgramSettings.h"
+#include "src/sksl/codegen/SkSLNativeShader.h"
+#include "src/sksl/ir/SkSLProgram.h"
+
+#include <string.h>
+#include <cstdint>
+#include <string>
+#include <utility>
+
+class GrGpuBuffer;
 
 GrVkMSAALoadManager::GrVkMSAALoadManager()
         : fVertShaderModule(VK_NULL_HANDLE)
@@ -35,27 +55,27 @@ bool GrVkMSAALoadManager::createMSAALoadProgram(GrVkGpu* gpu) {
     std::string vertShaderText;
     vertShaderText.append(
             "layout(vulkan, set=0, binding=0) uniform vertexUniformBuffer {"
-            "half4 uPosXform;"
+                "half4 uPosXform;"
             "};"
 
-            "// MSAA Load Program VS\n"
+            // MSAA Load Program VS
             "void main() {"
-            "float2 position = float2(sk_VertexID >> 1, sk_VertexID & 1);"
-            "sk_Position.xy = position * uPosXform.xy + uPosXform.zw;"
-            "sk_Position.zw = half2(0, 1);"
+                "float2 position = float2(sk_VertexID >> 1, sk_VertexID & 1);"
+                "sk_Position.xy = position * uPosXform.xy + uPosXform.zw;"
+                "sk_Position.zw = half2(0, 1);"
             "}");
 
     std::string fragShaderText;
     fragShaderText.append(
             "layout(vulkan, input_attachment_index=0, set=2, binding=0) subpassInput uInput;"
 
-            "// MSAA Load Program FS\n"
+            // MSAA Load Program FS
             "void main() {"
-            "sk_FragColor = subpassLoad(uInput);"
+                "sk_FragColor = subpassLoad(uInput);"
             "}");
 
     SkSL::ProgramSettings settings;
-    std::string spirv;
+    SkSL::NativeShader spirv;
     SkSL::Program::Interface interface;
     if (!GrCompileVkShaderModule(gpu, vertShaderText, VK_SHADER_STAGE_VERTEX_BIT,
                                  &fVertShaderModule, &fShaderStageInfo[0], settings, &spirv,
@@ -103,9 +123,9 @@ bool GrVkMSAALoadManager::createMSAALoadProgram(GrVkGpu* gpu) {
     layoutCreateInfo.pushConstantRangeCount = 0;
     layoutCreateInfo.pPushConstantRanges = nullptr;
 
-    VkResult err = GR_VK_CALL(
-            gpu->vkInterface(),
-            CreatePipelineLayout(gpu->device(), &layoutCreateInfo, nullptr, &fPipelineLayout));
+    VkResult err;
+    GR_VK_CALL_RESULT(gpu, err, CreatePipelineLayout(
+            gpu->device(), &layoutCreateInfo, nullptr, &fPipelineLayout));
     if (err) {
         this->destroyResources(gpu);
         return false;
@@ -236,4 +256,3 @@ void GrVkMSAALoadManager::destroyResources(GrVkGpu* gpu) {
         fPipelineLayout = VK_NULL_HANDLE;
     }
 }
-

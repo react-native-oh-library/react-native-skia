@@ -6,7 +6,7 @@
 
 #include "FontConfig_ohos.h"
 #include "hilog/log.h"
-#include<array>
+#include <array>
 #include <dirent.h>
 #include <libgen.h>
 #include <sys/stat.h>
@@ -23,15 +23,13 @@ using namespace ErrorCode;
 
 const bool G_IS_HMSYMBOL_ENABLE = HmSymbolConfig_OHOS::GetInstance()->GetHmSymbolEnable();
 
-static const char* OHOS_DEFAULT_CONFIG = "/system/etc/fontconfig.json";
+static const char *OHOS_DEFAULT_CONFIG = "/system/etc/fontconfig.json";
 /*! Constructor
  * \param fontScanner the scanner to get the font information from a font file
  * \param fname the full name of system font configuration document.
  *     \n The default value is '/system/etc/fontconfig.json', if fname is given null
  */
-FontConfig_OHOS::FontConfig_OHOS(const SkFontScanner& fontScanner,
-    const char* fname)
-{
+FontConfig_OHOS::FontConfig_OHOS(const SkFontScanner &fontScanner, const char *fname) {
     int err = parseConfig(fname);
     if (err != NO_ERROR) {
         return;
@@ -44,36 +42,24 @@ FontConfig_OHOS::FontConfig_OHOS(const SkFontScanner& fontScanner,
 /*! To get the fallbackForMap
  *  \return The reference of fallbackForMap
  */
-const FallbackForMap& FontConfig_OHOS::getFallbackForMap() const
-{
-    return fallbackForMap;
-}
+const FallbackForMap &FontConfig_OHOS::getFallbackForMap() const { return fallbackForMap; }
 
 /*! To get the fallback set
  *  \return The reference of fallbackSet
  */
-const FallbackSet& FontConfig_OHOS::getFallbackSet() const
-{
-    return fallbackSet;
-}
+const FallbackSet &FontConfig_OHOS::getFallbackSet() const { return fallbackSet; }
 
 /*! To get the count of font style sets supported in the system
  *  \return The count of font style sets in generic family
  */
-int FontConfig_OHOS::getFamilyCount() const
-{
-    return genericFamilySet.size();
-}
+int FontConfig_OHOS::getFamilyCount() const { return genericFamilySet.size(); }
 
 /*! To get the family name of the default font style set
  *  \param[out] familyName a pointer of SkString object, to which the family value will be set.
  *  \return The count of typeface in this font style set
  *  \n Return -1, if there is no any font style set in the system.
  */
-int FontConfig_OHOS::getDefaultFamily(SkString* familyName) const
-{
-    return getFamilyName(0, familyName);
-}
+int FontConfig_OHOS::getDefaultFamily(SkString *familyName) const { return getFamilyName(0, familyName); }
 
 /*! To get the family name of a font style set
  * \param index the index of a font style set in generic family
@@ -81,8 +67,7 @@ int FontConfig_OHOS::getDefaultFamily(SkString* familyName) const
  * \return The count of typeface in the font style set
  * \n      Return -1, if the 'index' is out of range
  */
-int FontConfig_OHOS::getFamilyName(int index, SkString* familyName) const
-{
+int FontConfig_OHOS::getFamilyName(int index, SkString *familyName) const {
     if (index < 0 || index >= this->getFamilyCount()) {
         if (familyName) {
             familyName->reset();
@@ -102,8 +87,7 @@ int FontConfig_OHOS::getFamilyName(int index, SkString* familyName) const
  * \n                 true, the font style set is from fallback family list
  * \return The count of typeface in the font style set
  */
-int FontConfig_OHOS::getTypefaceCount(int styleIndex, bool isFallback) const
-{
+int FontConfig_OHOS::getTypefaceCount(int styleIndex, bool isFallback) const {
     if (styleIndex < 0) {
         return -1;
     }
@@ -127,21 +111,18 @@ int FontConfig_OHOS::getTypefaceCount(int styleIndex, bool isFallback) const
  * \return The pointer of a typeface
  * \n       Return null, if 'styleIndex' or 'index' is out of range
  */
-SkTypeface_OHOS* FontConfig_OHOS::getTypeface(int styleIndex, int index,
-    bool isFallback) const
-{
-    if (styleIndex < 0 || index < 0 ||
-        (isFallback && (unsigned int)styleIndex >= fallbackSet.size()) ||
+SkTypeface_OHOS *FontConfig_OHOS::getTypeface(int styleIndex, int index, bool isFallback) const {
+    if (styleIndex < 0 || index < 0 || (isFallback && (unsigned int)styleIndex >= fallbackSet.size()) ||
         (!isFallback && (unsigned int)styleIndex >= genericFamilySet.size())) {
         return nullptr;
     }
     if (isFallback) {
-        const TypefaceSet& tpSet = *(fallbackSet[styleIndex]->typefaceSet.get());
+        const TypefaceSet &tpSet = *(fallbackSet[styleIndex]->typefaceSet.get());
         if ((unsigned int)index < tpSet.size()) {
             return tpSet[index].get();
         }
     } else {
-        const TypefaceSet& tpSet = *(genericFamilySet[styleIndex]->typefaceSet.get());
+        const TypefaceSet &tpSet = *(genericFamilySet[styleIndex]->typefaceSet.get());
         if ((unsigned int)index < tpSet.size()) {
             return tpSet[index].get();
         }
@@ -157,15 +138,12 @@ SkTypeface_OHOS* FontConfig_OHOS::getTypeface(int styleIndex, int index,
  * \return An object of typeface whose font style is the closest matching to 'style'
  * \n      Return null, if 'styleIndex' is out of range
  */
-SkTypeface_OHOS* FontConfig_OHOS::getTypeface(int styleIndex, const SkFontStyle& style,
-    bool isFallback) const
-{
-    if (styleIndex < 0 ||
-        (isFallback && (unsigned int)styleIndex >= fallbackSet.size()) ||
+SkTypeface_OHOS *FontConfig_OHOS::getTypeface(int styleIndex, const SkFontStyle &style, bool isFallback) const {
+    if (styleIndex < 0 || (isFallback && (unsigned int)styleIndex >= fallbackSet.size()) ||
         (!isFallback && (unsigned int)styleIndex >= genericFamilySet.size())) {
         return nullptr;
     }
-    const TypefaceSet* pSet = nullptr;
+    const TypefaceSet *pSet = nullptr;
     if (isFallback) {
         pSet = fallbackSet[styleIndex]->typefaceSet.get();
     } else {
@@ -184,8 +162,7 @@ SkTypeface_OHOS* FontConfig_OHOS::getTypeface(int styleIndex, const SkFontStyle&
  *  \return The index of the font style set
  *  \n      Return -1, if 'familyName' is not found in the system
  */
-int FontConfig_OHOS::getStyleIndex(const char* familyName, bool& isFallback) const
-{
+int FontConfig_OHOS::getStyleIndex(const char *familyName, bool &isFallback) const {
     if (familyName == nullptr) {
         isFallback = false;
         return 0;
@@ -197,7 +174,7 @@ int FontConfig_OHOS::getStyleIndex(const char* familyName, bool& isFallback) con
     }
 
     SkString fname(familyName);
-    int* p = genericNames.find(fname);
+    int *p = genericNames.find(fname);
     if (p) {
         isFallback = false;
         return *p;
@@ -221,9 +198,7 @@ int FontConfig_OHOS::getStyleIndex(const char* familyName, bool& isFallback) con
  * \return The typeface object which is the closest matching to 'pattern'
  * \n      Return null, if the count of typeface is 0
  */
-sk_sp<SkTypeface_OHOS> FontConfig_OHOS::matchFontStyle(const TypefaceSet& typefaceSet,
-    const SkFontStyle& pattern)
-{
+sk_sp<SkTypeface_OHOS> FontConfig_OHOS::matchFontStyle(const TypefaceSet &typefaceSet, const SkFontStyle &pattern) {
     int count = typefaceSet.size();
     if (count == 1) {
         return typefaceSet[0];
@@ -231,7 +206,7 @@ sk_sp<SkTypeface_OHOS> FontConfig_OHOS::matchFontStyle(const TypefaceSet& typefa
     sk_sp<SkTypeface_OHOS> res = nullptr;
     uint32_t minDiff = 0xFFFFFFFF;
     for (int i = 0; i < count; i++) {
-        const SkFontStyle& fontStyle = typefaceSet[i]->fontStyle();
+        const SkFontStyle &fontStyle = typefaceSet[i]->fontStyle();
         uint32_t diff = getFontStyleDifference(pattern, fontStyle);
         if (diff < minDiff) {
             minDiff = diff;
@@ -246,9 +221,7 @@ sk_sp<SkTypeface_OHOS> FontConfig_OHOS::matchFontStyle(const TypefaceSet& typefa
  * \param srcStyle a font style
  * \return The difference value of a specified style with the matching style
  */
-uint32_t FontConfig_OHOS::getFontStyleDifference(const SkFontStyle& dstStyle,
-    const SkFontStyle& srcStyle)
-{
+uint32_t FontConfig_OHOS::getFontStyleDifference(const SkFontStyle &dstStyle, const SkFontStyle &srcStyle) {
     int normalWidth = SkFontStyle::kNormal_Width;
     int dstWidth = dstStyle.width();
     int srcWidth = srcStyle.width();
@@ -273,11 +246,7 @@ uint32_t FontConfig_OHOS::getFontStyleDifference(const SkFontStyle& dstStyle,
         }
     }
 
-    int diffSlantValue[3][3] = {
-        {0, 2, 1},
-        {2, 0, 1},
-        {2, 1, 0}
-    };
+    int diffSlantValue[3][3] = {{0, 2, 1}, {2, 0, 1}, {2, 1, 0}};
     uint32_t slantDiff = diffSlantValue[dstStyle.slant()][srcStyle.slant()];
 
     int dstWeight = dstStyle.weight();
@@ -314,25 +283,24 @@ uint32_t FontConfig_OHOS::getFontStyleDifference(const SkFontStyle& dstStyle,
  * \return The pointer of content of the file
  * \note The returned pointer should be freed by the caller
  */
-char* FontConfig_OHOS::getFileData(const char* fname, int& size)
-{
-    FILE* fp = fopen(fname, "r");
+char *FontConfig_OHOS::getFileData(const char *fname, int &size) {
+    FILE *fp = fopen(fname, "r");
     if (fp == nullptr) {
         return nullptr;
     }
     fseek(fp, 0L, SEEK_END);
     size = ftell(fp) + 1;
     rewind(fp);
-    void* data = malloc(size);
+    void *data = malloc(size);
     if (data == nullptr) {
         fclose(fp);
         return nullptr;
     }
 //     memset_s(data, size, 0, size);
-    memset(data, 0 ,size);
-    (void) fread(data, size, 1, fp);
+    memset(data, 0, size);
+    (void)fread(data, size, 1, fp);
     fclose(fp);
-    return (char*)data;
+    return (char *)data;
 }
 
 /*! parse the system font configuration document
@@ -342,8 +310,7 @@ char* FontConfig_OHOS::getFileData(const char* fname, int& size)
  * \return ERROR_CONFIG_FORMAT_NOT_SUPPORTED config document format is not supported
  * \return ERROR_CONFIG_INVALID_VALUE_TYPE wrong type of value in the configuration
  */
-int FontConfig_OHOS::parseConfig(const char* fname)
-{
+int FontConfig_OHOS::parseConfig(const char *fname) {
     if (fname == nullptr) {
         fname = OHOS_DEFAULT_CONFIG;
     }
@@ -353,7 +320,7 @@ int FontConfig_OHOS::parseConfig(const char* fname)
         return err;
     }
     // "fontdir" - optional, the data type should be string
-    const char* key = "fontdir";
+    const char *key = "fontdir";
     if (root.isMember(key)) {
         if (root[key].isArray()) {
             parseFontDir(fname, root[key]);
@@ -362,7 +329,7 @@ int FontConfig_OHOS::parseConfig(const char* fname)
         }
     }
     // "generic", "fallback" - necessary, the data type should be array
-    const char* keys[] = {"generic", "fallback", nullptr};
+    const char *keys[] = {"generic", "fallback", nullptr};
     int index = 0;
     while (true) {
         if (keys[index] == nullptr) {
@@ -374,7 +341,7 @@ int FontConfig_OHOS::parseConfig(const char* fname)
         } else if (!root[key].isArray()) {
             return logErrInfo(ERROR_CONFIG_INVALID_VALUE_TYPE, key, Json::arrayValue, root[key].type());
         }
-        const Json::Value& arr = root[key];
+        const Json::Value &arr = root[key];
         for (unsigned int i = 0; i < arr.size(); i++) {
             if (arr[i].isObject()) {
                 if (!strcmp(key, "generic")) {
@@ -385,8 +352,7 @@ int FontConfig_OHOS::parseConfig(const char* fname)
             } else {
                 SkString errKey;
                 errKey.appendf("%s#%d", key, i + 1);
-                (void) logErrInfo(ERROR_CONFIG_INVALID_VALUE_TYPE, errKey.c_str(),
-                    Json::objectValue, arr[i].type());
+                (void)logErrInfo(ERROR_CONFIG_INVALID_VALUE_TYPE, errKey.c_str(), Json::objectValue, arr[i].type());
             }
         }
     }
@@ -400,10 +366,9 @@ int FontConfig_OHOS::parseConfig(const char* fname)
  * \return ERROR_CONFIG_NOT_FOUND config document is not found
  * \return ERROR_CONFIG_FORMAT_NOT_SUPPORTED config document format is not supported
  */
-int FontConfig_OHOS::checkConfigFile(const char* fname, Json::Value& root)
-{
+int FontConfig_OHOS::checkConfigFile(const char *fname, Json::Value &root) {
     int size = 0;
-    char* data = getFileData(fname, size);
+    char *data = getFileData(fname, size);
     if (data == nullptr) {
         return logErrInfo(ERROR_CONFIG_NOT_FOUND, fname);
     }
@@ -411,7 +376,7 @@ int FontConfig_OHOS::checkConfigFile(const char* fname, Json::Value& root)
     Json::CharReaderBuilder charReaderBuilder;
     std::unique_ptr<Json::CharReader> jsonReader(charReaderBuilder.newCharReader());
     bool isJson = jsonReader->parse(data, data + size, &root, &errs);
-    free((void*)data);
+    free((void *)data);
     data = nullptr;
 
     if (!isJson || !errs.empty()) {
@@ -423,11 +388,9 @@ int FontConfig_OHOS::checkConfigFile(const char* fname, Json::Value& root)
 /*! To print out the font information
  * \param font the font object to be printed
  */
-void FontConfig_OHOS::dumpFont(const FontInfo& font) const
-{
-    LOGI("name=%s, family=%s, weight=%d, width=%d, slant=%d, index=%d",
-        font.fname.c_str(), font.familyName.c_str(), font.style.weight(), font.style.width(), font.style.slant(),
-        font.index);
+void FontConfig_OHOS::dumpFont(const FontInfo &font) const {
+    LOGI("name=%s, family=%s, weight=%d, width=%d, slant=%d, index=%d", font.fname.c_str(), font.familyName.c_str(),
+         font.style.weight(), font.style.width(), font.style.slant(), font.index);
     int count = font.axisSet.axis.size();
     if (count > 0) {
         SkString str;
@@ -443,15 +406,14 @@ void FontConfig_OHOS::dumpFont(const FontInfo& font) const
 
 /*! To print out the information of generic font style set
  */
-void FontConfig_OHOS::dumpGeneric() const
-{
+void FontConfig_OHOS::dumpGeneric() const {
     LOGI("\n");
     for (unsigned int i = 0; i < genericFamilySet.size(); i++) {
         LOGI("[%d] familyName : %s - %d\n", i, genericFamilySet[i]->familyName.c_str(),
-            static_cast<int>(genericFamilySet[i]->typefaceSet->size()));
+             static_cast<int>(genericFamilySet[i]->typefaceSet->size()));
         for (int j = 0; j < genericFamilySet[i]->typefaceSet->size(); j++) {
             if ((*(genericFamilySet[i]->typefaceSet))[j].get()) {
-                const FontInfo* font = (*(genericFamilySet[i]->typefaceSet))[j]->getFontInfo();
+                const FontInfo *font = (*(genericFamilySet[i]->typefaceSet))[j]->getFontInfo();
                 if (font) {
                     dumpFont(*font);
                 } else {
@@ -466,19 +428,17 @@ void FontConfig_OHOS::dumpGeneric() const
 
 /*! To print out the information of fallback font style set
  */
-void FontConfig_OHOS::dumpFallback() const
-{
+void FontConfig_OHOS::dumpFallback() const {
     LOGI("\n");
     int count = 0;
-    fallbackForMap.foreach([this, &count](const SkString& key,
-        const FallbackSetPos& setIndex) {
+    fallbackForMap.foreach ([this, &count](const SkString &key, const FallbackSetPos &setIndex) {
         LOGI("[%d] family : %s - %d\n", count++, key.c_str(), setIndex.count);
         for (unsigned int i = setIndex.index; i < setIndex.index + setIndex.count; i++) {
-            const TypefaceSet& tpSet = *(fallbackSet[i]->typefaceSet.get());
+            const TypefaceSet &tpSet = *(fallbackSet[i]->typefaceSet.get());
             LOGI("[%s] - %d\n", fallbackSet[i]->familyName.c_str(), static_cast<int>(tpSet.size()));
 
             for (unsigned int j = 0; j < tpSet.size(); j++) {
-                const FontInfo* font = tpSet[j]->getFontInfo();
+                const FontInfo *font = tpSet[j]->getFontInfo();
                 if (font) {
                     this->dumpFont(*font);
                 } else {
@@ -495,17 +455,17 @@ void FontConfig_OHOS::dumpFallback() const
  * \return NO_ERROR successful
  * \return ERROR_CONFIG_INVALID_VALUE_TYPE invalid value type
  */
-int FontConfig_OHOS::parseFontDir(const char* fname, const Json::Value& root)
-{
+int FontConfig_OHOS::parseFontDir(const char *fname, const Json::Value &root) {
     for (unsigned int i = 0; i < root.size(); i++) {
         if (root[i].isString()) {
-            const char* dir;
-#if defined(SK_BUILD_FONT_MGR_FOR_PREVIEW_WIN) or defined(SK_BUILD_FONT_MGR_FOR_PREVIEW_MAC) or \
+            const char *dir;
+#if defined(SK_BUILD_FONT_MGR_FOR_PREVIEW_WIN) or defined(SK_BUILD_FONT_MGR_FOR_PREVIEW_MAC) or                        \
     defined(SK_BUILD_FONT_MGR_FOR_PREVIEW_LINUX)
             if (strcmp(fname, OHOS_DEFAULT_CONFIG) == 0) {
                 dir = strcmp(root[i].asCString(), "/system/fonts/") ? root[i].asCString() : "fonts";
             } else {
-                dir = strcmp(root[i].asCString(), "/system/fonts/") ? root[i].asCString() : "../../../../hms/previewer/resources/fonts";
+                dir = strcmp(root[i].asCString(), "/system/fonts/") ? root[i].asCString()
+                                                                    : "../../../../hms/previewer/resources/fonts";
             }
 #else
             dir = root[i].asCString();
@@ -526,10 +486,9 @@ int FontConfig_OHOS::parseFontDir(const char* fname, const Json::Value& root)
  * \return ERROR_CONFIG_INVALID_VALUE_TYPE invalid value type for an attribute
  * \return ERROR_CONFIG_MISSING_TAG missing tag of 'family' or 'alias'
  */
-int FontConfig_OHOS::parseGeneric(const Json::Value& root)
-{
+int FontConfig_OHOS::parseGeneric(const Json::Value &root) {
     // "family" - necessary, the data type should be String
-    const char* key = "family";
+    const char *key = "family";
     if (!root.isMember(key)) {
         return logErrInfo(ERROR_CONFIG_MISSING_TAG, key);
     } else if (!root[key].isString()) {
@@ -541,11 +500,11 @@ int FontConfig_OHOS::parseGeneric(const Json::Value& root)
         return logErrInfo(ERROR_CONFIG_MISSING_TAG, "alias");
     }
     // "adjust", "variation" - optional
-    const char* tags[] = {"alias", "adjust", "variations", "index"};
+    const char *tags[] = {"alias", "adjust", "variations", "index"};
     std::vector<AliasInfo> aliasSet;
     std::vector<AdjustInfo> adjustSet;
     std::vector<VariationInfo> variationSet;
-    for (unsigned int i = 0; i < sizeof(tags) / sizeof(char*); i++) {
+    for (unsigned int i = 0; i < sizeof(tags) / sizeof(char *); i++) {
         key = tags[i];
         if (!root.isMember(key)) {
             continue;
@@ -555,7 +514,7 @@ int FontConfig_OHOS::parseGeneric(const Json::Value& root)
                 parseTtcIndex(root[key], familyName);
                 continue;
             }
-            const Json::Value& arr = root[key];
+            const Json::Value &arr = root[key];
             for (unsigned int j = 0; j < arr.size(); j++) {
                 if (arr[j].isObject()) {
                     if (!strcmp(key, "alias")) {
@@ -568,12 +527,11 @@ int FontConfig_OHOS::parseGeneric(const Json::Value& root)
                 } else {
                     SkString text;
                     text.appendf("%s#%d", key, j + 1);
-                    (void) logErrInfo(ERROR_CONFIG_INVALID_VALUE_TYPE, text.c_str(), Json::objectValue,
-                        arr[j].type());
+                    (void)logErrInfo(ERROR_CONFIG_INVALID_VALUE_TYPE, text.c_str(), Json::objectValue, arr[j].type());
                 }
             }
         } else {
-            (void) logErrInfo(ERROR_CONFIG_INVALID_VALUE_TYPE, key, Json::arrayValue, root[key].type());
+            (void)logErrInfo(ERROR_CONFIG_INVALID_VALUE_TYPE, key, Json::arrayValue, root[key].type());
         }
         if (root.size() == 2) {
             break;
@@ -598,16 +556,14 @@ int FontConfig_OHOS::parseGeneric(const Json::Value& root)
  * \return ERROR_CONFIG_INVALID_VALUE_TYPE invalid value type for an attribute
  * \return ERROR_CONFIG_MISSING_TAG missing tag of alias name
  */
-int FontConfig_OHOS::parseAlias(const Json::Value& root, std::vector<AliasInfo>& aliasSet)
-{
+int FontConfig_OHOS::parseAlias(const Json::Value &root, std::vector<AliasInfo> &aliasSet) {
     if (root.empty()) {
         return logErrInfo(ERROR_CONFIG_MISSING_TAG, "generic-alias-name");
     }
     Json::Value::Members members = root.getMemberNames();
-    const char* key = members[0].c_str();
+    const char *key = members[0].c_str();
     if (!root[key].isInt()) {
-        return logErrInfo(ERROR_CONFIG_INVALID_VALUE_TYPE, "generic-alias-weight",
-            Json::intValue, root[key].type());
+        return logErrInfo(ERROR_CONFIG_INVALID_VALUE_TYPE, "generic-alias-weight", Json::intValue, root[key].type());
     }
 
     SkString aliasName = SkString(key);
@@ -622,7 +578,7 @@ int FontConfig_OHOS::parseAlias(const Json::Value& root, std::vector<AliasInfo>&
     }
     auto typeset = genericFamily->typefaceSet.get();
     genericNames.set(SkString(genericFamily->familyName), genericFamilySet.size());
-    OH_LOG_ERROR(LOG_APP, "cyjskia_________cyj_______genericFamily %{private}d",(*typeset).size());
+    OH_LOG_ERROR(LOG_APP, "cyjskia_________cyj_______genericFamily %{private}d", (*typeset).size());
     AliasInfo info = {static_cast<int>(genericFamilySet.size()), weight};
     aliasSet.emplace_back(std::move(info));
     genericFamilySet.emplace_back(std::move(genericFamily));
@@ -636,17 +592,15 @@ int FontConfig_OHOS::parseAlias(const Json::Value& root, std::vector<AliasInfo>&
  * \return ERROR_CONFIG_INVALID_VALUE_TYPE invalid value type for an attribute
  * \return ERROR_CONFIG_MISSING_TAG missing tag of 'weight' or 'to'
  */
-int FontConfig_OHOS::parseAdjust(const Json::Value& root, std::vector<AdjustInfo>& adjustSet)
-{
-    const char* tags[] = {"weight", "to"};
+int FontConfig_OHOS::parseAdjust(const Json::Value &root, std::vector<AdjustInfo> &adjustSet) {
+    const char *tags[] = {"weight", "to"};
     int values[2]; // value[0] - to save 'weight', value[1] - to save 'to'
-    for (unsigned int i = 0; i < sizeof(tags) / sizeof(char*); i++) {
-        const char* key = tags[i];
+    for (unsigned int i = 0; i < sizeof(tags) / sizeof(char *); i++) {
+        const char *key = tags[i];
         if (!root.isMember(key)) {
             return logErrInfo(ERROR_CONFIG_MISSING_TAG, key);
         } else if (!root[key].isInt()) {
-            return logErrInfo(ERROR_CONFIG_INVALID_VALUE_TYPE, key,
-                Json::intValue, root[key].type());
+            return logErrInfo(ERROR_CONFIG_INVALID_VALUE_TYPE, key, Json::intValue, root[key].type());
         } else {
             values[i] = root[key].asInt();
         }
@@ -662,26 +616,23 @@ int FontConfig_OHOS::parseAdjust(const Json::Value& root, std::vector<AdjustInfo
  * \return ERROR_CONFIG_INVALID_VALUE_TYPE invalid value type for an attribute
  * \return ERROR_CONFIG_MISSING_TAG missing tag of fallbackFor
  */
-int FontConfig_OHOS::parseFallback(const Json::Value& root)
-{
+int FontConfig_OHOS::parseFallback(const Json::Value &root) {
     if (root.empty()) {
         return logErrInfo(ERROR_CONFIG_MISSING_TAG, "fallback-fallbackFor");
     }
     Json::Value::Members members = root.getMemberNames();
-    const char* key = members[0].c_str();
+    const char *key = members[0].c_str();
     if (!root[key].isArray()) {
-        return logErrInfo(ERROR_CONFIG_INVALID_VALUE_TYPE, "fallback-items",
-            Json::arrayValue, root[key].type());
+        return logErrInfo(ERROR_CONFIG_INVALID_VALUE_TYPE, "fallback-items", Json::arrayValue, root[key].type());
     }
     unsigned int startPos = fallbackSet.size();
     SkString fallbackFor = SkString(key);
-    const Json::Value& fallbackArr = root[key];
+    const Json::Value &fallbackArr = root[key];
     for (unsigned int i = 0; i < fallbackArr.size(); i++) {
         if (!fallbackArr[i].isObject()) {
             SkString text;
             text.appendf("fallback-%s#%d", key, i + 1);
-            (void) logErrInfo(ERROR_CONFIG_INVALID_VALUE_TYPE, text.c_str(), Json::objectValue,
-                fallbackArr[i].type());
+            (void)logErrInfo(ERROR_CONFIG_INVALID_VALUE_TYPE, text.c_str(), Json::objectValue, fallbackArr[i].type());
             continue;
         }
         parseFallbackItem(fallbackArr[i]);
@@ -697,13 +648,12 @@ int FontConfig_OHOS::parseFallback(const Json::Value& root)
  * \return ERROR_CONFIG_INVALID_VALUE_TYPE invalid value type for an attribute
  * \return ERROR_CONFIG_MISSING_TAG missing tag of language
  */
-int FontConfig_OHOS::parseFallbackItem(const Json::Value& root)
-{
+int FontConfig_OHOS::parseFallbackItem(const Json::Value &root) {
     if (root.empty()) {
         return logErrInfo(ERROR_CONFIG_MISSING_TAG, "fallback-item-lang");
     }
     Json::Value::Members members = root.getMemberNames();
-    const char* key = nullptr;
+    const char *key = nullptr;
     bool hasIndex = false;
     bool hasVariations = false;
     for (unsigned int i = 0; i < members.size(); i++) {
@@ -719,15 +669,14 @@ int FontConfig_OHOS::parseFallbackItem(const Json::Value& root)
         return logErrInfo(ERROR_CONFIG_MISSING_TAG, "fallback-item-lang");
     }
     if (!root[key].isString()) {
-        return logErrInfo(ERROR_CONFIG_INVALID_VALUE_TYPE, "fallback-item-family",
-            Json::stringValue, root[key].type());
+        return logErrInfo(ERROR_CONFIG_INVALID_VALUE_TYPE, "fallback-item-family", Json::stringValue, root[key].type());
     }
     SkString lang = SkString(key);
     SkString familyName = SkString(root[key].asCString());
     if (hasVariations) {
         key = "variations";
         if (root[key].isArray()) {
-            const Json::Value& varArr = root[key];
+            const Json::Value &varArr = root[key];
             std::vector<VariationInfo> variationSet;
             for (unsigned int i = 0; i < varArr.size(); i++) {
                 if (varArr[i].isObject()) {
@@ -735,16 +684,15 @@ int FontConfig_OHOS::parseFallbackItem(const Json::Value& root)
                 } else {
                     SkString text = SkString("variations#");
                     text.appendU32(i + 1);
-                    (void) logErrInfo(ERROR_CONFIG_INVALID_VALUE_TYPE, text.c_str(),
-                        Json::objectValue, varArr[i].type());
+                    (void)logErrInfo(ERROR_CONFIG_INVALID_VALUE_TYPE, text.c_str(), Json::objectValue,
+                                     varArr[i].type());
                 }
             }
             if (variationSet.size()) {
                 variationMap.set(SkString(familyName), variationSet);
             }
         } else {
-            (void) logErrInfo(ERROR_CONFIG_INVALID_VALUE_TYPE, key, Json::arrayValue,
-                root[key].type());
+            (void)logErrInfo(ERROR_CONFIG_INVALID_VALUE_TYPE, key, Json::arrayValue, root[key].type());
         }
     }
     if (hasIndex) {
@@ -752,7 +700,7 @@ int FontConfig_OHOS::parseFallbackItem(const Json::Value& root)
         if (root[key].isArray()) {
             parseTtcIndex(root[key], familyName);
         } else {
-            (void) logErrInfo(ERROR_CONFIG_INVALID_VALUE_TYPE, key, Json::arrayValue, root[key].type());
+            (void)logErrInfo(ERROR_CONFIG_INVALID_VALUE_TYPE, key, Json::arrayValue, root[key].type());
         }
     }
     std::unique_ptr<FallbackInfo> fallback = std::make_unique<FallbackInfo>();
@@ -771,15 +719,13 @@ int FontConfig_OHOS::parseFallbackItem(const Json::Value& root)
  * \return ERROR_CONFIG_INVALID_VALUE_TYPE invalid value type for an attribute
  * \return ERROR_CONFIG_MISSING_TAG missing tag of 'weight' or 'wght'
  */
-int FontConfig_OHOS::parseVariation(const Json::Value& root, std::vector<VariationInfo>& variationSet)
-{
-    const char* key = nullptr;
-    const char* tags[] = {"wght", "wdth", "slnt", "weight", "width", "slant"};
+int FontConfig_OHOS::parseVariation(const Json::Value &root, std::vector<VariationInfo> &variationSet) {
+    const char *key = nullptr;
+    const char *tags[] = {"wght", "wdth", "slnt", "weight", "width", "slant"};
     VariationInfo info;
-    for (unsigned int i = 0; i < sizeof(tags) / sizeof(char*); i++) {
+    for (unsigned int i = 0; i < sizeof(tags) / sizeof(char *); i++) {
         key = tags[i];
-        if ((!strcmp(key, "wght") || !strcmp(key, "weight")) &&
-            !root.isMember(key)) {
+        if ((!strcmp(key, "wght") || !strcmp(key, "weight")) && !root.isMember(key)) {
             return logErrInfo(ERROR_CONFIG_MISSING_TAG, key);
         }
         if (!root.isMember(key)) {
@@ -799,7 +745,7 @@ int FontConfig_OHOS::parseVariation(const Json::Value& root, std::vector<Variati
             if (!root[key].isString()) {
                 return logErrInfo(ERROR_CONFIG_INVALID_VALUE_TYPE, key, Json::stringValue, root[key].type());
             }
-            const char* str = root[key].asCString();
+            const char *str = root[key].asCString();
             if (!strcmp(str, "normal")) {
                 info.slant = static_cast<int>(SkFontStyle::kUpright_Slant);
             } else if (!strcmp(str, "italic")) {
@@ -827,11 +773,10 @@ int FontConfig_OHOS::parseVariation(const Json::Value& root, std::vector<Variati
  * \return NO_ERROR successful
  * \return ERROR_CONFIG_INVALID_VALUE_TYPE invalid value type for an attribute
  */
-int FontConfig_OHOS::parseTtcIndex(const Json::Value& root, const SkString& familyName)
-{
+int FontConfig_OHOS::parseTtcIndex(const Json::Value &root, const SkString &familyName) {
     unsigned int keyCount = 2; // the value of 'index' is an array with 2 items.
     if (root.size() == keyCount && root[0].isString() && root[1].isNumeric()) {
-        TtcIndexInfo item = { SkString(root[0].asCString()), root[1].asInt() };
+        TtcIndexInfo item = {SkString(root[0].asCString()), root[1].asInt()};
         if (item.ttcIndex != 0 && ttcIndexMap.find(item.familyName) == nullptr) {
             ttcIndexMap.set(SkString(item.familyName), {SkString(item.familyName), 0});
         }
@@ -839,7 +784,7 @@ int FontConfig_OHOS::parseTtcIndex(const Json::Value& root, const SkString& fami
     } else {
         int ret = ERROR_CONFIG_INVALID_VALUE_TYPE;
         SkString text;
-        const char* key = "index";
+        const char *key = "index";
         if (root.size() != keyCount) {
             text.appendf("%s#0", key);
             errSet.emplace_back(ret, text.c_str());
@@ -861,22 +806,28 @@ int FontConfig_OHOS::parseTtcIndex(const Json::Value& root, const SkString& fami
  * \param variation the variation data from which axis values are generated
  * \param[out] font the axis values will be written to and returned to the caller
  */
-void FontConfig_OHOS::getAxisValues(const AxisDefinitions& axisDefs,
-    const VariationInfo& variation, FontInfo& font) const
-{
+void FontConfig_OHOS::getAxisValues(const AxisDefinitions &axisDefs, const VariationInfo &variation,
+                                    FontInfo &font) const {
     SkFontArguments::VariationPosition position;
     position.coordinateCount = variation.axis.size();
     position.coordinates = variation.axis.data();
 
     int count = axisDefs.size();
-    SkFixed axisValues[count];
-    SkFontScanner_FreeType::computeAxisValues(axisDefs, position,
-        axisValues, font.familyName);
+//    SkFixed axisValues[count];
+//    SkFontScanner_FreeType::computeAxisValues(axisDefs, position,
+//        axisValues, font.familyName);
+
+    std::vector<SkFixed> axisValues(count);
+    SkFontArguments::VariationPosition requestedPosition = position;
+    SkFontArguments::VariationPosition currentPosition;
+    SkFontScanner_FreeType::computeAxisValues(axisDefs, currentPosition, requestedPosition, axisValues.data(),
+                                              font.familyName, &font.style);
+
     font.axisSet.axis.clear();
     font.axisSet.range.clear();
     for (int i = 0; i < count; i++) {
         font.axisSet.axis.emplace_back(axisValues[i]);
-        font.axisSet.range.emplace_back(axisDefs[i]);
+        font.axisSet.range.emplace_back(axisDefs[i].tag);
     }
 }
 
@@ -886,14 +837,12 @@ void FontConfig_OHOS::getAxisValues(const AxisDefinitions& axisDefs,
  * \return true, if the font is a ttc font and added to corresponding font style set
  * \return false, if the font is not a ttc font
  */
-bool FontConfig_OHOS::insertTtcFont(int count, FontInfo& font)
-{
+bool FontConfig_OHOS::insertTtcFont(int count, FontInfo &font) {
     bool ret = false;
-    ttcIndexMap.foreach([this, count, &font, &ret]
-        (const SkString& familyName, TtcIndexInfo* info) {
+    ttcIndexMap.foreach ([this, count, &font, &ret](const SkString &familyName, TtcIndexInfo *info) {
         if (info->familyName == font.familyName && info->ttcIndex < count) {
             SkString specifiedName;
-            TypefaceSet* tpSet = this->getTypefaceSet(familyName, specifiedName);
+            TypefaceSet *tpSet = this->getTypefaceSet(familyName, specifiedName);
             if (tpSet) {
                 FontInfo newFont(font);
                 newFont.familyName = familyName;
@@ -913,18 +862,17 @@ bool FontConfig_OHOS::insertTtcFont(int count, FontInfo& font)
  * \return true, if the font is a variable and some typefaces are added to the corresponding font style set
  * \return false, if the font is not variable
  */
-bool FontConfig_OHOS::insertVariableFont(const AxisDefinitions& axisDefs, FontInfo& font)
-{
-    const SkString& key = font.familyName;
+bool FontConfig_OHOS::insertVariableFont(const AxisDefinitions &axisDefs, FontInfo &font) {
+    const SkString &key = font.familyName;
     if (variationMap.find(key) == nullptr || axisDefs.size() == 0) {
         return false;
     }
     SkString specifiedName;
-    TypefaceSet* tpSet = getTypefaceSet(key, specifiedName);
+    TypefaceSet *tpSet = getTypefaceSet(key, specifiedName);
     if (tpSet == nullptr) {
         return false;
     }
-    const std::vector<VariationInfo>& variationSet = *(variationMap.find(key));
+    const std::vector<VariationInfo> &variationSet = *(variationMap.find(key));
     for (unsigned int i = 0; i < variationSet.size(); i++) {
         FontInfo newFont(font);
         getAxisValues(axisDefs, variationSet[i], newFont);
@@ -934,7 +882,7 @@ bool FontConfig_OHOS::insertVariableFont(const AxisDefinitions& axisDefs, FontIn
             width = variationSet[i].width;
         }
         if (variationSet[i].slant != -1) {
-            slant = (SkFontStyle::Slant) variationSet[i].slant;
+            slant = (SkFontStyle::Slant)variationSet[i].slant;
         }
         newFont.style = SkFontStyle(variationSet[i].weight, width, slant);
         sk_sp<SkTypeface_OHOS> typeface = sk_make_sp<SkTypeface_OHOS>(specifiedName, newFont);
@@ -949,12 +897,10 @@ bool FontConfig_OHOS::insertVariableFont(const AxisDefinitions& axisDefs, FontIn
  * \return The object of typeface set
  * \n      Return null, if the family name is not found in the system
  */
-TypefaceSet* FontConfig_OHOS::getTypefaceSet(const SkString& familyName,
-    SkString& specifiedName) const
-{
+TypefaceSet *FontConfig_OHOS::getTypefaceSet(const SkString &familyName, SkString &specifiedName) const {
     std::lock_guard<std::mutex> lock(fontMutex);
     if (aliasMap.find(familyName) != nullptr) {
-        const std::vector<AliasInfo>& aliasSet = *(aliasMap.find(familyName));
+        const std::vector<AliasInfo> &aliasSet = *(aliasMap.find(familyName));
         if (aliasSet.size()) {
             int index = aliasSet[0].pos;
             specifiedName = genericFamilySet[index]->familyName;
@@ -974,29 +920,34 @@ TypefaceSet* FontConfig_OHOS::getTypefaceSet(const SkString& familyName,
  * \return ERROR_FONT_NOT_EXIST font file is not exist
  * \return ERROR_FONT_INVALID_STREAM the stream is not recognized
  */
-int FontConfig_OHOS::loadFont(const SkFontScanner& scanner, const char* fname)
-{
+int FontConfig_OHOS::loadFont(const SkFontScanner &scanner, const char *fname) {
     std::unique_ptr<SkStreamAsset> stream = SkStream::MakeFromFile(fname);
     int count = 1;
     SkFontScanner::AxisDefinitions axisDefs;
     FontInfo font(fname, 0);
-    if (stream == nullptr ||
-        scanner.recognizedFont(stream.get(), &count) == false ||
-        scanner.scanFont(stream.get(), 0, &font.familyName, &font.style,
-            &font.isFixedWidth, &axisDefs) == false) {
+
+    int numFaces = 0;
+    if (!scanner.scanFile(stream.get(), &numFaces)) {
+        return ERROR_FONT_NOT_EXIST;
+    }
+    int numInstances = 0;
+    if (!scanner.scanFace(stream.get(), 0, &numInstances)) {
+        return ERROR_FONT_NOT_EXIST;
+    }
+    if (!scanner.scanInstance(stream.get(), 0, 0, &font.familyName, &font.style, &font.isFixedWidth, &axisDefs,
+                              nullptr)) {
         int err = NO_ERROR;
         if (stream == nullptr) {
             err = ERROR_FONT_NOT_EXIST;
         } else {
             err = ERROR_FONT_INVALID_STREAM;
         }
-//         LOGE("%s : %s\n", errToString(err), fname);
-        char* fnameCopy = strdup(fname);
+        char *fnameCopy = strdup(fname);
         errSet.emplace_back(err, basename(fnameCopy));
         free(fnameCopy);
         return err;
     }
-    // for adjustMap - update weight
+
     if (adjustMap.find(font.familyName) != nullptr) {
         const std::vector<AdjustInfo> adjustSet = *(adjustMap.find(font.familyName));
         for (unsigned int i = 0; i < adjustSet.size(); i++) {
@@ -1008,16 +959,16 @@ int FontConfig_OHOS::loadFont(const SkFontScanner& scanner, const char* fname)
     }
     bool ret = false;
     if (count > 1) {
-    ret = insertTtcFont(count, font);
-    } else if (axisDefs.size() > 0) {        ret = insertVariableFont(axisDefs, font);
-
+        ret = insertTtcFont(count, font);
+    } else if (axisDefs.size() > 0) {
+        ret = insertVariableFont(axisDefs, font);
     }
     int iaxisDefs = axisDefs.size();
-    OH_LOG_ERROR(LOG_APP, "cyjskia_________cyj_______axisDefs.size() %{private}d",iaxisDefs);
-    
+    OH_LOG_ERROR(LOG_APP, "cyjskia_________cyj_______axisDefs.size() %{private}d", iaxisDefs);
+
     if (!ret) {
         SkString specifiedName;
-        TypefaceSet* tpSet = getTypefaceSet(font.familyName, specifiedName);
+        TypefaceSet *tpSet = getTypefaceSet(font.familyName, specifiedName);
         if (tpSet) {
             sk_sp<SkTypeface_OHOS> typeface = sk_make_sp<SkTypeface_OHOS>(specifiedName, font);
             tpSet->push_back(std::move(typeface));
@@ -1031,25 +982,24 @@ int FontConfig_OHOS::loadFont(const SkFontScanner& scanner, const char* fname)
  * \return NO_ERROR success
  * \return ERROR_DIR_NOT_FOUND a font directory is not exist
  */
-int FontConfig_OHOS::scanFonts(const SkFontScanner& fontScanner)
-{
+int FontConfig_OHOS::scanFonts(const SkFontScanner &fontScanner) {
     int err = NO_ERROR;
     if (fontDirSet.size() == 0) {
         fontDirSet.emplace_back(SkString("/system/fonts/"));
     }
     for (unsigned int i = 0; i < fontDirSet.size(); i++) {
-        DIR* dir = opendir(fontDirSet[i].c_str());
+        DIR *dir = opendir(fontDirSet[i].c_str());
         if (dir == nullptr) {
             err = logErrInfo(ERROR_DIR_NOT_FOUND, fontDirSet[i].c_str());
             continue;
         }
-        struct dirent* node = nullptr;
+        struct dirent *node = nullptr;
 
         while ((node = readdir(dir))) {
             if (node->d_type != DT_REG) {
                 continue;
             }
-            const char* fname = node->d_name;
+            const char *fname = node->d_name;
 
             if (G_IS_HMSYMBOL_ENABLE && (strcmp(fname, "hm_symbol_config_next.json") == 0)) {
                 HmSymbolConfig_OHOS::GetInstance()->ParseConfigOfHmSymbol(fname, fontDirSet[i]);
@@ -1059,9 +1009,9 @@ int FontConfig_OHOS::scanFonts(const SkFontScanner& fontScanner)
             int len = strlen(fname);
             int suffixLen = strlen(".ttf");
             if (len < suffixLen || (strncmp(fname + len - suffixLen, ".ttf", suffixLen) &&
-                strncmp(fname + len - suffixLen, ".otf", suffixLen) &&
-                strncmp(fname + len - suffixLen, ".ttc", suffixLen) &&
-                strncmp(fname + len - suffixLen, ".otc", suffixLen))) {
+                                    strncmp(fname + len - suffixLen, ".otf", suffixLen) &&
+                                    strncmp(fname + len - suffixLen, ".ttc", suffixLen) &&
+                                    strncmp(fname + len - suffixLen, ".otc", suffixLen))) {
                 continue;
             }
             len += (fontDirSet[i].size() + 2); // 2 more characters for '/' and '\0'
@@ -1069,7 +1019,7 @@ int FontConfig_OHOS::scanFonts(const SkFontScanner& fontScanner)
 //             memset_s(fullname, len,  0, len);
 //             strcpy_s(fullname, len, fontDirSet[i].c_str());
             memset(fullname, 0, len);
-            strcpy(fullname,fontDirSet[i].c_str());
+            strcpy(fullname, fontDirSet[i].c_str());
             if (fontDirSet[i][fontDirSet[i].size() - 1] != '/') {
 //                 strcat_s(fullname, len, "/");
                 strcat(fullname, "/");
@@ -1089,10 +1039,9 @@ int FontConfig_OHOS::scanFonts(const SkFontScanner& fontScanner)
  * \n 1. To sort the typefaces for each font style set in generic list
  * \n 2. To build typeface set for those font style sets which have single weight value
  */
-void FontConfig_OHOS::resetGenericValue()
-{
-    aliasMap.foreach([this](const SkString& key, std::vector<AliasInfo>* pAliasSet) {
-        std::vector<AliasInfo>& aliasSet = *pAliasSet;
+void FontConfig_OHOS::resetGenericValue() {
+    aliasMap.foreach ([this](const SkString &key, std::vector<AliasInfo> *pAliasSet) {
+        std::vector<AliasInfo> &aliasSet = *pAliasSet;
         int index = aliasSet[0].pos;
         if (genericFamilySet[index]->typefaceSet->size() == 0) {
             this->logErrInfo(ERROR_FAMILY_NOT_FOUND, key.c_str());
@@ -1102,13 +1051,10 @@ void FontConfig_OHOS::resetGenericValue()
                 if (aliasSet[i].weight == 0) {
                     continue;
                 }
-                buildSubTypefaceSet(genericFamilySet[index]->typefaceSet,
-                    genericFamilySet[index + i]->typefaceSet,
-                    genericFamilySet[index + i]->familyName,
-                    aliasSet[i].weight);
+                buildSubTypefaceSet(genericFamilySet[index]->typefaceSet, genericFamilySet[index + i]->typefaceSet,
+                                    genericFamilySet[index + i]->familyName, aliasSet[i].weight);
                 if (genericFamilySet[index + i]->typefaceSet->size() == 0) {
-                    this->logErrInfo(ERROR_FAMILY_NOT_FOUND,
-                        genericFamilySet[index + i]->familyName.c_str());
+                    this->logErrInfo(ERROR_FAMILY_NOT_FOUND, genericFamilySet[index + i]->familyName.c_str());
                 }
             }
         }
@@ -1126,16 +1072,16 @@ void FontConfig_OHOS::resetGenericValue()
  * \param familyName the family name of the sub typeface set
  * \param weight the weight of the sub typeface set
  */
-void FontConfig_OHOS::buildSubTypefaceSet(const std::shared_ptr<TypefaceSet>& typefaceSet,
-    std::shared_ptr<TypefaceSet>& subSet, const SkString& familyName, int weight)
-{
+void FontConfig_OHOS::buildSubTypefaceSet(const std::shared_ptr<TypefaceSet> &typefaceSet,
+                                          std::shared_ptr<TypefaceSet> &subSet, const SkString &familyName,
+                                          int weight) {
     if (typefaceSet->size() == 0) {
         return;
     }
     for (unsigned int i = 0; i < typefaceSet->size(); i++) {
-        const SkTypeface_OHOS* typeface = (*typefaceSet)[i].get();
+        const SkTypeface_OHOS *typeface = (*typefaceSet)[i].get();
         if (typeface && typeface->fontStyle().weight() == weight) {
-            const FontInfo* pFont = typeface->getFontInfo();
+            const FontInfo *pFont = typeface->getFontInfo();
             if (pFont == nullptr) {
                 continue;
             }
@@ -1149,8 +1095,7 @@ void FontConfig_OHOS::buildSubTypefaceSet(const std::shared_ptr<TypefaceSet>& ty
 /*! To reset the fallback value
  * \n To sort the typefaces for each font style set in fallback list.
  */
-void FontConfig_OHOS::resetFallbackValue()
-{
+void FontConfig_OHOS::resetFallbackValue() {
     for (unsigned int i = 0; i < fallbackSet.size(); i++) {
         if (fallbackSet[i]->typefaceSet->size() == 0) {
             logErrInfo(ERROR_FAMILY_NOT_FOUND, fallbackSet[i]->familyName.c_str());
@@ -1165,8 +1110,7 @@ void FontConfig_OHOS::resetFallbackValue()
  * \return false, this kind of error did not happen
  * \return true, the error happened
  */
-bool FontConfig_OHOS::hasError(int err, const SkString& text) const
-{
+bool FontConfig_OHOS::hasError(int err, const SkString &text) const {
     for (unsigned int i = 0; i < errSet.size(); i++) {
         if (errSet[i].err == err && errSet[i].text == text) {
             return true;
@@ -1178,48 +1122,43 @@ bool FontConfig_OHOS::hasError(int err, const SkString& text) const
 /*! To get the total count of errors happened
  * \return The count of errors
  */
-int FontConfig_OHOS::getErrorCount() const
-{
-    return errSet.size();
-}
+int FontConfig_OHOS::getErrorCount() const { return errSet.size(); }
 
 /*! To sort the typeface set
  * \param typefaceSet the typeface set to be sorted
  */
-void FontConfig_OHOS::sortTypefaceSet(std::shared_ptr<TypefaceSet>& typefaceSet)
-{
+void FontConfig_OHOS::sortTypefaceSet(std::shared_ptr<TypefaceSet> &typefaceSet) {
     if (typefaceSet.get() == nullptr || typefaceSet->size() <= 1) {
         return;
     }
-    TypefaceSet& tpSet = *(typefaceSet.get());
+    TypefaceSet &tpSet = *(typefaceSet.get());
     for (unsigned int i = 0; i < tpSet.size(); i++)
-    for (unsigned int j = 0; j < tpSet.size() - 1; j++) {
-        if ((tpSet[j]->fontStyle().weight() > tpSet[j + 1]->fontStyle().weight()) ||
-            (tpSet[j]->fontStyle().weight() == tpSet[j + 1]->fontStyle().weight() &&
-            tpSet[j]->fontStyle().slant() > tpSet[j + 1]->fontStyle().slant())) {
-            tpSet[j].swap(tpSet[j + 1]);
+        for (unsigned int j = 0; j < tpSet.size() - 1; j++) {
+            if ((tpSet[j]->fontStyle().weight() > tpSet[j + 1]->fontStyle().weight()) ||
+                (tpSet[j]->fontStyle().weight() == tpSet[j + 1]->fontStyle().weight() &&
+                 tpSet[j]->fontStyle().slant() > tpSet[j + 1]->fontStyle().slant())) {
+                tpSet[j].swap(tpSet[j + 1]);
+            }
         }
-    }
 }
 
 /*! To get the display text of an error
  * \param err the id of an error
  * \return The text to explain the error
  */
-const char* FontConfig_OHOS::errToString(int err)
-{
-    const static std::array<const char*, ERROR_TYPE_COUNT> errToString{
-        "successful",                                                      // NO_ERROR = 0
-        "config file is not found",                              // ERROR_CONFIG_NOT_FOUND
+const char *FontConfig_OHOS::errToString(int err) {
+    const static std::array<const char *, ERROR_TYPE_COUNT> errToString{
+        "successful",                                 // NO_ERROR = 0
+        "config file is not found",                   // ERROR_CONFIG_NOT_FOUND
         "the format of config file is not supported", // ERROR_CONFIG_FORMAT_NOT_SUPPORTED
-        "missing tag",                                         // ERROR_CONFIG_MISSING_TAG
-        "invalid value type",                           // ERROR_CONFIG_INVALID_VALUE_TYPE
-        "font file is not exist",                                  // ERROR_FONT_NOT_EXIST
-        "invalid font stream",                                // ERROR_FONT_INVALID_STREAM
-        "no font stream",                                          // ERROR_FONT_NO_STREAM
-        "family is not found",                                   // ERROR_FAMILY_NOT_FOUND
-        "no available family in the system",                   //ERROR_NO_AVAILABLE_FAMILY
-        "no such directory"                                         // ERROR_DIR_NOT_FOUND
+        "missing tag",                                // ERROR_CONFIG_MISSING_TAG
+        "invalid value type",                         // ERROR_CONFIG_INVALID_VALUE_TYPE
+        "font file is not exist",                     // ERROR_FONT_NOT_EXIST
+        "invalid font stream",                        // ERROR_FONT_INVALID_STREAM
+        "no font stream",                             // ERROR_FONT_NO_STREAM
+        "family is not found",                        // ERROR_FAMILY_NOT_FOUND
+        "no available family in the system",          // ERROR_NO_AVAILABLE_FAMILY
+        "no such directory"                           // ERROR_DIR_NOT_FOUND
     };
     if (err >= 0 && err < ERROR_TYPE_COUNT) {
         return errToString[err];
@@ -1236,45 +1175,34 @@ const char* FontConfig_OHOS::errToString(int err)
  * \n     It's used only for err 'ERROR_CONFIG_INVALID_VALUE_TYPE'
  * \return err
  */
-int FontConfig_OHOS::logErrInfo(int err, const char* key, Json::ValueType expected,
-    Json::ValueType actual)
-{
+int FontConfig_OHOS::logErrInfo(int err, const char *key, Json::ValueType expected, Json::ValueType actual) {
     errSet.emplace_back(err, key);
     if (err != ERROR_CONFIG_INVALID_VALUE_TYPE) {
 //         LOGE("%s : %s\n", errToString(err), key);
     } else {
-        const char* types[] = {
-            "null",
-            "int",
-            "unit",
-            "real",
-            "string",
-            "boolean",
-            "array",
-            "object",
+        const char *types[] = {
+            "null", "int", "unit", "real", "string", "boolean", "array", "object",
         };
-        int size = sizeof(types) / sizeof(char*);
-        if ((expected >= 0 && expected < size) &&
-            (actual >= 0 && actual < size)) {
+        int size = sizeof(types) / sizeof(char *);
+        if ((expected >= 0 && expected < size) && (actual >= 0 && actual < size)) {
 //             LOGE("%s : '%s' should be '%s', but here it's '%s'\n",
 //                 errToString(err), key, types[expected], types[actual]);
-  } else {
+        } else {
 //            LOGE("%s : %s\n", errToString(err), key);
         }
     }
     return err;
 }
 
-bool FontConfig_OHOS::judgeFileExist()
-{
+bool FontConfig_OHOS::judgeFileExist() {
     bool haveFile = false;
     for (unsigned int i = 0; i < fontDirSet.size(); i++) {
-        DIR* dir = opendir(fontDirSet[i].c_str());
+        DIR *dir = opendir(fontDirSet[i].c_str());
         if (dir == nullptr) {
             logErrInfo(ERROR_DIR_NOT_FOUND, fontDirSet[i].c_str());
             continue;
         }
-        struct dirent* node = nullptr;
+        struct dirent *node = nullptr;
 #if defined(SK_BUILD_FONT_MGR_FOR_PREVIEW_WIN)
         struct stat fileStat;
 #endif
@@ -1289,13 +1217,13 @@ bool FontConfig_OHOS::judgeFileExist()
                 continue;
             }
 #endif
-            const char* fileName = node->d_name;
+            const char *fileName = node->d_name;
             int len = strlen(fileName);
             int suffixLen = strlen(".ttf");
             if (len < suffixLen || (strncmp(fileName + len - suffixLen, ".ttf", suffixLen) &&
-                strncmp(fileName + len - suffixLen, ".otf", suffixLen) &&
-                strncmp(fileName + len - suffixLen, ".ttc", suffixLen) &&
-                strncmp(fileName + len - suffixLen, ".otc", suffixLen))) {
+                                    strncmp(fileName + len - suffixLen, ".otf", suffixLen) &&
+                                    strncmp(fileName + len - suffixLen, ".ttc", suffixLen) &&
+                                    strncmp(fileName + len - suffixLen, ".otc", suffixLen))) {
                 continue;
             }
             haveFile = true;

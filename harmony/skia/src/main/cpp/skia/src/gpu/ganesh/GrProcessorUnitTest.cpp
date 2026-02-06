@@ -7,30 +7,36 @@
 
 #include "src/gpu/ganesh/GrProcessorUnitTest.h"
 
-#include <memory>
+#if defined(GPU_TEST_UTILS)
 
-#include "include/gpu/GrRecordingContext.h"
+#include "include/gpu/ganesh/GrRecordingContext.h"
+#include "include/private/base/SkDebug.h"
+#include "include/private/gpu/ganesh/GrTypesPriv.h"
+#include "src/base/SkArenaAlloc.h"
+#include "src/base/SkRandom.h"
+#include "src/core/SkColorData.h"
 #include "src/gpu/ganesh/GrFragmentProcessor.h"
 #include "src/gpu/ganesh/GrRecordingContextPriv.h"
-#include "src/gpu/ganesh/GrSurfaceProxyView.h"
+#include "src/gpu/ganesh/SurfaceDrawContext.h"
+
+#include <cstdint>
+#include <memory>
+#include <utility>
 
 using namespace skia_private;
 
-#if defined(GR_TEST_UTILS)
-
-class GrGeometryProcessor;
-
-GrProcessorTestData::GrProcessorTestData(SkRandom* random, GrRecordingContext* context,
+GrProcessorTestData::GrProcessorTestData(SkRandom* random, skgpu::ganesh::SurfaceDrawContext* sdc,
                                          int maxTreeDepth, int numViews, const ViewInfo views[])
-        : GrProcessorTestData(random, context, maxTreeDepth, numViews, views,
+        : GrProcessorTestData(random, sdc, maxTreeDepth, numViews, views,
                               /*inputFP=*/nullptr) {}
 
-GrProcessorTestData::GrProcessorTestData(SkRandom* random, GrRecordingContext* context,
+GrProcessorTestData::GrProcessorTestData(SkRandom* random, skgpu::ganesh::SurfaceDrawContext* sdc,
                                          int maxTreeDepth, int numViews, const ViewInfo views[],
                                          std::unique_ptr<GrFragmentProcessor> inputFP)
         : fRandom(random)
         , fMaxTreeDepth(maxTreeDepth)
-        , fContext(context)
+        , fContext(sdc->recordingContext())
+        , fDrawContext(sdc)
         , fInputFP(std::move(inputFP)) {
     fViews.reset(views, numViews);
     fArena = std::make_unique<SkArenaAlloc>(1000);
@@ -114,7 +120,7 @@ GrXPFactoryTestFactory::GrXPFactoryTestFactory(GetFn* getProc) : fGetProc(getPro
 
 const GrXPFactory* GrXPFactoryTestFactory::Get(GrProcessorTestData* data) {
     VerifyFactoryCount();
-    if (GetFactories()->size() == 0) {
+    if (GetFactories()->empty()) {
         return nullptr;
     }
     uint32_t idx = data->fRandom->nextRangeU(0, GetFactories()->size() - 1);

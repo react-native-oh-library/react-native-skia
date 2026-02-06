@@ -8,21 +8,34 @@
 #ifndef GrGLProgramBuilder_DEFINED
 #define GrGLProgramBuilder_DEFINED
 
-#include "include/gpu/GrContextOptions.h"
-#include "src/gpu/ganesh/GrPipeline.h"
+#include "include/core/SkData.h"
+#include "include/core/SkRefCnt.h"
+#include "include/core/SkString.h"
+#include "include/gpu/ganesh/GrContextOptions.h"
+#include "include/gpu/ganesh/gl/GrGLTypes.h"
+#include "include/private/base/SkTDArray.h"  // IWYU pragma: keep
+#include "src/gpu/ganesh/GrGeometryProcessor.h"
 #include "src/gpu/ganesh/gl/GrGLProgram.h"
-#include "src/gpu/ganesh/gl/GrGLProgramDataManager.h"
 #include "src/gpu/ganesh/gl/GrGLUniformHandler.h"
 #include "src/gpu/ganesh/gl/GrGLVaryingHandler.h"
 #include "src/gpu/ganesh/glsl/GrGLSLProgramBuilder.h"
-#include "src/gpu/ganesh/glsl/GrGLSLProgramDataManager.h"
 #include "src/sksl/ir/SkSLProgram.h"
 
-class GrFragmentProcessor;
-class GrGLContextInfo;
+#include <cstddef>
+#include <memory>
+
+class GrCaps;
+class GrDirectContext;
+class GrGLGpu;
+class GrGLSLUniformHandler;
+class GrGLSLVaryingHandler;
 class GrProgramDesc;
-class GrGLSLShaderBuilder;
-struct GrShaderCaps;
+class GrProgramInfo;
+
+namespace SkSL {
+struct NativeShader;
+struct ProgramSettings;
+}  // namespace SkSL
 
 struct GrGLPrecompiledProgram {
     GrGLPrecompiledProgram(GrGLuint programID = 0,
@@ -59,7 +72,7 @@ private:
     GrGLProgramBuilder(GrGLGpu*, const GrProgramDesc&, const GrProgramInfo&);
 
     void addInputVars(const SkSL::Program::Interface&);
-    bool compileAndAttachShaders(const std::string& glsl,
+    bool compileAndAttachShaders(const SkSL::NativeShader& glsl,
                                  GrGLuint programId,
                                  GrGLenum type,
                                  SkTDArray<GrGLuint>* shaderIds,
@@ -71,7 +84,7 @@ private:
                                  bool bindAttribLocations);
     void storeShaderInCache(const SkSL::Program::Interface&,
                             GrGLuint programID,
-                            const std::string shaders[],
+                            const SkSL::NativeShader shaders[],
                             bool isSkSL,
                             SkSL::ProgramSettings* settings);
     sk_sp<GrGLProgram> finalize(const GrGLPrecompiledProgram*);

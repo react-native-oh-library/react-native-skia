@@ -7,7 +7,7 @@
 #include "NativeRender.h"
 #include <native_window/external_window.h>
 #include <sys/mman.h>
-#include "RNSkDomView.h"
+#include "RNSkPictureView.h"
 #include "RNSkHarmonyView.h"
 #include "common.h"
 #include "SkiaManager.h"
@@ -68,7 +68,7 @@ napi_value NativeRender::RegisterView(napi_env env, napi_callback_info info) {
     DLOG(INFO) << "napi RegisterView";
     // 获取参数
     NFuncArg funcArg(env, info);
-    if (!funcArg.InitArgs(NARG_CNT::TWO)) {
+    if (!funcArg.InitArgs(NARG_CNT::THREE)) {
         return nullptr;
     }
     napi_value v1 = funcArg.GetArg(NARG_POS::FIRST);
@@ -85,15 +85,20 @@ napi_value NativeRender::RegisterView(napi_env env, napi_callback_info info) {
         DLOG(ERROR) << "napi RegisterView get nValNativeId fail";
         return nullptr;
     }
-    DLOG(INFO) << "napi registerView xComponentId: " << xComponentId << " nativeId: " << nativeId;
-    std::string id(xComponentId.get());
-
+    napi_value v3 = funcArg.GetArg(NARG_POS::THIRD);
+    NVal nValIsColorSpace(env, v3);
+    auto [v3Succ, isColorSpace] = nValIsColorSpace.ToBool();
+    if (!v3Succ) {
+        DLOG(ERROR) << "napi RegisterView get nValIsColorSpace fail";
+        return nullptr;
+    }
+    DLOG(INFO) << "napi registerView xComponentId: " << xComponentId << " nativeId: " << nativeId << " isColorSpace: " << isColorSpace;
     if (NativeRender::GetInstance()->_harmonyView) {
         std::shared_ptr<RNSkView> rNSkView = NativeRender::GetInstance()->_harmonyView->getSkiaView();
         size_t nId = static_cast<size_t>(nativeId);
         SkiaManager::getInstance().getManager()->registerSkiaView(nId, rNSkView);
         DLOG(INFO) << "napi registerView finish";
-        NativeRender::GetInstance()->_harmonyView->surfaceAvailable(NativeRender::GetInstance()->nativeWindow_, NativeRender::GetInstance()->width_, NativeRender::GetInstance()->height_);
+        NativeRender::GetInstance()->_harmonyView->surfaceAvailable(NativeRender::GetInstance()->nativeWindow_, NativeRender::GetInstance()->width_, NativeRender::GetInstance()->height_, isColorSpace);
     }
     return nullptr;
 };
@@ -161,7 +166,7 @@ bool NativeRender::Export(napi_env env, napi_value exports) {
         auto result = render->Export(env, exports);
 
         if (result) {
-            _harmonyView = std::make_shared<RNSkHarmonyView<RNSkia::RNSkDomView>>(SkiaManager::getInstance().getContext());
+            _harmonyView = std::make_shared<RNSkHarmonyView<RNSkia::RNSkPictureView>>(SkiaManager::getInstance().getContext());
             size_t nid = _harmonyView->getSkiaView()->getNativeId();
         }
     }

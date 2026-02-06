@@ -7,8 +7,8 @@
 
 #include "src/gpu/ganesh/mtl/GrMtlResourceProvider.h"
 
-#include "include/gpu/GrContextOptions.h"
-#include "include/gpu/GrDirectContext.h"
+#include "include/gpu/ganesh/GrContextOptions.h"
+#include "include/gpu/ganesh/GrDirectContext.h"
 #include "src/core/SkTraceEvent.h"
 #include "src/gpu/ganesh/GrDirectContextPriv.h"
 #include "src/gpu/ganesh/GrProgramDesc.h"
@@ -72,8 +72,8 @@ const GrMtlRenderPipeline* GrMtlResourceProvider::findOrCreateMSAALoadPipeline(
     if (!fMSAALoadLibrary) {
         TRACE_EVENT0("skia", TRACE_FUNC);
 
-        std::string shaderText;
-        shaderText.append(
+        SkSL::NativeShader shader;
+        shader.fText.append(
                 "#include <metal_stdlib>\n"
                 "#include <simd/simd.h>\n"
                 "using namespace metal;\n"
@@ -105,7 +105,7 @@ const GrMtlRenderPipeline* GrMtlResourceProvider::findOrCreateMSAALoadPipeline(
         );
 
         auto errorHandler = fGpu->getContext()->priv().getShaderErrorHandler();
-        fMSAALoadLibrary = GrCompileMtlShaderLibrary(fGpu, shaderText, errorHandler);
+        fMSAALoadLibrary = GrCompileMtlShaderLibrary(fGpu, shader, errorHandler);
         if (!fMSAALoadLibrary) {
             return nullptr;
         }

@@ -5,17 +5,45 @@
  * found in the LICENSE file.
  */
 
-#include "modules/skottie/src/effects/Effects.h"
-
+#include "include/core/SkBlendMode.h"
 #include "include/core/SkCanvas.h"
+#include "include/core/SkM44.h"
+#include "include/core/SkMatrix.h"
+#include "include/core/SkPaint.h"
+#include "include/core/SkRect.h"
+#include "include/core/SkRefCnt.h"
+#include "include/core/SkScalar.h"
+#include "include/core/SkShader.h"
+#include "include/core/SkString.h"
 #include "include/effects/SkRuntimeEffect.h"
+#include "include/private/base/SkAssert.h"
+#include "include/private/base/SkFloatingPoint.h"
+#include "include/private/base/SkTPin.h"
 #include "modules/skottie/src/Adapter.h"
-#include "modules/skottie/src/SkottieJson.h"
+#include "modules/skottie/src/SkottiePriv.h"
 #include "modules/skottie/src/SkottieValue.h"
+#include "modules/skottie/src/effects/Effects.h"
+#include "modules/sksg/include/SkSGNode.h"
 #include "modules/sksg/include/SkSGRenderNode.h"
 #include "src/base/SkRandom.h"
 
+#include <algorithm>
+#include <array>
 #include <cmath>
+#include <cstddef>
+#include <cstdint>
+#include <tuple>
+#include <utility>
+#include <vector>
+
+struct SkPoint;
+
+namespace skjson {
+class ArrayValue;
+}
+namespace sksg {
+class InvalidationController;
+}
 
 namespace skottie::internal {
 namespace {
@@ -56,13 +84,13 @@ static constexpr char gNoiseEffectSkSL[] =
     "uniform float3x3 u_submatrix;" // sublayer transform
 
     "uniform float2 u_noise_planes;" // noise planes computed based on evolution params
-    "uniform float  u_noise_weight," // noise planes lerp weight
-                   "u_octaves,"      // number of octaves (can be fractional)
-                   "u_persistence;"  // relative octave weight
+    "uniform float u_noise_weight,"  // noise planes lerp weight
+                  "u_octaves,"       // number of octaves (can be fractional)
+                  "u_persistence;"   // relative octave weight
 
     // Hash based on hash13 (https://www.shadertoy.com/view/4djSRW).
     "float hash(float3 v) {"
-        "v  = fract(v*0.1031);"
+        "v = fract(v*0.1031);"
         "v += dot(v, v.zxy + 31.32);"
         "return fract((v.x + v.y)*v.z);"
     "}"
@@ -73,8 +101,8 @@ static constexpr char gNoiseEffectSkSL[] =
     "float sample_noise(float2 xy) {"
         "xy = floor(xy);"
 
-        "float n0  = hash(float3(xy, u_noise_planes.x)),"
-              "n1  = hash(float3(xy, u_noise_planes.y));"
+        "float n0 = hash(float3(xy, u_noise_planes.x)),"
+              "n1 = hash(float3(xy, u_noise_planes.y));"
 
         // Note: Ideally we would use 4 samples (-1, 0, 1, 2) and cubic interpolation for
         //       better results -- but that's significantly more expensive than lerp.
@@ -103,14 +131,14 @@ static constexpr char gNoiseEffectSkSL[] =
             //   -- for fractional octave:         layer amplitude modulated by fractional part
             "float w = amp*min(oct,1.0);"
 
-            "n    += w*fractal(filter(xy));"
+            "n += w*fractal(filter(xy));"
             "wacc += w;"
 
             "if (oct <= 1.0) { break; }"
 
             "oct -= 1.0;"
             "amp *= u_persistence;"
-            "xy   = (u_submatrix*float3(xy,1)).xy;"
+            "xy = (u_submatrix*float3(xy,1)).xy;"
         "}"
 
         "n /= wacc;"

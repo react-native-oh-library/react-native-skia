@@ -4,20 +4,27 @@
  * Use of this source code is governed by a BSD-style license that can be
  * found in the LICENSE file.
  */
-
 #include "src/gpu/ganesh/GrOpFlushState.h"
 
+#include "include/core/SkAlphaType.h"
 #include "include/core/SkColorSpace.h"
-#include "include/gpu/GrDirectContext.h"
-#include "src/core/SkConvertPixels.h"
+#include "include/core/SkRect.h"
+#include "include/gpu/ganesh/GrBackendSurface.h"
+#include "include/gpu/ganesh/GrDirectContext.h"
+#include "src/gpu/ganesh/GrCaps.h"
 #include "src/gpu/ganesh/GrDataUtils.h"
 #include "src/gpu/ganesh/GrDirectContextPriv.h"
-#include "src/gpu/ganesh/GrDrawOpAtlas.h"
 #include "src/gpu/ganesh/GrGpu.h"
 #include "src/gpu/ganesh/GrImageInfo.h"
+#include "src/gpu/ganesh/GrPixmap.h"
 #include "src/gpu/ganesh/GrProgramInfo.h"
-#include "src/gpu/ganesh/GrResourceProvider.h"
-#include "src/gpu/ganesh/GrTexture.h"
+#include "src/gpu/ganesh/GrSimpleMesh.h"
+#include "src/gpu/ganesh/GrSurface.h"
+#include "src/gpu/ganesh/GrSurfaceProxy.h"
+#include "src/gpu/ganesh/GrTextureProxy.h"
+
+#include <functional>
+#include <memory>
 
 //////////////////////////////////////////////////////////////////////////////
 
@@ -45,7 +52,7 @@ void GrOpFlushState::executeDrawsAndUploadsForMeshDrawOp(
     SkASSERT(this->opsRenderPass());
 
     while (fCurrDraw != fDraws.end() && fCurrDraw->fOp == op) {
-        skgpu::AtlasToken drawToken = fTokenTracker->nextFlushToken();
+        skgpu::Token drawToken = fTokenTracker->nextFlushToken();
         while (fCurrUpload != fInlineUploads.end() &&
                fCurrUpload->fUploadBeforeToken == drawToken) {
             this->opsRenderPass()->inlineUpload(this, fCurrUpload->fUpload);
@@ -97,7 +104,7 @@ void GrOpFlushState::reset() {
     fASAPUploads.reset();
     fInlineUploads.reset();
     fDraws.reset();
-    fBaseDrawToken = skgpu::AtlasToken::InvalidToken();
+    fBaseDrawToken = skgpu::Token::InvalidToken();
 }
 
 void GrOpFlushState::doUpload(GrDeferredTextureUploadFn& upload,
@@ -142,12 +149,12 @@ void GrOpFlushState::doUpload(GrDeferredTextureUploadFn& upload,
     upload(wp);
 }
 
-skgpu::AtlasToken GrOpFlushState::addInlineUpload(GrDeferredTextureUploadFn&& upload) {
+skgpu::Token GrOpFlushState::addInlineUpload(GrDeferredTextureUploadFn&& upload) {
     return fInlineUploads.append(&fArena, std::move(upload), fTokenTracker->nextDrawToken())
             .fUploadBeforeToken;
 }
 
-skgpu::AtlasToken GrOpFlushState::addASAPUpload(GrDeferredTextureUploadFn&& upload) {
+skgpu::Token GrOpFlushState::addASAPUpload(GrDeferredTextureUploadFn&& upload) {
     fASAPUploads.append(&fArena, std::move(upload));
     return fTokenTracker->nextFlushToken();
 }
@@ -162,7 +169,7 @@ void GrOpFlushState::recordDraw(
     SkDEBUGCODE(fOpArgs->validate());
     bool firstDraw = fDraws.begin() == fDraws.end();
     auto& draw = fDraws.append(&fArena);
-    skgpu::AtlasToken token = fTokenTracker->issueDrawToken();
+    skgpu::Token token = fTokenTracker->issueDrawToken();
     for (int i = 0; i < geomProc->numTextureSamplers(); ++i) {
         SkASSERT(geomProcProxies && geomProcProxies[i]);
         geomProcProxies[i]->ref();

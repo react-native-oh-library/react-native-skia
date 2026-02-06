@@ -228,14 +228,18 @@ $pure float4 tessellate_stroked_curve(float edgeID, float maxEdges,
     float numParametricSegments;
     if (w < 0) {
         if (p0 == p1 && p2 == p3) {
-            numParametricSegments = 1; // a line
+            numParametricSegments = 1; // a line (or a circle if p1 == p2)
         } else {
             numParametricSegments = $wangs_formula_cubic(p0, p1, p2, p3, affineMatrix);
         }
     } else {
-        numParametricSegments = $wangs_formula_conic(affineMatrix * p0,
-                                                     affineMatrix * p1,
-                                                     affineMatrix * p2, w);
+        if (p0 == p1 || p1 == p2) {
+            numParametricSegments = 1; // a line (or a square if p0 == p2)
+        } else {
+            numParametricSegments = $wangs_formula_conic(affineMatrix * p0,
+                                                         affineMatrix * p1,
+                                                         affineMatrix * p2, w);
+        }
     }
 
     // Matches skgpu::tess::StrokeParams
@@ -244,7 +248,7 @@ $pure float4 tessellate_stroked_curve(float edgeID, float maxEdges,
     bool isHairline = strokeParams.x == 0.0;
     float numRadialSegmentsPerRadian;
     if (isHairline) {
-        numRadialSegmentsPerRadian = $num_radial_segments_per_radian(1.0);
+        numRadialSegmentsPerRadian = $num_radial_segments_per_radian(0.5);
         strokeRadius = 0.5;
     } else {
         numRadialSegmentsPerRadian = $num_radial_segments_per_radian(maxScale * strokeParams.x);
@@ -260,14 +264,37 @@ $pure float4 tessellate_stroked_curve(float edgeID, float maxEdges,
         lastControlPoint = affineMatrix * lastControlPoint;
     }
 
-    // Find the starting and ending tangents.
+    // Find the starting and ending tangents (of the curve) and the tangent of the previous curve
+    // that connects to it.
     float2 tan0 = $robust_normalize_diff((p0 == p1) ? ((p1 == p2) ? p3 : p2) : p1, p0);
     float2 tan1 = $robust_normalize_diff(p3, (p3 == p2) ? ((p2 == p1) ? p0 : p1) : p2);
+    float2 prevTan = $robust_normalize_diff(p0, lastControlPoint);
     if (tan0 == float2(0)) {
-        // The stroke is a point. This special case tells us to draw a stroke-width circle as a
-        // 180 degree point stroke instead.
-        tan0 = float2(1,0);
-        tan1 = float2(-1,0);
+        // The stroke is a point, which is a special case for square or circle caps.
+        joinType = 0;
+        if (w < 0) {
+            // This is a special case representing a stroke-width circle, so treat it as a 180
+            // degree point stroke instead.
+            tan0 = float2(1,0);
+            tan1 = float2(-1,0);
+        } else {
+            // This is a special case representing a stroke-width square, or half-square cap
+            // (depending on the value of lastControlPoint).
+            w = -1;
+            tan0 = prevTan;
+            tan1 = prevTan;
+            if (prevTan == float2(0.0, 0.0)) {
+                // A square cap, so adjust both p0,p1 and p2,p3 to shift by the stroke radius in
+                // opposite directions along the X axis
+                p2 = p3 = p0 + strokeRadius * float2(1.0, 0.0);
+                p0 = p1 = p0 - strokeRadius * float2(1.0, 0.0);
+                prevTan = tan0 = tan1 = float2(1.0, 0.0);
+            } else {
+                // A half-square, so behave as a lineTo from p0 to a strokeRadius outset away from
+                // the prior tangent point
+                p2 = p3 = p0 + strokeRadius * prevTan;
+            }
+        }
     }
 
     // Determine how many edges to give to the join. We emit the first and final edges
@@ -278,9 +305,9 @@ $pure float4 tessellate_stroked_curve(float edgeID, float maxEdges,
     if (joinType >= 0 /*Is the join not a round type?*/) {
         // Bevel(0) and miter(+) joins get 1 and 2 segments respectively.
         // +2 because we emit the beginning and ending edges twice (see above comments).
-        numEdgesInJoin = sign(joinType) + 1 + 2;
+        numEdgesInJoin = sign(joinType) + (1 + 2);
     } else {
-        float2 prevTan = $robust_normalize_diff(p0, lastControlPoint);
+        // NOTE: for circles, prevTan = (0,0), but this still works out to 180 degrees here
         float joinRads = acos($cosine_between_unit_vectors(prevTan, tan0));
         float numRadialSegmentsInJoin = max(ceil(joinRads * numRadialSegmentsPerRadian), 1);
         // +2 because we emit the beginning and ending edges twice (see above comment).
@@ -302,7 +329,7 @@ $pure float4 tessellate_stroked_curve(float edgeID, float maxEdges,
         // means the join is disabled, and to disable it with the existing code we can leave
         // tan0 equal to tan1.
         if (lastControlPoint != p0) {
-            tan0 = $robust_normalize_diff(p0, lastControlPoint);
+            tan0 = prevTan;
         }
         turn = cross_length_2d(tan0, tan1);
     }
@@ -327,22 +354,24 @@ $pure float4 tessellate_stroked_curve(float edgeID, float maxEdges,
         // edge and lands one edge at the very end of the join. (The duplicated final edge will
         // actually come from the section of our strip that belongs to the stroke.)
         combinedEdgeID += numRadialSegments + 1;
-        // We normally restrict the join on one side of the junction, but if the tangents are
-        // nearly equivalent this could theoretically result in bad seaming and/or cracks on the
-        // side we don't put it on. If the tangents are nearly equivalent then we leave the join
-        // double-sided.
-        float sinEpsilon = 1e-2;  // ~= sin(180deg / 3000)
-        bool tangentsNearlyParallel =
-                (abs(turn) * inversesqrt(dot(tan0, tan0) * dot(tan1, tan1))) < sinEpsilon;
-        if (!tangentsNearlyParallel || dot(tan0, tan1) < 0) {
-            // There are two edges colocated at the beginning. Leave the first one double sided
-            // for seaming with the previous stroke. (The double sided edge at the end will
-            // actually come from the section of our strip that belongs to the stroke.)
-            if (combinedEdgeID >= 0) {
+        if (combinedEdgeID < 0) {
+            combinedEdgeID = 0;
+        } else {
+            // We normally restrict the join on one side of the junction, but if the tangents are
+            // nearly equivalent this could theoretically result in bad seaming and/or cracks on the
+            // side we don't put it on. If the tangents are nearly equivalent then we leave the join
+            // double-sided.
+            // NOTE: For square caps, the construction of tan0/tan1 ensure we emit a full width edge
+            const float sinEpsilon = 1e-2;  // ~= sin(180deg / 3000)
+            bool tangentsNearlyParallel =
+                    (abs(turn) * inversesqrt(dot(tan0, tan0) * dot(tan1, tan1))) < sinEpsilon;
+            if (!tangentsNearlyParallel || dot(tan0, tan1) < 0) {
+                // There are two edges colocated at the beginning. Leave the first one double sided
+                // for seaming with the previous stroke. (The double sided edge at the end will
+                // actually come from the section of our strip that belongs to the stroke.)
                 strokeOutset = (turn < 0) ? min(strokeOutset, 0) : max(strokeOutset, 0);
             }
         }
-        combinedEdgeID = max(combinedEdgeID, 0);
     } else {
         // We belong to the stroke. Unless numRadialSegmentsPerRadian is incredibly high,
         // clamping to maxCombinedSegments will be a no-op because the draw call was invoked with
@@ -393,7 +422,7 @@ $pure float4 tessellate_stroked_curve(float edgeID, float maxEdges,
             B = E - C;
             A = fma(float2(-3), E, D);
         }
-        // FIXME(crbug.com/800804,skbug.com/11268): Consider normalizing the exponents in A,B,C at
+        // FIXME(crbug.com/800804,skbug.com/40042642): Consider normalizing the exponents in A,B,C at
         // this point in order to prevent fp32 overflow.
 
         // Now find the coefficients that give a tangent direction from a parametric edge ID:
@@ -415,9 +444,9 @@ $pure float4 tessellate_stroked_curve(float edgeID, float maxEdges,
         float maxParametricEdgeID = min(numParametricSegments - 1.0, combinedEdgeID);
         float negAbsRadsPerSegment = -abs(radsPerSegment);
         float maxRotation0 = (1.0 + combinedEdgeID) * abs(radsPerSegment);
-        for (int exp = 5 /*max resolve level*/ - 1; exp >= 0; --exp) {
-            // Test the parametric edge at lastParametricEdgeID + 2^exp.
-            float testParametricID = lastParametricEdgeID + exp2(float(exp));
+        for (float exp = 32.0; exp >= 1.0; exp *= 0.5) {
+            // Test the parametric edge at lastParametricEdgeID + (32, 16, 8, 4, 2, 1).
+            float testParametricID = lastParametricEdgeID + exp;
             if (testParametricID <= maxParametricEdgeID) {
                 float2 testTan = fma(float2(testParametricID), A, B_);
                 testTan = fma(float2(testParametricID), testTan, C_);
@@ -471,14 +500,12 @@ $pure float4 tessellate_stroked_curve(float edgeID, float maxEdges,
         // nearest .5.
         float _5qa = -.5*q*a;
         float2 root = (abs(fma(q,q,_5qa)) < abs(fma(a,c,_5qa))) ? float2(q,a) : float2(c,q);
-        float radialT = (root.t != 0.0) ? root.s / root.t : 0.0;
-        radialT = clamp(radialT, 0.0, 1.0);
 
-        if (lastRadialEdgeID == 0.0) {
-            // The root finder above can become unstable when lastRadialEdgeID == 0 (e.g., if
-            // there are roots at exatly 0 and 1 both). radialT should always == 0 in this case.
-            radialT = 0.0;
-        }
+        // The root finder above can become unstable when lastRadialEdgeID == 0 (e.g., if there are
+        // roots at exatly 0 and 1 both). radialT should always equal 0 in this case.
+        float radialT = (lastRadialEdgeID != 0.0 && root.t != 0.0)
+                            ? saturate(root.s / root.t)
+                            : 0.0;
 
         // Now that we've identified the T values of the last parametric and radial edges, our final
         // T value for combinedEdgeID is whichever is larger.
@@ -531,6 +558,7 @@ $pure float4 tessellate_stroked_curve(float edgeID, float maxEdges,
 }
 
 float4 analytic_rrect_vertex_fn(// Vertex Attributes
+                                uint cornerID,
                                 float2 position,
                                 float2 normal,
                                 float normalScale,
@@ -551,18 +579,24 @@ float4 analytic_rrect_vertex_fn(// Vertex Attributes
                                 out float2 perPixelControl,
                                 // Render Step
                                 out float2 stepLocalCoords) {
-    const int kCornerVertexCount = 9; // KEEP IN SYNC WITH C++'s
-                                      // AnalyticRRectRenderStep::kCornerVertexCount
     const float kMiterScale = 1.0;
     const float kBevelScale = 0.0;
     const float kRoundScale = 0.41421356237; // sqrt(2)-1
-
     const float kEpsilon = 0.00024; // SK_ScalarNearlyZero
 
     // Default to miter'ed vertex positioning. Corners with sufficiently large corner radii, or
     // bevel'ed strokes will adjust vertex placement on a per corner basis. This will not affect
     // the final coverage calculations in the fragment shader.
     float joinScale = kMiterScale;
+
+    // Calculate a rotated cornerID value to use for indexing within vectors that would normally
+    // require ".yzwx" swizzling before indexing (e.g., if `var` is a container of 4,
+    // `var.yzwx[cornerID]` is instead handled as `var[nextID]`). Though theoretically equivalent,
+    // using the modified cornerID gets around a driver bug within Qualcomm Adreno 620 GPUs (used by
+    // the Pixel 5) which leads to incorrect output when swizzling and indexing into a vector within
+    // one line or operation. This issue may also exist on other devices as well. Since the
+    // workaround is simple, just use this approach for all vertex shaders.
+    uint nextID = (cornerID + 1) % 4;
 
     // Unpack instance-level state that determines the vertex placement and style of shape.
     bool bidirectionalCoverage = center.z <= 0.0;
@@ -590,11 +624,11 @@ float4 analytic_rrect_vertex_fn(// Vertex Attributes
             yRadii = xRadii; // regular strokes are circular
             strokeParams = xRadiiOrFlags.zw;
 
-            if (strokeParams.y < 0.0) {
-                joinScale = kRoundScale; // the stroke radius rounds rectangular corners
-            }  else if (strokeParams.y == 0.0) {
-                joinScale = kBevelScale;
-            } // else stay mitered
+            // `sign(strokeParams.y)` evaluates to kMiterScale (1.0) when the
+            // input is positive, and kBevelScale (0.0) when it is zero.
+            // kRoundScale uses the stroke radius to round rectangular corners.
+            joinScale = (strokeParams.y < 0.0) ? kRoundScale
+                                               : sign(strokeParams.y);
         }
     } else if (any(greaterThan(xRadiiOrFlags, float4(0.0)))) {
         // Filled round rect
@@ -620,7 +654,6 @@ float4 analytic_rrect_vertex_fn(// Vertex Attributes
     }
 
     // Adjust state on a per-corner basis
-    int cornerID = sk_VertexID / kCornerVertexCount;
     float2 cornerRadii = float2(xRadii[cornerID], yRadii[cornerID]);
     if (cornerID % 2 != 0) {
         // Corner radii are uploaded in the local coordinate frame, but vertex placement happens
@@ -642,6 +675,12 @@ float4 analytic_rrect_vertex_fn(// Vertex Attributes
     // the +X/+Y normalized vertex template for each corner.
     float4 dx = xs - xs.wxyz;
     float4 dy = ys - ys.wxyz;
+    // This is a specialized application of `robust_normalized_diff` for a quad, with an extra
+    // max against 1.0 to not scale small edges. This is to avoid overflows for extremely large
+    // coordinates when squaring dx or dy.
+    float4 invMag = 1.0 / max(abs(dx), max(abs(dy), float4(1.0)));
+    dx *= invMag;
+    dy *= invMag;
     float4 edgeSquaredLen = dx*dx + dy*dy;
 
     float4 edgeMask = sign(edgeSquaredLen); // 0 for zero-length edge, 1 for non-zero edge.
@@ -670,7 +709,8 @@ float4 analytic_rrect_vertex_fn(// Vertex Attributes
                 // Don't outset by stroke radius for butt caps on the zero-length edge, but
                 // adjust edgeBias and strokeParams to calculate an AA miter'ed shape with the
                 // non-uniform stroke outset.
-                strokeRadius *= float2(edgeMask[cornerID], edgeMask.yzwx[cornerID]);
+
+                strokeRadius *= float2(edgeMask[cornerID], edgeMask[nextID]);
                 edgeBias = (edgeMask - 1.0) * strokeParams.x;
                 strokeParams.y = 1.0;
                 joinScale = kMiterScale;
@@ -683,8 +723,8 @@ float4 analytic_rrect_vertex_fn(// Vertex Attributes
     dy *= inverseEdgeLen;
 
     // Calculate local coordinate for the vertex (relative to xAxis and yAxis at first).
-    float2 xAxis = -float2(dx.yzwx[cornerID], dy.yzwx[cornerID]);
-    float2 yAxis =  float2(dx.xyzw[cornerID], dy.xyzw[cornerID]);
+    float2 xAxis = -float2(dx[nextID], dy[nextID]);
+    float2 yAxis =  float2(dx[cornerID], dy[cornerID]);
     float2 localPos;
     bool snapToCenter = false;
     if (normalScale < 0.0) {
@@ -770,11 +810,11 @@ float4 analytic_rrect_vertex_fn(// Vertex Attributes
         // because it accounts for the position's influence on a line's projected direction.
         float2x2 J = float2x2(jacobian);
 
-        float2 edgeAANormal = float2(edgeAA[cornerID], edgeAA.yzwx[cornerID]) * normal;
+        float2 edgeAANormal = float2(edgeAA[cornerID], edgeAA[nextID]) * normal;
         float2 nx = cornerAspectRatio.x * edgeAANormal.x * perp(-yAxis) * J;
         float2 ny = cornerAspectRatio.y * edgeAANormal.y * perp( xAxis) * J;
 
-        bool isMidVertex = edgeAANormal.x != 0.0 && edgeAANormal.y != 0.0;
+        bool isMidVertex = all(notEqual(edgeAANormal, float2(0)));
         if (joinScale == kMiterScale && isMidVertex) {
             // Produce a bisecting vector in device space.
             nx = normalize(nx);
@@ -837,6 +877,7 @@ float4 analytic_rrect_vertex_fn(// Vertex Attributes
 }
 
 float4 per_edge_aa_quad_vertex_fn(// Vertex Attributes
+                                  uint cornerID,
                                   float2 normal,
                                   // Instance Attributes
                                   float4 edgeAA,
@@ -848,16 +889,23 @@ float4 per_edge_aa_quad_vertex_fn(// Vertex Attributes
                                   out float4 edgeDistances,
                                   // Render Step
                                   out float2 stepLocalCoords) {
-    const int kCornerVertexCount = 4; // KEEP IN SYNC WITH C++'s
-                                      // PerEdgeAAQuadRenderStep::kCornerVertexCount
-
     const float kEpsilon = 0.00024; // SK_ScalarNearlyZero
+
+    // Calculate a rotated cornerID value to use for indexing within vectors that would normally
+    // require ".yzwx" swizzling (see similar note in analytic_rrect_vertex_fn for explanation).
+    uint nextID = (cornerID + 1) % 4;
 
     // Calculate the local edge vectors, ordered L, T, R, B starting from the bottom left point.
     // For quadrilaterals these are not necessarily axis-aligned, but in all cases they orient
     // the +X/+Y normalized vertex template for each corner.
     float4 dx = xs - xs.wxyz;
     float4 dy = ys - ys.wxyz;
+    // This is a specialized application of `robust_normalized_diff` for a quad, with an extra
+    // max against 1.0 to not scale small edges. This is to avoid overflows for extremely large
+    // coordinates when squaring dx or dy.
+    float4 invMag = 1.0 / max(abs(dx), max(abs(dy), float4(1.0)));
+    dx *= invMag;
+    dy *= invMag;
     float4 edgeSquaredLen = dx*dx + dy*dy;
 
     float4 edgeMask = sign(edgeSquaredLen); // 0 for zero-length edge, 1 for non-zero edge.
@@ -887,9 +935,8 @@ float4 per_edge_aa_quad_vertex_fn(// Vertex Attributes
     dy *= inverseEdgeLen;
 
     // Calculate local coordinate for the vertex (relative to xAxis and yAxis at first).
-    int cornerID = sk_VertexID / kCornerVertexCount;
-    float2 xAxis = -float2(dx.yzwx[cornerID], dy.yzwx[cornerID]);
-    float2 yAxis =  float2(dx.xyzw[cornerID], dy.xyzw[cornerID]);
+    float2 xAxis = -float2(dx[nextID], dy[nextID]);
+    float2 yAxis =  float2(dx[cornerID], dy[cornerID]);
 
     // Vertex is outset from the base shape (and possibly with an additional AA outset later
     // in device space).
@@ -929,11 +976,11 @@ float4 per_edge_aa_quad_vertex_fn(// Vertex Attributes
         float2x2 J = float2x2(deviceToLocal[0].xy - deviceToLocal[0].z*localPos,
                               deviceToLocal[1].xy - deviceToLocal[1].z*localPos);
 
-        float2 edgeAANormal = float2(edgeAA[cornerID], edgeAA.yzwx[cornerID]) * normal;
+        float2 edgeAANormal = float2(edgeAA[cornerID], edgeAA[nextID]) * normal;
         float2 nx = edgeAANormal.x * perp(-yAxis) * J;
         float2 ny = edgeAANormal.y * perp( xAxis) * J;
 
-        bool isMidVertex = edgeAANormal.x != 0.0 && edgeAANormal.y != 0.0;
+        bool isMidVertex = all(notEqual(edgeAANormal, float2(0)));
         if (isMidVertex) {
             // Produce a bisecting vector in device space.
             nx = normalize(nx);
@@ -967,6 +1014,80 @@ float4 per_edge_aa_quad_vertex_fn(// Vertex Attributes
     // Write out final results
     stepLocalCoords = localPos;
     return float4(devPos.xy, devPos.z*depth, devPos.z);
+}
+
+float4 circular_arc_vertex_fn(float3 position,
+                              // Instance Attributes
+                              float4 centerScales,
+                              float3 radiiAndFlags,
+                              float3 geoClipPlane,
+                              float3 fragClipPlane0,
+                              float3 fragClipPlane1,
+                              float4 inRoundCapPos,
+                              float inRoundCapRadius,
+                              float depth,
+                              float3x3 localToDevice,
+                              // Varyings
+                              out float4 circleEdge,
+                              out float3 clipPlane,
+                              out float3 isectPlane,
+                              out float3 unionPlane,
+                              out float  roundCapRadius,
+                              out float4 roundCapPos,
+                              // Render Step
+                              out float2 stepLocalCoords) {
+    // TODO: clip offset against clip planes
+    float2 localCenter = centerScales.xy;
+    float2 localPos = localCenter;
+    // do geometric clip in normalized space
+    float dist = min(dot(position.xy, geoClipPlane.xy) + geoClipPlane.z, 0);
+    position.xy -= geoClipPlane.xy * dist;
+    // Get the new length to use below for scaling the offset
+    // (origLength is the initial length of position.xy).
+    float offsetScale = length(position.xy);
+
+    // scale and translate to local space
+    if (position.z > 0) {
+        localPos += position.xy * centerScales.z;
+    } else {
+        localPos += position.xy * centerScales.w;
+    }
+
+    float3 devPos = localToDevice * localPos.xy1;
+    float3 devCenter = localToDevice * localCenter.xy1;
+    float2 offset = devPos.xy - devCenter.xy;
+    // offset for AA and correct length of offset
+    if (offset != float2(0)) {
+        offset = normalize(offset);
+        devPos.xy += position.z*offset;
+        if (position.z > 0) {
+            // Scale using distance from center of unit octagon to the vertex
+            // Because of geometry clipping we need to scale by 1.0823922*newLength/origLength
+            // But the original length is 1.0823922 so the offsetScale is just newLength
+            offset *= offsetScale;
+        } else {
+            // Because of geometry clipping we need to scale by innerRadius*newLength/origLength
+            // But the original length is 1 so this is just innerRadius*newLength
+            offset *= offsetScale*radiiAndFlags.y;
+        }
+    }
+
+    circleEdge = float4(offset, radiiAndFlags.xy);
+    if (radiiAndFlags.z > 0) {
+        clipPlane = fragClipPlane0;
+        isectPlane = fragClipPlane1;
+        unionPlane = float3(0, 0, 0);
+    } else {
+        clipPlane = fragClipPlane0;
+        isectPlane = float3(0, 0, 1);
+        unionPlane = fragClipPlane1;
+    }
+    roundCapRadius = inRoundCapRadius;
+    roundCapPos = inRoundCapPos;
+    stepLocalCoords = localPos;
+
+    // We assume no perspective
+    return float4(devPos.xy, depth, 1);
 }
 
 float4 text_vertex_fn(float2 baseCoords,
@@ -1066,10 +1187,19 @@ float4 cover_bounds_vertex_fn(float2 corner,
     } else {
         // An inverse fill
         corner = mix(bounds.RB, bounds.LT, corner);
-        // TODO: Support float3 local coordinates if the matrix has perspective so that W is
-        // interpolated correctly to the fragment shader.
-        float3 localCoords = matrix * corner.xy1;
-        stepLocalCoords = localCoords.xy / localCoords.z;
-        return float4(corner, depth, 1.0);
+        // TODO(b/351923375): Get the 3x3 inverse  of the local-to-device transform from the CPU
+        // if it can be computed fast enough on the CPU from the cached 4x4 inverse.
+        float3 localCoords = inverse(matrix) * corner.xy1;
+        // Dividing the inverse mapped local coords by its homogenous coordinate reconstructs the
+        // original local coords.
+        float invW = 1.0 / localCoords.z;
+        stepLocalCoords = localCoords.xy * invW;
+
+        // 1/W also happens to be equal to (matrix*stepLocalCoords.xy1).z, which is the device-space
+        // homogenous coordinate we want perspective interpolation to respect. We multiply the
+        // output position by 1/W and set the output position's homogenous coord to that same 1/W
+        // which ensures the projected vertices are still the device-space corners, but
+        // stepLocalCoords will be correctly perspective interpolated by HW.
+        return float4(corner*invW, depth*invW, invW);
     }
 }

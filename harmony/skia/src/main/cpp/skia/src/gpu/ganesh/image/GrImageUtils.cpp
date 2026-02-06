@@ -13,20 +13,18 @@
 #include "include/core/SkImage.h"
 #include "include/core/SkImageInfo.h"
 #include "include/core/SkPixmap.h"
-#include "include/core/SkPoint.h"
 #include "include/core/SkRect.h"
 #include "include/core/SkSamplingOptions.h"
-#include "include/core/SkScalar.h"
 #include "include/core/SkSize.h"
 #include "include/core/SkSurface.h"
 #include "include/core/SkTypes.h"
 #include "include/core/SkYUVAInfo.h"
 #include "include/core/SkYUVAPixmaps.h"
 #include "include/gpu/GpuTypes.h"
-#include "include/gpu/GrBackendSurface.h"
-#include "include/gpu/GrContextOptions.h"
-#include "include/gpu/GrRecordingContext.h"
-#include "include/gpu/GrTypes.h"
+#include "include/gpu/ganesh/GrBackendSurface.h"
+#include "include/gpu/ganesh/GrContextOptions.h"
+#include "include/gpu/ganesh/GrRecordingContext.h"
+#include "include/gpu/ganesh/GrTypes.h"
 #include "include/gpu/ganesh/SkSurfaceGanesh.h"
 #include "include/private/SkIDChangeListener.h"
 #include "include/private/base/SkMutex.h"
@@ -38,12 +36,10 @@
 #include "src/core/SkImageFilterCache.h"
 #include "src/core/SkImageFilterTypes.h"
 #include "src/core/SkSamplingPriv.h"
-#include "src/core/SkSpecialImage.h"
 #include "src/gpu/ResourceKey.h"
 #include "src/gpu/SkBackingFit.h"
 #include "src/gpu/Swizzle.h"
 #include "src/gpu/ganesh/Device.h"
-#include "src/gpu/ganesh/GrBlurUtils.h"
 #include "src/gpu/ganesh/GrCaps.h"
 #include "src/gpu/ganesh/GrColorSpaceXform.h"
 #include "src/gpu/ganesh/GrFragmentProcessor.h"
@@ -78,6 +74,8 @@ class SkDevice;
 class SkMatrix;
 class SkSurfaceProps;
 enum SkColorType : int;
+
+class SkSpecialImage;
 
 namespace skgpu::ganesh {
 
@@ -280,19 +278,6 @@ GrSurfaceProxyView LockTextureProxyView(GrRecordingContext* rContext,
                                         const SkImage_Lazy* img,
                                         GrImageTexGenPolicy texGenPolicy,
                                         skgpu::Mipmapped mipmapped) {
-    // Values representing the various texture lock paths we can take. Used for logging the path
-    // taken to a histogram.
-    enum LockTexturePath {
-        kFailure_LockTexturePath,
-        kPreExisting_LockTexturePath,
-        kNative_LockTexturePath,
-        kCompressed_LockTexturePath, // Deprecated
-        kYUV_LockTexturePath,
-        kRGBA_LockTexturePath,
-    };
-
-    enum { kLockTexturePathCount = kRGBA_LockTexturePath + 1 };
-
     skgpu::UniqueKey key;
     if (texGenPolicy == GrImageTexGenPolicy::kDraw) {
         GrMakeKeyFromImageID(&key, img->uniqueID(), SkIRect::MakeSize(img->dimensions()));
@@ -330,7 +315,7 @@ GrSurfaceProxyView LockTextureProxyView(GrRecordingContext* rContext,
                 if (!mippedView) {
                     // We failed to make a mipped proxy with the base copied into it. This could
                     // have been from failure to make the proxy or failure to do the copy. Thus we
-                    // will fall back to just using the non mipped proxy; See skbug.com/7094.
+                    // will fall back to just using the non mipped proxy; See skbug.com/40038328.
                     return view;
                 }
                 proxyProvider->removeUniqueKeyFromProxy(view.asTextureProxy());
@@ -350,6 +335,9 @@ GrSurfaceProxyView LockTextureProxyView(GrRecordingContext* rContext,
                 installKey(view);
                 return view;
             }
+            // The fallback for this would be to generate a bitmap, but some picture-backed
+            // images can only be played back on the GPU.
+            return {};
         } else if (img->generator()->isTextureGenerator()) {
             auto sharedGenerator = img->generator();
             SkAutoMutexExclusive mutex(sharedGenerator->fMutex);
@@ -532,13 +520,17 @@ std::unique_ptr<GrFragmentProcessor> raster_as_fp(GrRecordingContext* rContext,
                              domain);
 }
 
-std::unique_ptr<GrFragmentProcessor> AsFragmentProcessor(GrRecordingContext* rContext,
+std::unique_ptr<GrFragmentProcessor> AsFragmentProcessor(SurfaceDrawContext* sdc,
                                                          const SkImage* img,
                                                          SkSamplingOptions sampling,
                                                          const SkTileMode tileModes[2],
                                                          const SkMatrix& m,
                                                          const SkRect* subset,
                                                          const SkRect* domain) {
+    if (!sdc) {
+        return {};
+    }
+    GrRecordingContext* rContext = sdc->recordingContext();
     if (!rContext) {
         return {};
     }
@@ -561,7 +553,7 @@ std::unique_ptr<GrFragmentProcessor> AsFragmentProcessor(GrRecordingContext* rCo
                             domain);
     } else if (ib->isGaneshBacked()) {
         auto gb = static_cast<const SkImage_GaneshBase*>(img);
-        return gb->asFragmentProcessor(rContext, sampling, tileModes, m, subset, domain);
+        return gb->asFragmentProcessor(sdc, sampling, tileModes, m, subset, domain);
     } else if (ib->isLazyGenerated()) {
         // TODO: If the CPU data is extracted as planes return a FP that reconstructs the image from
         // the planes.
@@ -729,7 +721,10 @@ namespace skif {
 
 namespace {
 
-class GaneshBackend : public Backend, private SkBlurEngine, private SkBlurEngine::Algorithm {
+class GaneshBackend :
+        public Backend,
+        private SkShaderBlurAlgorithm,
+        private SkBlurEngine {
 public:
 
     GaneshBackend(sk_sp<GrRecordingContext> context,
@@ -799,48 +794,17 @@ public:
         return this;
     }
 
-    // SkBlurEngine::Algorithm
-    float maxSigma() const override {
-        // GrBlurUtils handles resizing at the moment
-        return SK_ScalarInfinity;
-    }
-
-    bool supportsOnlyDecalTiling() const override { return false; }
-
-    sk_sp<SkSpecialImage> blur(SkSize sigma,
-                               sk_sp<SkSpecialImage> input,
-                               const SkIRect& srcRect,
-                               SkTileMode tileMode,
-                               const SkIRect& dstRect) const override {
-        GrSurfaceProxyView inputView = SkSpecialImages::AsView(fContext.get(), input);
-        if (!inputView.proxy()) {
-            return nullptr;
-        }
-        SkASSERT(inputView.asTextureProxy());
-
-        // Update srcRect and dstRect to be relative to the underlying texture proxy of 'input'.
-        auto proxyOffset = input->subset().topLeft() - srcRect.topLeft();
-        auto sdc = GrBlurUtils::GaussianBlur(
-                fContext.get(),
-                std::move(inputView),
-                SkColorTypeToGrColorType(input->colorType()),
-                input->alphaType(),
-                sk_ref_sp(input->getColorSpace()),
-                dstRect.makeOffset(proxyOffset),
-                srcRect.makeOffset(proxyOffset),
-                sigma.width(),
-                sigma.height(),
-                tileMode);
-        if (!sdc) {
-            return nullptr;
-        }
-
-        return SkSpecialImages::MakeDeferredFromGpu(fContext.get(),
-                                                    SkIRect::MakeSize(dstRect.size()),
-                                                    kNeedNewImageUniqueID_SpecialImage,
-                                                    sdc->readSurfaceView(),
-                                                    sdc->colorInfo(),
-                                                    this->surfaceProps());
+    // SkShaderBlurAlgorithm
+    sk_sp<SkDevice> makeDevice(const SkImageInfo& imageInfo) const override {
+        return fContext->priv().createDevice(skgpu::Budgeted::kYes,
+                                             imageInfo,
+                                             SkBackingFit::kApprox,
+                                             1,
+                                             skgpu::Mipmapped::kNo,
+                                             GrProtected::kNo,
+                                             fOrigin,
+                                             this->surfaceProps(),
+                                             skgpu::ganesh::Device::InitContents::kUninit);
     }
 
 private:

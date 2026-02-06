@@ -10,36 +10,20 @@
 
 #include "src/gpu/graphite/Resource.h"
 
+#include "include/gpu/vk/VulkanTypes.h"
 #include "include/private/base/SkTArray.h"
-#include "src/gpu/graphite/AttachmentTypes.h"
-#include "src/gpu/graphite/vk/VulkanCommandBuffer.h"
+#include "src/gpu/graphite/RenderPassDesc.h"
 
 namespace skgpu::graphite {
 
 class VulkanCommandBuffer;
 class VulkanSharedContext;
 
-const static VkAttachmentStoreOp vkStoreOp[] {
-    VK_ATTACHMENT_STORE_OP_STORE,
-    VK_ATTACHMENT_STORE_OP_DONT_CARE
-};
-const static VkAttachmentLoadOp vkLoadOp[] {
-    VK_ATTACHMENT_LOAD_OP_LOAD,
-    VK_ATTACHMENT_LOAD_OP_CLEAR,
-    VK_ATTACHMENT_LOAD_OP_DONT_CARE
-};
-
 /**
  * Wrapper around VkRenderPass.
 */
 class VulkanRenderPass : public Resource {
 public:
-    // Methods to create compatible (needed when creating a framebuffer and graphics pipeline) or
-    // full (needed when beginning a render pass from the command buffer) render passes and keys.
-    static GraphiteResourceKey MakeRenderPassKey(const RenderPassDesc&, bool compatibleOnly);
-    static sk_sp<VulkanRenderPass> MakeRenderPass(
-            const VulkanSharedContext*, const RenderPassDesc&, bool compatibleOnly);
-
     VkRenderPass renderPass() const {
         SkASSERT(fRenderPass != VK_NULL_HANDLE);
         return fRenderPass;
@@ -48,6 +32,21 @@ public:
     VkExtent2D granularity() { return fGranularity; }
 
     const char* getResourceType() const override { return "Vulkan RenderPass"; }
+
+    // The relevant information in RenderPassDesc to identify a VkRenderPass fits in one uint32. If
+    // compatibleForPipelineKey, the load/store ops do not contribute to the key (with the exception
+    // of load-from-resolve info if necessary).
+    static uint32_t GetRenderPassKey(const RenderPassDesc& renderPassDesc,
+                                     bool compatibleForPipelineKey);
+    // A way back from the render pass key to RenderPassDesc. The write swizzle and dst read
+    // strategy is not part of the key as calculated by GetRenderPassKey and so must be passed in to
+    // reconstruct RenderPassDesc fully.
+    static void ExtractRenderPassDesc(uint32_t key,
+                                      Swizzle writeSwizzle,
+                                      DstReadStrategy dstReadStrategy,
+                                      RenderPassDesc* renderPassDesc);
+
+    static sk_sp<VulkanRenderPass> Make(const VulkanSharedContext*, const RenderPassDesc&);
 
 private:
     void freeGpuData() override;

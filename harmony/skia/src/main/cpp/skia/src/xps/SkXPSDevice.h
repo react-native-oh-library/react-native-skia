@@ -15,6 +15,7 @@
 #include <ObjBase.h>
 #include <XpsObjectModel.h>
 
+#include "include/core/SkCPURecorder.h"
 #include "include/core/SkCanvas.h"
 #include "include/core/SkColor.h"
 #include "include/core/SkPaint.h"
@@ -39,7 +40,7 @@ class GlyphRunList;
 
     The drawing context for the XPS backend.
 */
-class SkXPSDevice : public SkClipStackDevice {
+class SkXPSDevice final : public SkClipStackDevice {
 public:
     SK_SPI SkXPSDevice(SkISize);
     SK_SPI ~SkXPSDevice() override;
@@ -77,8 +78,7 @@ public:
     bool endPortfolio();
 
     void drawPaint(const SkPaint& paint) override;
-    void drawPoints(SkCanvas::PointMode mode, size_t count,
-                    const SkPoint[], const SkPaint& paint) override;
+    void drawPoints(SkCanvas::PointMode, SkSpan<const SkPoint>, const SkPaint&) override;
     void drawRect(const SkRect& r,
                   const SkPaint& paint) override;
     void drawOval(const SkRect& oval,
@@ -100,6 +100,11 @@ public:
 
     sk_sp<SkDevice> createDevice(const CreateInfo&, const SkPaint*) override;
 
+    SkRecorder* baseRecorder() const override {
+        // TODO(kjlubick) the creation of this should likely involve a CPU context.
+        return skcpu::Recorder::TODO();
+    }
+
 private:
     class TypefaceUse {
     public:
@@ -115,8 +120,7 @@ private:
     };
     friend HRESULT subset_typeface(const TypefaceUse& current);
 
-    void onDrawGlyphRunList(
-            SkCanvas*, const sktext::GlyphRunList&, const SkPaint&, const SkPaint&) override;
+    void onDrawGlyphRunList(SkCanvas*, const sktext::GlyphRunList&, const SkPaint&) override;
 
     bool createCanvasForLayer();
 
@@ -166,7 +170,7 @@ private:
         const SkMatrix* parentTransform = nullptr);
 
     HRESULT createXpsSolidColorBrush(
-        const SkColor skColor, const SkAlpha alpha,
+        const SkColor4f skColor, const SkAlpha alpha,
         IXpsOMBrush** xpsBrush);
 
     HRESULT createXpsImageBrush(
@@ -191,7 +195,7 @@ private:
         IXpsOMBrush** xpsBrush);
 
     HRESULT createXpsGradientStop(
-        const SkColor skColor,
+        const SkColor4f skColor,
         const SkScalar offset,
         IXpsOMGradientStop** xpsGradStop);
 
@@ -242,7 +246,7 @@ private:
 
     HRESULT cornerOfClamp(
         const SkRect& tlPoints,
-        const SkColor color,
+        const SkColor4f color,
         IXpsOMVisualCollection* visuals);
 
     HRESULT clip(IXpsOMVisual* xpsVisual);

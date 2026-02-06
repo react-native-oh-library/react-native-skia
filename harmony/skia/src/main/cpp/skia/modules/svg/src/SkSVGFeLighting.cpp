@@ -5,14 +5,18 @@
  * found in the LICENSE file.
  */
 
+#include "modules/svg/include/SkSVGFeLighting.h"
+
+#include "include/core/SkImageFilter.h"
+#include "include/core/SkM44.h"
 #include "include/core/SkPoint3.h"
 #include "include/effects/SkImageFilters.h"
+#include "include/private/base/SkDebug.h"
+#include "include/private/base/SkTArray.h"
 #include "modules/svg/include/SkSVGAttributeParser.h"
 #include "modules/svg/include/SkSVGFeLightSource.h"
-#include "modules/svg/include/SkSVGFeLighting.h"
 #include "modules/svg/include/SkSVGFilterContext.h"
 #include "modules/svg/include/SkSVGRenderContext.h"
-#include "modules/svg/include/SkSVGValue.h"
 
 bool SkSVGFeLighting::parseAndSetAttribute(const char* n, const char* v) {
     return INHERITED::parseAndSetAttribute(n, v) ||
@@ -54,7 +58,7 @@ sk_sp<SkImageFilter> SkSVGFeLighting::onMakeImageFilter(const SkSVGRenderContext
         }
     }
 
-    SkDebugf("lighting filter effect needs exactly one light source\n");
+    SkDEBUGF("lighting filter effect needs exactly one light source\n");
     return nullptr;
 }
 
@@ -62,7 +66,7 @@ SkColor SkSVGFeLighting::resolveLightingColor(const SkSVGRenderContext& ctx) con
     const auto color = this->getLightingColor();
     if (!color.isValue()) {
         // Uninherited presentation attributes should have a concrete value by now.
-        SkDebugf("unhandled: lighting-color has no value\n");
+        SkDEBUGF("unhandled: lighting-color has no value\n");
         return SK_ColorWHITE;
     }
 
@@ -122,7 +126,7 @@ sk_sp<SkImageFilter> SkSVGFeSpecularLighting::makeSpotLight(const SkSVGRenderCon
                                                             const SkSVGFilterContext& fctx,
                                                             const SkSVGFeSpotLight* light) const {
     const auto& limitingConeAngle = light->getLimitingConeAngle();
-    const float cutoffAngle = limitingConeAngle.isValid() ? *limitingConeAngle : 180.f;
+    const float cutoffAngle = limitingConeAngle.value_or(180.f);
 
     return SkImageFilters::SpotLitSpecular(
             this->resolveXYZ(ctx, fctx, light->getX(), light->getY(), light->getZ()),
@@ -174,7 +178,7 @@ sk_sp<SkImageFilter> SkSVGFeDiffuseLighting::makeSpotLight(const SkSVGRenderCont
                                                            const SkSVGFilterContext& fctx,
                                                            const SkSVGFeSpotLight* light) const {
     const auto& limitingConeAngle = light->getLimitingConeAngle();
-    const float cutoffAngle = limitingConeAngle.isValid() ? *limitingConeAngle : 180.f;
+    const float cutoffAngle = limitingConeAngle.value_or(180.f);
 
     return SkImageFilters::SpotLitDiffuse(
             this->resolveXYZ(ctx, fctx, light->getX(), light->getY(), light->getZ()),

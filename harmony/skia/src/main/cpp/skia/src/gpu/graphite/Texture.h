@@ -13,6 +13,8 @@
 #include "src/gpu/graphite/Resource.h"
 #include "src/gpu/graphite/ResourceTypes.h"
 
+class SkColorInfo;
+
 namespace skgpu {
 class MutableTextureState;
 class RefCntedCallback;
@@ -20,6 +22,8 @@ enum class Budgeted : bool;
 };
 
 namespace skgpu::graphite {
+
+class UploadSource;
 
 class Texture : public Resource {
 public:
@@ -35,21 +39,28 @@ public:
 
     const char* getResourceType() const override { return "Texture"; }
 
-#if defined(GRAPHITE_TEST_UTILS)
     const Texture* asTexture() const override { return this; }
-#endif
+
+    virtual bool canUploadOnHost(const UploadSource&) const { return false; }
+
+    // With the assumption that source.canUploadOnHost() is true, attempts to write to the
+    // texture on the host directly. Returns `false` only if driver calls fail.
+    virtual bool uploadDataOnHost(const UploadSource& source, const SkIRect& dstRect);
 
 protected:
     Texture(const SharedContext*,
             SkISize dimensions,
             const TextureInfo& info,
+            bool isTransient,
             sk_sp<MutableTextureState> mutableState,
-            Ownership,
-            skgpu::Budgeted);
+            Ownership);
 
     MutableTextureState* mutableState() const;
 
     void invokeReleaseProc() override;
+
+    void onDumpMemoryStatistics(SkTraceMemoryDump* traceMemoryDump,
+                                const char* dumpName) const override;
 
 private:
     SkISize fDimensions;
@@ -58,6 +69,6 @@ private:
     sk_sp<RefCntedCallback> fReleaseCallback;
 };
 
-} // namepsace skgpu::graphite
+} // namespace skgpu::graphite
 
 #endif // skgpu_graphite_Texture_DEFINED

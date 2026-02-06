@@ -128,7 +128,7 @@ public:
      * \param range an array of AxisDefinition
      */
     void setAxisSet(int count, const SkFixed* axis,
-        const SkFontScanner::AxisDefinition* range)
+        const SkFontScanner::AxisDefinitions* range)
     {
         axisSet.axis.clear();
         axisSet.range.clear();
@@ -145,7 +145,7 @@ public:
         auto slant = style.slant();
         for (size_t i = 0; i < axisSet.axis.size(); i++) {
             auto value = SkFixedToScalar(axisSet.axis[i]);
-            auto tag = axisSet.range[i].fTag;
+            auto tag = axisSet.range[i].data()->tag;
             if (tag == SkSetFourByteTag('w', 'g', 'h', 't')) {
                 weight = SkScalarFloorToInt(value);
             } else if (tag == SkSetFourByteTag('w', 'd', 't', 'h')) {
@@ -165,7 +165,7 @@ public:
      */
     struct AxisSet {
         std::vector<SkFixed> axis;  // the axis values
-        std::vector<SkFontScanner::AxisDefinition> range; // the axis ranges
+        std::vector<SkFontScanner::AxisDefinitions> range; // the axis ranges
     } axisSet; // the axis values for a variable font
     std::unique_ptr<SkStreamAsset> stream; // the data stream of font file
 };

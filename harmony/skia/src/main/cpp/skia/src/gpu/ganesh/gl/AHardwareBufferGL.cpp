@@ -11,10 +11,10 @@
 #define GL_GLEXT_PROTOTYPES
 #define EGL_EGLEXT_PROTOTYPES
 
-#include "include/gpu/GrBackendSurface.h"
-#include "include/gpu/GrDirectContext.h"
+#include "include/gpu/ganesh/GrBackendSurface.h"
+#include "include/gpu/ganesh/GrDirectContext.h"
 #include "include/gpu/ganesh/gl/GrGLBackendSurface.h"
-#include "include/gpu/gl/GrGLTypes.h"
+#include "include/gpu/ganesh/gl/GrGLTypes.h"
 #include "src/gpu/ganesh/GrDirectContextPriv.h"
 #include "src/gpu/ganesh/gl/GrGLDefines.h"
 #include "src/gpu/ganesh/gl/GrGLUtil.h"
@@ -144,6 +144,16 @@ static GrBackendTexture make_gl_backend_texture(
     }
 
     GrGLuint target = isRenderable ? GR_GL_TEXTURE_2D : GR_GL_TEXTURE_EXTERNAL;
+
+    if (!dContext->priv().caps()->shaderCaps()->fExternalTextureSupport) {
+        // The extension OES_EGL_image_external is mandatory for an
+        // Android-compatible device. See
+        // https://source.android.com/docs/core/graphics/implement-opengl-es
+        //
+        // This path exists to support a RenderDoc fork which supports
+        // OES_EGL_image but not OES_EGL_image_external.
+        target = GR_GL_TEXTURE_2D;
+    }
 
     glBindTexture(target, texID);
     GLenum status = GL_NO_ERROR;

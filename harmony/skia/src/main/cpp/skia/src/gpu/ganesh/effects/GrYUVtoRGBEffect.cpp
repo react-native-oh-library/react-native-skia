@@ -77,7 +77,7 @@ std::unique_ptr<GrFragmentProcessor> GrYUVtoRGBEffect::Make(const GrYUVATextureP
         GrSurfaceProxyView view = yuvaProxies.makeView(i);
         SkMatrix planeMatrix = yuvaProxies.yuvaInfo().originMatrix();
         // The returned matrix is a view matrix but we need a local matrix.
-        SkAssertResult(planeMatrix.invert(&planeMatrix));
+        planeMatrix = planeMatrix.invert().value_or(SkMatrix());
         SkRect planeSubset;
         SkRect planeDomain;
         bool makeLinearWithSnap = false;
@@ -247,7 +247,7 @@ GrYUVtoRGBEffect::GrYUVtoRGBEffect(std::unique_ptr<GrFragmentProcessor> planeFPs
     }
 }
 
-#if defined(GR_TEST_UTILS)
+#if defined(GPU_TEST_UTILS)
 SkString GrYUVtoRGBEffect::onDumpInfo() const {
     SkString str("(");
     for (int i = 0; i < SkYUVAInfo::kYUVAChannelCount; ++i) {

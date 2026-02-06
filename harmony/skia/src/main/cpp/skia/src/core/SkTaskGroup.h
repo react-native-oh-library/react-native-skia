@@ -11,8 +11,11 @@
 #include "include/core/SkExecutor.h"
 #include "include/core/SkTypes.h"
 #include "include/private/base/SkNoncopyable.h"
+
 #include <atomic>
+#include <cstdint>
 #include <functional>
+#include <memory>
 
 class SkTaskGroup : SkNoncopyable {
 public:
@@ -22,6 +25,9 @@ public:
 
     // Add a task to this SkTaskGroup.
     void add(std::function<void(void)> fn);
+    void add(std::function<void(void)> fn, int workList);
+
+    void discardAllPendingWork();
 
     // Add a batch of N tasks, all calling fn with different arguments.
     void batch(int N, std::function<void(int)> fn);

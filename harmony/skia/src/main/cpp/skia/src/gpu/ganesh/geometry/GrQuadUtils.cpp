@@ -4,15 +4,20 @@
  * Use of this source code is governed by a BSD-style license that can be
  * found in the LICENSE file.
  */
-
 #include "src/gpu/ganesh/geometry/GrQuadUtils.h"
 
+#include "include/core/SkPoint.h"
 #include "include/core/SkRect.h"
+#include "include/core/SkScalar.h"
+#include "include/core/SkTypes.h"
+#include "include/private/base/SkFloatingPoint.h"
+#include "include/private/base/SkMacros.h"
 #include "include/private/gpu/ganesh/GrTypesPriv.h"
 #include "src/base/SkVx.h"
 #include "src/core/SkPathPriv.h"
 #include "src/gpu/ganesh/geometry/GrQuad.h"
 
+#include <algorithm>
 #include <cmath>
 
 using float4 = skvx::float4;
@@ -579,7 +584,7 @@ bool CropToRect(const SkRect& cropRect, GrAA cropAA, DrawQuad* quad, bool comput
 
     if (computeLocal || quad->fDevice.quadType() == GrQuad::Type::kPerspective) {
         // FIXME (michaelludwig) Calculate cropped local coordinates when not kAxisAligned
-        // FIXME (michaelludwig) crbug.com/1204347 and skbug.com/9906 - disable this when there's
+        // FIXME (michaelludwig) crbug.com/1204347 and skbug.com/40041027 - disable this when there's
         // perspective; it does not prove numerical robust enough in the wild and should be
         // revisited.
         return false;

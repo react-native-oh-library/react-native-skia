@@ -8,23 +8,37 @@
 #ifndef SkRemoteTypeface_DEFINED
 #define SkRemoteTypeface_DEFINED
 
+#include "include/core/SkFontArguments.h"
+#include "include/core/SkFontParameters.h"
 #include "include/core/SkFontStyle.h"
-#include "include/core/SkPaint.h"
+#include "include/core/SkRefCnt.h"
+#include "include/core/SkSpan.h"
+#include "include/core/SkString.h"
 #include "include/core/SkTypeface.h"
+#include "include/core/SkTypes.h"
 #include "include/private/chromium/SkChromeRemoteGlyphCache.h"
-#include "src/core/SkAdvancedTypefaceMetrics.h"
-#include "src/core/SkDescriptor.h"
-#include "src/core/SkFontDescriptor.h"
 #include "src/core/SkScalerContext.h"
 
+#include <cstddef>
+#include <cstdint>
+#include <memory>
+#include <optional>
+
+class SkArenaAlloc;
+class SkDescriptor;
+class SkDrawable;
+class SkFontDescriptor;
+class SkGlyph;
 class SkReadBuffer;
-class SkStrikeCache;
+class SkStreamAsset;
 class SkTypefaceProxy;
 class SkWriteBuffer;
+struct SkAdvancedTypefaceMetrics;
+struct SkFontMetrics;
 
 class SkScalerContextProxy : public SkScalerContext {
 public:
-    SkScalerContextProxy(sk_sp<SkTypeface> tf,
+    SkScalerContextProxy(SkTypeface& tf,
                          const SkScalerContextEffects& effects,
                          const SkDescriptor* desc,
                          sk_sp<SkStrikeClient::DiscardableHandleManager> manager);
@@ -32,7 +46,7 @@ public:
 protected:
     GlyphMetrics generateMetrics(const SkGlyph&, SkArenaAlloc*) override;
     void generateImage(const SkGlyph&, void*) override;
-    bool generatePath(const SkGlyph& glyph, SkPath* path) override;
+    std::optional<GeneratedPath> generatePath(const SkGlyph&) override;
     sk_sp<SkDrawable> generateDrawable(const SkGlyph&) override;
     void generateFontMetrics(SkFontMetrics* metrics) override;
     SkTypefaceProxy* getProxyTypeface() const;
@@ -104,12 +118,11 @@ protected:
     bool onGlyphMaskNeedsCurrentColor() const override {
         return fGlyphMaskNeedsCurrentColor;
     }
-    int onGetVariationDesignPosition(SkFontArguments::VariationPosition::Coordinate coordinates[],
-                                     int coordinateCount) const override {
+    int onGetVariationDesignPosition(
+                         SkSpan<SkFontArguments::VariationPosition::Coordinate>) const override {
         SK_ABORT("Should never be called.");
     }
-    int onGetVariationDesignParameters(SkFontParameters::Variation::Axis parameters[],
-                                       int parameterCount) const override {
+    int onGetVariationDesignParameters(SkSpan<SkFontParameters::Variation::Axis>) const override {
         SK_ABORT("Should never be called.");
     }
     void onGetFamilyName(SkString* familyName) const override {
@@ -122,7 +135,7 @@ protected:
     SkTypeface::LocalizedStrings* onCreateFamilyNameIterator() const override {
         SK_ABORT("Should never be called.");
     }
-    int onGetTableTags(SkFontTableTag tags[]) const override {
+    int onGetTableTags(SkSpan<SkFontTableTag>) const override {
         SK_ABORT("Should never be called.");
     }
     size_t onGetTableData(SkFontTableTag, size_t offset, size_t length, void* data) const override {
@@ -132,7 +145,7 @@ protected:
         const SkScalerContextEffects& effects, const SkDescriptor* desc) const override
     {
         return std::make_unique<SkScalerContextProxy>(
-                sk_ref_sp(const_cast<SkTypefaceProxy*>(this)), effects, desc, fDiscardableManager);
+                *const_cast<SkTypefaceProxy*>(this), effects, desc, fDiscardableManager);
     }
     void onFilterRec(SkScalerContextRec* rec) const override {
         // The rec filtering is already applied by the server when generating
@@ -141,7 +154,7 @@ protected:
     void onGetFontDescriptor(SkFontDescriptor*, bool*) const override {
         SK_ABORT("Should never be called.");
     }
-    void getGlyphToUnicodeMap(SkUnichar*) const override {
+    void getGlyphToUnicodeMap(SkSpan<SkUnichar>) const override {
         SK_ABORT("Should never be called.");
     }
 
@@ -152,7 +165,7 @@ protected:
     std::unique_ptr<SkAdvancedTypefaceMetrics> onGetAdvancedMetrics() const override {
         SK_ABORT("Should never be called.");
     }
-    void onCharsToGlyphs(const SkUnichar* chars, int count, SkGlyphID glyphs[]) const override {
+    void onCharsToGlyphs(SkSpan<const SkUnichar>, SkSpan<SkGlyphID>) const override {
         SK_ABORT("Should never be called.");
     }
     int onCountGlyphs() const override {

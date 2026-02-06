@@ -8,15 +8,24 @@
 #ifndef SkSVGAttributeParser_DEFINED
 #define SkSVGAttributeParser_DEFINED
 
-#include <vector>
-
+#include "include/core/SkColor.h"
+#include "include/core/SkScalar.h"
+#include "include/core/SkTypes.h"
 #include "include/private/base/SkNoncopyable.h"
 #include "modules/svg/include/SkSVGTypes.h"
-#include "src/base/SkTLazy.h"
+
+#include <cstdint>
+#include <cstring>
+#include <optional>
+#include <tuple>
+#include <vector>
+
+class SkMatrix;
+class SkString;
 
 class SkSVGAttributeParser : public SkNoncopyable {
 public:
-    SkSVGAttributeParser(const char[]);
+    explicit SkSVGAttributeParser(const char[]);
 
     bool parseInteger(SkSVGIntegerType*);
     bool parseViewBox(SkSVGViewBoxType*);
@@ -26,15 +35,14 @@ public:
     //      so they can be used by parse<T>():
     bool parse(SkSVGIntegerType* v) { return parseInteger(v); }
 
-    template <typename T> using ParseResult = SkTLazy<T>;
+    template <typename T> using ParseResult = std::optional<T>;
 
     template <typename T> static ParseResult<T> parse(const char* value) {
-        ParseResult<T> result;
         T parsedValue;
         if (SkSVGAttributeParser(value).parse(&parsedValue)) {
-            result.set(std::move(parsedValue));
+            return parsedValue;
         }
-        return result;
+        return {};
     }
 
     template <typename T>
@@ -57,14 +65,12 @@ public:
         }
 
         if (!strcmp(value, "inherit")) {
-            PropertyT result(SkSVGPropertyState::kInherit);
-            return ParseResult<PropertyT>(&result);
+            return PropertyT(SkSVGPropertyState::kInherit);
         }
 
         auto pr = parse<typename PropertyT::ValueT>(value);
-        if (pr.isValid()) {
-            PropertyT result(*pr);
-            return ParseResult<PropertyT>(&result);
+        if (pr.has_value()) {
+            return PropertyT(*pr);
         }
 
         return ParseResult<PropertyT>();

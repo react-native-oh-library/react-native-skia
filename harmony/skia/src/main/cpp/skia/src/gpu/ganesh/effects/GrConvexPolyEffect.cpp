@@ -10,11 +10,11 @@
 #include "include/core/SkPath.h"
 #include "include/core/SkPoint.h"
 #include "include/core/SkString.h"
-#include "include/private/SkColorData.h"
 #include "include/private/base/SkAssert.h"
 #include "include/private/base/SkFloatingPoint.h"
 #include "include/private/gpu/ganesh/GrTypesPriv.h"
 #include "src/base/SkRandom.h"
+#include "src/core/SkColorData.h"
 #include "src/core/SkPathEnums.h"
 #include "src/core/SkPathPriv.h"
 #include "src/core/SkSLTypeShared.h"
@@ -56,8 +56,6 @@ GrFPResult GrConvexPolyEffect::Make(std::unique_ptr<GrFragmentProcessor> inputFP
     }
 
     SkScalar        edges[3 * kMaxEdges];
-    SkPoint         pts[4];
-    SkPath::Verb    verb;
     SkPath::Iter    iter(path, true);
 
     // SkPath considers itself convex so long as there is a convex contour within it,
@@ -65,12 +63,13 @@ GrFPResult GrConvexPolyEffect::Make(std::unique_ptr<GrFragmentProcessor> inputFP
     // Iterate here to consume any degenerate contours and only process the points
     // on the actual convex contour.
     int n = 0;
-    while ((verb = iter.next(pts)) != SkPath::kDone_Verb) {
-        switch (verb) {
-            case SkPath::kMove_Verb:
-            case SkPath::kClose_Verb:
+    while (auto rec = iter.next()) {
+        switch (rec->fVerb) {
+            case SkPathVerb::kMove:
+            case SkPathVerb::kClose:
                 break;
-            case SkPath::kLine_Verb: {
+            case SkPathVerb::kLine: {
+                SkSpan<const SkPoint> pts = rec->fPoints;
                 if (n >= kMaxEdges) {
                     return GrFPFailure(std::move(inputFP));
                 }
@@ -123,10 +122,10 @@ std::unique_ptr<GrFragmentProcessor::ProgramImpl> GrConvexPolyEffect::onMakeProg
                                                                  cpe.fEdgeCount,
                                                                  &edgeArrayName);
             GrGLSLFPFragmentBuilder* fragBuilder = args.fFragBuilder;
-            fragBuilder->codeAppend("half alpha = 1.0;\n"
-                                    "half edge;\n");
+            fragBuilder->codeAppend("float alpha = 1.0;\n"
+                                    "float edge;\n");
             for (int i = 0; i < cpe.fEdgeCount; ++i) {
-                fragBuilder->codeAppendf("edge = dot(%s[%d], half3(sk_FragCoord.xy1));\n",
+                fragBuilder->codeAppendf("edge = dot(float3(%s[%d]), sk_FragCoord.xy1);\n",
                                          edgeArrayName, i);
                 if (GrClipEdgeTypeIsAA(cpe.fEdgeType)) {
                     fragBuilder->codeAppend("alpha *= saturate(edge);\n");
@@ -141,7 +140,7 @@ std::unique_ptr<GrFragmentProcessor::ProgramImpl> GrConvexPolyEffect::onMakeProg
 
             SkString inputSample = this->invokeChild(/*childIndex=*/0, args);
 
-            fragBuilder->codeAppendf("return %s * alpha;\n", inputSample.c_str());
+            fragBuilder->codeAppendf("return %s * half(alpha);\n", inputSample.c_str());
         }
 
     private:
@@ -206,7 +205,7 @@ bool GrConvexPolyEffect::onIsEqual(const GrFragmentProcessor& other) const {
 
 GR_DEFINE_FRAGMENT_PROCESSOR_TEST(GrConvexPolyEffect)
 
-#if defined(GR_TEST_UTILS)
+#if defined(GPU_TEST_UTILS)
 std::unique_ptr<GrFragmentProcessor> GrConvexPolyEffect::TestCreate(GrProcessorTestData* d) {
     int count = d->fRandom->nextULessThan(kMaxEdges) + 1;
     SkScalar edges[kMaxEdges * 3];

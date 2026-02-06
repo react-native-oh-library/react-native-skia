@@ -5,9 +5,9 @@
  * found in the LICENSE file.
  */
 
+#include "include/core/SkFontScanner.h"
 #include "include/core/SkRefCnt.h"
 #include "include/ports/SkFontMgr_empty.h"
-#include "src/core/SkFontScanner.h"
 #include "src/ports/SkFontMgr_custom.h"
 
 class EmptyFontLoader : public SkFontMgr_Custom::SystemFontLoader {
@@ -24,6 +24,6 @@ public:
 
 };
 
-SK_API sk_sp<SkFontMgr> SkFontMgr_New_Custom_Empty() {
+sk_sp<SkFontMgr> SkFontMgr_New_Custom_Empty() {
     return sk_make_sp<SkFontMgr_Custom>(EmptyFontLoader());
 }

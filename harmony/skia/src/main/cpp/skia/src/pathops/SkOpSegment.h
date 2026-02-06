@@ -82,7 +82,7 @@ public:
     SkOpSegment* addLine(SkPoint pts[2], SkOpContour* parent) {
         SkASSERT(pts[0] != pts[1]);
         init(pts, 1, parent, SkPath::kLine_Verb);
-        fBounds.setBounds(pts, 2);
+        fBounds.setBounds({pts, 2});
         return this;
     }
 
@@ -460,7 +460,7 @@ private:
     mutable SkScalar fDebugLastMin;  // if > 0, the last t -- next t val - base has same sign
     mutable SkScalar fDebugLastMax;
 #endif
-    SkDEBUGCODE(int fID);
+    SkDEBUGCODE(int fID;)
 };
 
 #endif

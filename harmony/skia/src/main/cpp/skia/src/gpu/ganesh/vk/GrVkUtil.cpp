@@ -7,16 +7,23 @@
 
 #include "src/gpu/ganesh/vk/GrVkUtil.h"
 
-#include "include/gpu/GrDirectContext.h"
+#include "include/gpu/ganesh/GrDirectContext.h"
 #include "src/core/SkTraceEvent.h"
-#include "src/gpu/PipelineUtils.h"
-#include "src/gpu/ganesh/GrDataUtils.h"
 #include "src/gpu/ganesh/GrDirectContextPriv.h"
+#include "src/gpu/ganesh/GrShaderCaps.h"
+#include "src/gpu/ganesh/vk/GrVkCaps.h"
 #include "src/gpu/ganesh/vk/GrVkGpu.h"
 #include "src/gpu/vk/VulkanUtilsPriv.h"
-#include "src/sksl/SkSLCompiler.h"
 #include "src/sksl/SkSLProgramKind.h"
-#include "src/sksl/SkSLProgramSettings.h"
+#include "src/sksl/codegen/SkSLNativeShader.h"
+
+#include <string.h>
+#include <cstdint>
+#include <vector>
+
+namespace skgpu {
+class ShaderErrorHandler;
+}
 
 bool GrVkFormatIsSupported(VkFormat format) {
     switch (format) {
@@ -67,7 +74,7 @@ bool GrCompileVkShaderModule(GrVkGpu* gpu,
                              VkShaderModule* shaderModule,
                              VkPipelineShaderStageCreateInfo* stageInfo,
                              const SkSL::ProgramSettings& settings,
-                             std::string* outSPIRV,
+                             SkSL::NativeShader* outSPIRV,
                              SkSL::Program::Interface* outInterface) {
     TRACE_EVENT0("skia.shaders", "CompileVkShaderModule");
     skgpu::ShaderErrorHandler* errorHandler = gpu->getContext()->priv().getShaderErrorHandler();
@@ -85,7 +92,7 @@ bool GrCompileVkShaderModule(GrVkGpu* gpu,
 }
 
 bool GrInstallVkShaderModule(GrVkGpu* gpu,
-                             const std::string& spirv,
+                             const SkSL::NativeShader& spirv,
                              VkShaderStageFlagBits stage,
                              VkShaderModule* shaderModule,
                              VkPipelineShaderStageCreateInfo* stageInfo) {
@@ -95,8 +102,8 @@ bool GrInstallVkShaderModule(GrVkGpu* gpu,
     moduleCreateInfo.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
     moduleCreateInfo.pNext = nullptr;
     moduleCreateInfo.flags = 0;
-    moduleCreateInfo.codeSize = spirv.size();
-    moduleCreateInfo.pCode = (const uint32_t*)spirv.c_str();
+    moduleCreateInfo.codeSize = spirv.fBinary.size() * sizeof(uint32_t);
+    moduleCreateInfo.pCode = spirv.fBinary.data();
 
     VkResult err;
     GR_VK_CALL_RESULT(gpu, err, CreateShaderModule(gpu->device(), &moduleCreateInfo, nullptr,
@@ -116,4 +123,3 @@ bool GrInstallVkShaderModule(GrVkGpu* gpu,
 
     return true;
 }
-

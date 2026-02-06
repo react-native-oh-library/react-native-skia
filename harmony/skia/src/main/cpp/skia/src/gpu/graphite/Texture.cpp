@@ -7,6 +7,7 @@
 
 #include "src/gpu/graphite/Texture.h"
 
+#include "include/core/SkTraceMemoryDump.h"
 #include "include/gpu/MutableTextureState.h"
 #include "src/gpu/RefCntedCallback.h"
 #include "src/gpu/graphite/Caps.h"
@@ -15,23 +16,20 @@
 
 namespace skgpu::graphite {
 
-
 Texture::Texture(const SharedContext* sharedContext,
                  SkISize dimensions,
                  const TextureInfo& info,
+                 bool isTransient,
                  sk_sp<MutableTextureState> mutableState,
-                 Ownership ownership,
-                 skgpu::Budgeted budgeted)
-        : Resource(sharedContext,
-                   ownership,
-                   budgeted,
-                   ComputeSize(dimensions, info),
-                   /*label=*/"Texture")
+                 Ownership ownership)
+        // For the initial GPU size, this assumes that a transient texture will not have any actual
+        // memory. Over a texture's lifetime this may not stay the case.
+        : Resource(sharedContext, ownership, isTransient ? 0 : ComputeSize(dimensions, info))
         , fDimensions(dimensions)
         , fInfo(info)
         , fMutableState(std::move(mutableState)) {}
 
-Texture::~Texture() {}
+Texture::~Texture() = default;
 
 void Texture::setReleaseCallback(sk_sp<RefCntedCallback> releaseCallback) {
     fReleaseCallback = std::move(releaseCallback);
@@ -45,6 +43,19 @@ void Texture::invokeReleaseProc() {
     }
 }
 
+bool Texture::uploadDataOnHost(const UploadSource& source, const SkIRect& dstRect) {
+    SkUNREACHABLE;
+    return false;
+}
+
 MutableTextureState* Texture::mutableState() const { return fMutableState.get(); }
+
+void Texture::onDumpMemoryStatistics(SkTraceMemoryDump* traceMemoryDump,
+                                     const char* dumpName) const {
+    SkString dimensionsStr;
+    dimensionsStr.printf("(%dx%d)", fDimensions.width(), fDimensions.height());
+    traceMemoryDump->dumpStringValue(dumpName, "dimensions", dimensionsStr.c_str());
+    traceMemoryDump->dumpStringValue(dumpName, "textureInfo", fInfo.toString().c_str());
+}
 
 } // namespace skgpu::graphite

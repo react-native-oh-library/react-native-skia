@@ -13,10 +13,10 @@
 #include "include/core/SkRect.h"
 #include "include/core/SkRefCnt.h"
 #include "include/core/SkString.h"
-#include "include/private/SkColorData.h"
 #include "include/private/base/SkAssert.h"
 #include "include/private/base/SkPoint_impl.h"
 #include "include/private/gpu/ganesh/GrTypesPriv.h"
+#include "src/core/SkColorData.h"
 #include "src/gpu/AtlasTypes.h"
 #include "src/gpu/ganesh/GrAppliedClip.h"
 #include "src/gpu/ganesh/GrBuffer.h"
@@ -30,8 +30,10 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <tuple>
 #include <utility>
 
+class GrClip;
 class GrDstProxyView;
 class GrGeometryProcessor;
 class GrMeshDrawTarget;
@@ -42,19 +44,26 @@ class GrRecordingContext;
 class GrSurfaceProxy;
 class GrSurfaceProxyView;
 class SkArenaAlloc;
-class SkFont;
 class SkPaint;
 enum class GrXferBarrierFlags;
 struct GrShaderCaps;
 
+namespace skgpu { namespace ganesh { class SurfaceDrawContext; } }
 namespace sktext { namespace gpu { class AtlasSubRun; } }
 
 namespace skgpu::ganesh {
-class SurfaceDrawContext;
 
 class AtlasTextOp final : public GrMeshDrawOp {
 public:
     DEFINE_OP_CLASS_ID
+
+    static std::tuple<const GrClip*, GrOp::Owner> Make(SurfaceDrawContext*,
+                                                       const sktext::gpu::AtlasSubRun*,
+                                                       const GrClip*,
+                                                       const SkMatrix& viewMatrix,
+                                                       SkPoint drawOrigin,
+                                                       const SkPaint&,
+                                                       sk_sp<SkRefCnt>&& subRunStorage);
 
     ~AtlasTextOp() override {
         for (const Geometry* g = fHead; g != nullptr;) {
@@ -129,24 +138,13 @@ public:
         kAliasedDistanceField,
         kGrayscaleDistanceField,
         kLCDDistanceField,
-        kLCDBGRDistanceField,
 
-        kLast = kLCDBGRDistanceField
+        kLast = kLCDDistanceField
 #else
         kLast = kColorBitmap
 #endif
     };
     inline static constexpr int kMaskTypeCount = static_cast<int>(MaskType::kLast) + 1;
-
-#if defined(GR_TEST_UTILS)
-    static GrOp::Owner CreateOpTestingOnly(skgpu::ganesh::SurfaceDrawContext*,
-                                           const SkPaint&,
-                                           const SkFont&,
-                                           const SkMatrix&,
-                                           const char* text,
-                                           int x,
-                                           int y);
-#endif
 
 private:
     friend class GrOp; // for ctor
@@ -161,6 +159,7 @@ private:
         int fNumDraws = 0;
     };
 
+    // DirectMask and TransformedMask constructor
     AtlasTextOp(MaskType maskType,
                 bool needsTransform,
                 int glyphCount,
@@ -169,6 +168,7 @@ private:
                 const GrColorInfo& dstColorInfo,
                 GrPaint&& paint);
 
+    // SDF constructor
     AtlasTextOp(MaskType maskType,
                 bool needsTransform,
                 int glyphCount,
@@ -217,7 +217,7 @@ private:
     void onPrepareDraws(GrMeshDrawTarget*) override;
     void onExecute(GrOpFlushState*, const SkRect& chainBounds) override;
 
-#if defined(GR_TEST_UTILS)
+#if defined(GPU_TEST_UTILS)
     SkString onDumpInfo() const override;
 #endif
 
@@ -232,7 +232,6 @@ private:
             case MaskType::kAliasedDistanceField:
             case MaskType::kGrayscaleDistanceField:
             case MaskType::kLCDDistanceField:
-            case MaskType::kLCDBGRDistanceField:
 #endif
                 return skgpu::MaskFormat::kA8;
         }
@@ -244,14 +243,12 @@ private:
     bool usesDistanceFields() const {
         return MaskType::kAliasedDistanceField == this->maskType() ||
                MaskType::kGrayscaleDistanceField == this->maskType() ||
-               MaskType::kLCDDistanceField == this->maskType() ||
-               MaskType::kLCDBGRDistanceField == this->maskType();
+               MaskType::kLCDDistanceField == this->maskType();
     }
 
     bool isLCD() const {
         return MaskType::kLCDCoverage == this->maskType() ||
-               MaskType::kLCDDistanceField == this->maskType() ||
-               MaskType::kLCDBGRDistanceField == this->maskType();
+               MaskType::kLCDDistanceField == this->maskType();
     }
 #else
     bool isLCD() const {

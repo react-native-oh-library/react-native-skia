@@ -5,11 +5,16 @@
  * found in the LICENSE file.
  */
 
-#include "include/core/SkCanvas.h"
 #include "modules/svg/include/SkSVGPoly.h"
+
+#include "include/core/SkCanvas.h"
+#include "include/core/SkPathTypes.h"
+#include "include/core/SkPoint.h"
+#include "modules/svg/include/SkSVGAttribute.h"
+#include "modules/svg/include/SkSVGAttributeParser.h"
 #include "modules/svg/include/SkSVGRenderContext.h"
-#include "modules/svg/include/SkSVGValue.h"
-#include "src/base/SkTLazy.h"
+
+class SkPaint;
 
 SkSVGPoly::SkSVGPoly(SkSVGTag t) : INHERITED(t) {}
 
@@ -20,9 +25,8 @@ bool SkSVGPoly::parseAndSetAttribute(const char* n, const char* v) {
 
     if (this->setPoints(SkSVGAttributeParser::parse<SkSVGPointsType>("points", n, v))) {
         // TODO: we can likely just keep the points array and create the SkPath when needed.
-        fPath = SkPath::Polygon(
-                fPoints.data(), fPoints.size(),
-                this->tag() == SkSVGTag::kPolygon);  // only polygons are auto-closed
+        // only polygons are auto-closed
+        fPath = SkPath::Polygon(fPoints, this->tag() == SkSVGTag::kPolygon);
     }
 
     // No other attributes on this node
@@ -42,10 +46,9 @@ SkPath SkSVGPoly::onAsPath(const SkSVGRenderContext& ctx) const {
     // clip-rule can be inherited and needs to be applied at clip time.
     path.setFillType(ctx.presentationContext().fInherited.fClipRule->asFillType());
 
-    this->mapToParent(&path);
-    return path;
+    return this->mapToParent(path);
 }
 
-SkRect SkSVGPoly::onObjectBoundingBox(const SkSVGRenderContext& ctx) const {
+SkRect SkSVGPoly::onTransformableObjectBoundingBox(const SkSVGRenderContext& ctx) const {
     return fPath.getBounds();
 }

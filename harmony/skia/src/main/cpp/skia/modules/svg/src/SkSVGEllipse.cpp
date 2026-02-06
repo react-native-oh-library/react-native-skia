@@ -5,10 +5,17 @@
  * found in the LICENSE file.
  */
 
-#include "include/core/SkCanvas.h"
 #include "modules/svg/include/SkSVGEllipse.h"
+
+#include "include/core/SkCanvas.h"
+#include "include/core/SkPathTypes.h"
+#include "include/core/SkRect.h"
+#include "modules/svg/include/SkSVGAttributeParser.h"
 #include "modules/svg/include/SkSVGRenderContext.h"
-#include "modules/svg/include/SkSVGValue.h"
+#include "modules/svg/include/SkSVGTypes.h"
+#include "modules/svg/src/SkSVGRectPriv.h"
+
+class SkPaint;
 
 SkSVGEllipse::SkSVGEllipse() : INHERITED(SkSVGTag::kEllipse) {}
 
@@ -23,9 +30,15 @@ bool SkSVGEllipse::parseAndSetAttribute(const char* n, const char* v) {
 SkRect SkSVGEllipse::resolve(const SkSVGLengthContext& lctx) const {
     const auto cx = lctx.resolve(fCx, SkSVGLengthContext::LengthType::kHorizontal);
     const auto cy = lctx.resolve(fCy, SkSVGLengthContext::LengthType::kVertical);
-    const auto rx = lctx.resolve(fRx, SkSVGLengthContext::LengthType::kHorizontal);
-    const auto ry = lctx.resolve(fRy, SkSVGLengthContext::LengthType::kVertical);
 
+    // https://www.w3.org/TR/SVG2/shapes.html#EllipseElement
+    //
+    // An auto value for either rx or ry is converted to a used value, following the rules given
+    // above for rectangles (but without any clamping based on width or height).
+    const auto [ rx, ry ] = ResolveOptionalRadii(fRx, fRy, lctx);
+
+    // A computed value of zero for either dimension, or a computed value of auto for both
+    // dimensions, disables rendering of the element.
     return (rx > 0 && ry > 0)
         ? SkRect::MakeXYWH(cx - rx, cy - ry, rx * 2, ry * 2)
         : SkRect::MakeEmpty();
@@ -37,8 +50,5 @@ void SkSVGEllipse::onDraw(SkCanvas* canvas, const SkSVGLengthContext& lctx,
 }
 
 SkPath SkSVGEllipse::onAsPath(const SkSVGRenderContext& ctx) const {
-    SkPath path = SkPath::Oval(this->resolve(ctx.lengthContext()));
-    this->mapToParent(&path);
-
-    return path;
+    return this->mapToParent(SkPath::Oval(this->resolve(ctx.lengthContext())));
 }

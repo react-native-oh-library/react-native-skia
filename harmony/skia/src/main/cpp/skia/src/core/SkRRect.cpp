@@ -16,6 +16,8 @@
 #include "include/private/base/SkDebug.h"
 #include "include/private/base/SkFloatingPoint.h"
 #include "src/base/SkBuffer.h"
+#include "src/core/SkPathPriv.h"
+#include "src/core/SkPathRawShapes.h"
 #include "src/core/SkRRectPriv.h"
 #include "src/core/SkRectPriv.h"
 #include "src/core/SkScaleToSides.h"
@@ -54,7 +56,7 @@ void SkRRect::setRectXY(const SkRect& rect, SkScalar xRad, SkScalar yRad) {
         return;
     }
 
-    if (!SkScalarsAreFinite(xRad, yRad)) {
+    if (!SkIsFinite(xRad, yRad)) {
         xRad = yRad = 0;    // devolve into a simple rect
     }
 
@@ -118,8 +120,7 @@ void SkRRect::setNinePatch(const SkRect& rect, SkScalar leftRad, SkScalar topRad
         return;
     }
 
-    const SkScalar array[4] = { leftRad, topRad, rightRad, bottomRad };
-    if (!SkScalarsAreFinite(array, 4)) {
+    if (!SkIsFinite(leftRad, topRad, rightRad, bottomRad)) {
         this->setRect(rect);    // devolve into a simple rect
         return;
     }
@@ -192,7 +193,7 @@ void SkRRect::setRectRadii(const SkRect& rect, const SkVector radii[4]) {
         return;
     }
 
-    if (!SkScalarsAreFinite(&radii[0].fX, 8)) {
+    if (!SkIsFinite(&radii[0].fX, 8)) {
         this->setRect(rect);    // devolve into a simple rect
         return;
     }
@@ -434,7 +435,45 @@ void SkRRect::computeType() {
     }
 }
 
+std::optional<SkRRect> SkRRect::transform(const SkMatrix& matrix) const {
+// TODO(b/441005851): Resolve Android RenderEngine's shader prewarming regressions before removing.
+#ifdef SK_SUPPORT_LEGACY_RRECT_TRANSFORM
+    SkRRect newrr;
+    if (this->transform(matrix, &newrr)) {
+        return newrr;
+    }
+    return {};
+#else
+    if (matrix.isIdentity()) {
+        return *this;
+    }
+
+    if (!matrix.preservesAxisAlignment()) {
+        return {};
+    }
+
+    const SkRect newRect = matrix.mapRect(fRect);
+    if (!newRect.isFinite()) {
+        return {};
+    }
+
+    switch (this->getType()) {
+        case kEmpty_Type: return MakeEmpty();
+        case kRect_Type:  return MakeRect(newRect);
+        case kOval_Type:  return MakeOval(newRect);
+        default:
+            break;
+    }
+
+    SkPathRawShapes::RRect raw(*this);
+    matrix.mapPoints(raw.fStorage);
+    return SkPathPriv::DeduceRRectFromContour(newRect, raw.fPoints, raw.fVerbs);
+#endif
+}
+
 bool SkRRect::transform(const SkMatrix& matrix, SkRRect* dst) const {
+// TODO(b/441005851): Resolve Android RenderEngine's shader prewarming regressions before removing.
+#ifdef SK_SUPPORT_LEGACY_RRECT_TRANSFORM
     if (nullptr == dst) {
         return false;
     }
@@ -494,11 +533,18 @@ bool SkRRect::transform(const SkMatrix& matrix, SkRRect* dst) const {
     // 180 degrees rotations are simply flipX with a flipY and would come under
     // a scale transform.
     if (!matrix.isScaleTranslate()) {
+        // If we got here, the matrix preserves axis alignment (earlier return check) but isn't
+        // a regular scale matrix. To confirm that it's a 90/270 rotation, the scale components are
+        // 0s and the skew components are non-zero (+/-1 if there is no other scale factor).
+        SkASSERT(matrix.getScaleX() == 0.f && matrix.getScaleY() == 0.f &&
+                 matrix.getSkewX() != 0.f && matrix.getSkewY() != 0.f);
         const bool isClockwise = matrix.getSkewX() < 0;
 
         // The matrix location for scale changes if there is a rotation.
-        xScale = matrix.getSkewY() * (isClockwise ? 1 : -1);
-        yScale = matrix.getSkewX() * (isClockwise ? -1 : 1);
+        // xScale and yScale represent scales applied to the dst radii, so we store the src x scale
+        // in yScale and vice versa.
+        yScale = matrix.getSkewY() * (isClockwise ? 1 : -1);
+        xScale = matrix.getSkewX() * (isClockwise ? -1 : 1);
 
         const int dir = isClockwise ? 3 : 1;
         for (int i = 0; i < 4; ++i) {
@@ -548,14 +594,23 @@ bool SkRRect::transform(const SkMatrix& matrix, SkRRect* dst) const {
         swap(dst->fRadii[kUpperRight_Corner], dst->fRadii[kLowerRight_Corner]);
     }
 
+    dst->scaleRadii();
+
     if (!AreRectAndRadiiValid(dst->fRect, dst->fRadii)) {
         return false;
     }
 
-    dst->scaleRadii();
-    dst->isValid();  // TODO: is this meant to be SkASSERT(dst->isValid())?
-
+    SkASSERT(dst->isValid());
     return true;
+#else
+    if (auto rr = this->transform(matrix)) {
+        if (dst) {
+            *dst = *rr;
+        }
+        return true;
+    }
+    return false;
+#endif
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -633,8 +688,8 @@ bool SkRRectPriv::ReadFromBuffer(SkRBuffer* buffer, SkRRect* rr) {
 SkString SkRRect::dumpToString(bool asHex) const {
     SkScalarAsStringType asType = asHex ? kHex_SkScalarAsStringType : kDec_SkScalarAsStringType;
 
-    fRect.dump(asHex);
-    SkString line("const SkPoint corners[] = {\n");
+    SkString line = fRect.dumpToString(asHex);
+    line.appendf("\nconst SkPoint corners[] = {\n");
     for (int i = 0; i < 4; ++i) {
         SkString strX, strY;
         SkAppendScalar(&strX, fRadii[i].x(), asType);

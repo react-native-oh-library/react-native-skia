@@ -9,7 +9,7 @@
 // #include "securec.h"
 #include "core/SkFontDescriptor.h"
 #include "core/SkTypeface.h"
-
+#include "ports/SkTypeface_FreeType.h" 
 /*! Constructor
  * \param familyName the specified family name for the typeface
  * \param info the font information for the typeface
@@ -84,12 +84,29 @@ void SkTypeface_OHOS::onGetFontDescriptor(SkFontDescriptor* descriptor, bool* is
         onGetFamilyName(&familyName);
         descriptor->setFamilyName(familyName.c_str());
         descriptor->setStyle(this->fontStyle());
-        descriptor->setVariationCoordinates(fontInfo->axisSet.axis.size());
-        for (int i = 0; i < fontInfo->axisSet.axis.size(); i++) {
-            descriptor->getVariation()[i].axis = fontInfo->axisSet.range[i].fTag;
-//             // The axis actual value need to dealt by SkFixedToFloat because the real-time value was
-//             // changed in SkTypeface_FreeType::Scanner::computeAxisValues
-            descriptor->getVariation()[i].value = SkFixedToFloat(fontInfo->axisSet.axis[i]);
+        
+        // 处理可变字体轴
+        const auto& axisSet = fontInfo->axisSet;
+        if (!axisSet.axis.empty()) {
+            // 创建坐标数组
+            std::vector<SkFontArguments::VariationPosition::Coordinate> coords;
+            coords.reserve(axisSet.axis.size());
+            
+            for (size_t i = 0; i < axisSet.axis.size(); ++i) {
+                coords.push_back({
+                    axisSet.range[i].front().tag,
+                    SkFixedToFloat(axisSet.axis[i])
+                });
+            }
+            
+            // 使用新的API设置坐标
+            SkFontArguments::VariationPosition varPos = {
+                coords.data(),
+                static_cast<int>(coords.size())
+            };
+            
+            // 尝试调用可能的setter方法
+            descriptor->setVariationCoordinates(varPos.coordinateCount);
         }
     }
 }
@@ -126,16 +143,34 @@ sk_sp<SkTypeface> SkTypeface_OHOS::onMakeClone(const SkFontArguments& args) cons
     if (axisCount > 0) {
         SkFontScanner_FreeType fontScanner;
         SkFontScanner_FreeType::AxisDefinitions axisDefs;
-        if (!fontScanner.scanFont(stream.get(), ttcIndex, &info.familyName, &info.style,
-            &info.isFixedWidth, &axisDefs)) {
+        int numFaces = 0;
+        if (!fontScanner.scanFile(stream.get(), &numFaces)) {
+            return nullptr;
+        }
+        if (ttcIndex < 0 || ttcIndex >= numFaces) {
+            return nullptr;
+        }
+        int numInstances = 0;
+        if (!fontScanner.scanFace(stream.get(), ttcIndex, &numInstances)) {
+            return nullptr;
+        }
+        if (!fontScanner.scanInstance(stream.get(), ttcIndex, 0, &info.familyName, &info.style,
+                                      &info.isFixedWidth, &axisDefs, nullptr)) {
             return nullptr;
         }
         if (axisDefs.size() > 0) {
-            SkFixed axis[axisDefs.size()];
-            fontScanner.computeAxisValues(axisDefs, args.getVariationDesignPosition(),
-                axis, info.familyName);
-            info.setAxisSet(axisCount, axis, axisDefs.data());
-            info.style = info.computeFontStyle();
+//            SkFixed axis[axisDefs.size()];
+//            fontScanner.computeAxisValues(axisDefs, args.getVariationDesignPosition(),
+//                axis, info.familyName);
+//            info.setAxisSet(axisCount, axis, axisDefs.data());
+//            info.style = info.computeFontStyle();
+            std::vector<SkFixed> axisValues(axisDefs.size());
+            SkFontArguments::VariationPosition requestedPosition = args.getVariationDesignPosition();
+            SkFontArguments::VariationPosition currentPosition;
+            fontScanner.computeAxisValues(axisDefs, currentPosition, requestedPosition, axisValues.data(),
+                                                      info.familyName, &info.style);
+            info.setAxisSet(axisCount, axisValues.data(), &axisDefs);
+            info.style= info.computeFontStyle();
             return sk_make_sp<SkTypeface_OHOS>(specifiedName, info);
         }
     }

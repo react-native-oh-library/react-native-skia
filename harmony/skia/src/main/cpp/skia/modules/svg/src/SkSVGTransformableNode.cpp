@@ -5,9 +5,12 @@
  * found in the LICENSE file.
  */
 
-#include "include/core/SkCanvas.h"
-#include "modules/svg/include/SkSVGRenderContext.h"
 #include "modules/svg/include/SkSVGTransformableNode.h"
+
+#include "include/core/SkCanvas.h"
+#include "include/core/SkRect.h"
+#include "modules/svg/include/SkSVGAttribute.h"
+#include "modules/svg/include/SkSVGRenderContext.h"
 #include "modules/svg/include/SkSVGValue.h"
 
 SkSVGTransformableNode::SkSVGTransformableNode(SkSVGTag tag)
@@ -37,11 +40,25 @@ void SkSVGTransformableNode::onSetAttribute(SkSVGAttribute attr, const SkSVGValu
     }
 }
 
-void SkSVGTransformableNode::mapToParent(SkPath* path) const {
+SkPath SkSVGTransformableNode::mapToParent(const SkPath& path) const {
     // transforms the path to parent node coordinates.
-    path->transform(fTransform);
+    return path.makeTransform(fTransform);
 }
 
-void SkSVGTransformableNode::mapToParent(SkRect* rect) const {
-    *rect = fTransform.mapRect(*rect);
+SkRect SkSVGTransformableNode::mapToParent(const SkRect& rect) const {
+    return fTransform.mapRect(rect);
 }
+
+SkRect SkSVGTransformableNode::onTransformableObjectBoundingBox(const SkSVGRenderContext&) const {
+    return SkRect::MakeEmpty();
+}
+
+SkRect SkSVGTransformableNode::onObjectBoundingBox(const SkSVGRenderContext& ctx) const {
+    SkRect obb = this->onTransformableObjectBoundingBox(ctx);
+
+    if (ctx.currentOBBScope().fNode != this && !fTransform.isIdentity()) {
+        obb = this->mapToParent(obb);
+    }
+    return obb;
+}
+

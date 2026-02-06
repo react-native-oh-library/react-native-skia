@@ -4,24 +4,55 @@
  * Use of this source code is governed by a BSD-style license that can be
  * found in the LICENSE file.
  */
-
 #ifndef GrOpFlushState_DEFINED
 #define GrOpFlushState_DEFINED
 
-#include <utility>
+#include "include/core/SkRefCnt.h"
+#include "include/private/base/SkAssert.h"
+#include "include/private/base/SkDebug.h"
+#include "include/private/base/SkTArray.h"
+#include "include/private/gpu/ganesh/GrTypesPriv.h"
 #include "src/base/SkArenaAlloc.h"
 #include "src/base/SkArenaAllocList.h"
+#include "src/gpu/AtlasTypes.h"
 #include "src/gpu/ganesh/GrAppliedClip.h"
+#include "src/gpu/ganesh/GrBuffer.h"
 #include "src/gpu/ganesh/GrBufferAllocPool.h"
 #include "src/gpu/ganesh/GrDeferredUpload.h"
+#include "src/gpu/ganesh/GrDrawIndirectCommand.h"
+#include "src/gpu/ganesh/GrDstProxyView.h"
+#include "src/gpu/ganesh/GrGeometryProcessor.h"
 #include "src/gpu/ganesh/GrMeshDrawTarget.h"
+#include "src/gpu/ganesh/GrOpsRenderPass.h"
+#include "src/gpu/ganesh/GrPipeline.h"
 #include "src/gpu/ganesh/GrProgramInfo.h"
-#include "src/gpu/ganesh/GrRenderTargetProxy.h"
+#include "src/gpu/ganesh/GrScissorState.h"
 #include "src/gpu/ganesh/GrSurfaceProxyView.h"
 
+#include <cstddef>
+#include <cstdint>
+#include <utility>
+
+class GrAtlasManager;
+class GrCaps;
 class GrGpu;
-class GrOpsRenderPass;
+class GrOp;
+class GrRenderTargetProxy;
 class GrResourceProvider;
+class GrSurfaceProxy;
+class GrThreadSafeCache;
+enum class GrXferBarrierFlags;
+struct GrSimpleMesh;
+struct GrUserStencilSettings;
+struct SkIRect;
+struct SkRect;
+
+namespace skgpu::ganesh {
+class SmallPathAtlasMgr;
+}
+namespace sktext::gpu {
+class StrikeCache;
+}
 
 /** Tracks the state across all the GrOps (really just the GrDrawOps) in a OpsTask flush. */
 class GrOpFlushState final : public GrDeferredUploadTarget, public GrMeshDrawTarget {
@@ -120,8 +151,8 @@ public:
     /** Overrides of GrDeferredUploadTarget. */
 
     const skgpu::TokenTracker* tokenTracker() final { return fTokenTracker; }
-    skgpu::AtlasToken addInlineUpload(GrDeferredTextureUploadFn&&) final;
-    skgpu::AtlasToken addASAPUpload(GrDeferredTextureUploadFn&&) final;
+    skgpu::Token addInlineUpload(GrDeferredTextureUploadFn&&) final;
+    skgpu::Token addASAPUpload(GrDeferredTextureUploadFn&&) final;
 
     /** Overrides of GrMeshDrawTarget. */
     void recordDraw(const GrGeometryProcessor*,
@@ -265,10 +296,10 @@ public:
 
 private:
     struct InlineUpload {
-        InlineUpload(GrDeferredTextureUploadFn&& upload, skgpu::AtlasToken token)
+        InlineUpload(GrDeferredTextureUploadFn&& upload, skgpu::Token token)
                 : fUpload(std::move(upload)), fUploadBeforeToken(token) {}
         GrDeferredTextureUploadFn fUpload;
-        skgpu::AtlasToken fUploadBeforeToken;
+        skgpu::Token fUploadBeforeToken;
     };
 
     // A set of contiguous draws that share a draw token, geometry processor, and pipeline. The
@@ -303,7 +334,7 @@ private:
 
     // All draws we store have an implicit draw token. This is the draw token for the first draw
     // in fDraws.
-    skgpu::AtlasToken fBaseDrawToken = skgpu::AtlasToken::InvalidToken();
+    skgpu::Token fBaseDrawToken = skgpu::Token::InvalidToken();
 
     // Info about the op that is currently preparing or executing using the flush state or null if
     // an op is not currently preparing of executing.

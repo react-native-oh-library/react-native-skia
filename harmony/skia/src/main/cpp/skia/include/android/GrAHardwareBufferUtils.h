@@ -11,8 +11,8 @@
 
 #if defined(SK_BUILD_FOR_ANDROID) && __ANDROID_API__ >= 26
 
-#include "include/gpu/GrBackendSurface.h"
-#include "include/gpu/GrTypes.h"
+#include "include/gpu/ganesh/GrBackendSurface.h"
+#include "include/gpu/ganesh/GrTypes.h"
 
 class GrDirectContext;
 
@@ -21,10 +21,6 @@ extern "C" {
 }
 
 namespace GrAHardwareBufferUtils {
-
-// TODO: remove this function once Android has been updated to call the AHardwareBufferUtils
-// version
-SkColorType GetSkColorTypeFromBufferFormat(uint32_t bufferFormat);
 
 #if !defined(SK_DISABLE_LEGACY_ANDROID_HW_UTILS)
 GrBackendFormat GetBackendFormat(GrDirectContext* dContext, AHardwareBuffer* hardwareBuffer,

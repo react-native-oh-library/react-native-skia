@@ -7,8 +7,6 @@
 
 #include "src/sksl/codegen/SkSLSPIRVtoHLSL.h"
 
-#if defined(SK_ENABLE_SPIRV_CROSS)
-
 #include <spirv_hlsl.hpp>
 
 /*
@@ -19,9 +17,8 @@
 
 namespace SkSL {
 
-bool SPIRVtoHLSL(const std::string& spirv, std::string* hlsl) {
-    spirv_cross::CompilerHLSL hlslCompiler((const uint32_t*)spirv.c_str(),
-                                           spirv.size() / sizeof(uint32_t));
+void SPIRVtoHLSL(SkSpan<const uint32_t> spirv, std::string* hlsl) {
+    spirv_cross::CompilerHLSL hlslCompiler(spirv.data(), spirv.size());
 
     spirv_cross::CompilerGLSL::Options optionsGLSL;
     // Force all uninitialized variables to be 0, otherwise they will fail to compile
@@ -37,13 +34,6 @@ bool SPIRVtoHLSL(const std::string& spirv, std::string* hlsl) {
     hlslCompiler.set_common_options(optionsGLSL);
     hlslCompiler.set_hlsl_options(optionsHLSL);
     hlsl->assign(hlslCompiler.compile());
-    return true;
 }
 
-}
-
-#else
-
-namespace SkSL { bool SPIRVtoHLSL(const std::string&, std::string*) { return false; } }
-
-#endif
+}  // namespace SkSL

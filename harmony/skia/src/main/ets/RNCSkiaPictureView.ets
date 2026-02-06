@@ -13,12 +13,12 @@ import {
 } from '@rnoh/react-native-openharmony'
 import { SkiaDomView } from './view/SkiaDomView';
 import Logger from './Logger';
-
 export interface SkiaPictureViewState {}
 
 export interface SkiaPictureViewProps extends ViewRawProps {
-  mode: string
   debug: boolean
+  colorSpace: string,
+  opaque: boolean
 }
 
 export const SKIA_PICTURE_VIEW_TYPE: string = "SkiaPictureView";
@@ -33,11 +33,12 @@ export struct RNCSkiaPictureView {
   tag: number = -1;
   @State descriptor: SkiaPictureViewDescriptor = {} as SkiaPictureViewDescriptor;
   private callbackList: Array<() => void> = []
-  @Provide('mode') mode: string = "";
-  @Provide('debug') debug: boolean = false;
+  @State debug: boolean = false;
   @State nativeID: number = 0;
   @State viewWidth: number = 0;
   @State viewHeight: number = 0;
+  @State colorSpace: string = "p3";
+  @State opaque: boolean = false;
 
   aboutToAppear(): void {
     this.descriptor = this.ctx.descriptorRegistry.getDescriptor<SkiaPictureViewDescriptor>(this.tag);
@@ -75,11 +76,13 @@ export struct RNCSkiaPictureView {
 
   /* 更新属性变更  */
   updatePropFromDesc(): void {
-    this.mode = this.descriptor.rawProps.mode
     this.debug = this.descriptor.rawProps.debug
     this.nativeID = Number.parseInt(this.descriptor.rawProps.nativeID ? this.descriptor.rawProps.nativeID : '0');
     this.viewWidth = this.descriptor.layoutMetrics.frame.size.width
     this.viewHeight = this.descriptor.layoutMetrics.frame.size.height
+    this.colorSpace = this.descriptor.rawProps.colorSpace;
+    this.opaque = this.descriptor.rawProps.opaque;
+    Logger.debug(TAG, `debug: ${this.debug} colorSpace:${this.colorSpace} opaque:${this.opaque}}`)
   }
 
   cancellationCallback() {
@@ -92,7 +95,7 @@ export struct RNCSkiaPictureView {
 
   build() {
     RNViewBase({ ctx: this.ctx, tag: this.tag }) {
-      SkiaDomView({ nativeID: this.nativeID, viewWidth: this.viewWidth, viewHeight: this.viewHeight })
+      SkiaDomView({ nativeID: this.nativeID, viewWidth: this.viewWidth, viewHeight: this.viewHeight, debug: this.debug, opaque: this.opaque, colorSpace : this.colorSpace})
         .align(Alignment.Center)
         .height(this.viewHeight)
         .width(this.viewWidth)

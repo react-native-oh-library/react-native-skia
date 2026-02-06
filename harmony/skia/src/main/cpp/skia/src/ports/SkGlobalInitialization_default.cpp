@@ -26,6 +26,7 @@
     #include "include/effects/SkPerlinNoiseShader.h"
     #include "include/effects/SkRuntimeEffect.h"
     #include "include/effects/SkShaderMaskFilter.h"
+    #include "include/effects/SkTableMaskFilter.h"
     #include "src/core/SkBlendModeBlender.h"
     #include "src/core/SkImageFilter_Base.h"
     #include "src/core/SkLocalMatrixImageFilter.h"
@@ -41,10 +42,6 @@
     #include "src/shaders/SkShaderBase.h"
     #include "src/shaders/gradients/SkGradientBaseShader.h"
 
-#ifdef SK_SUPPORT_LEGACY_DRAWLOOPER
-    #include "include/effects/SkLayerDrawLooper.h"
-#endif
-
     /**
      *  Register most effects for deserialization.
      *
@@ -55,7 +52,6 @@
     void SkFlattenable::PrivateInitializer::InitEffects() {
         // Shaders.
         SkRegisterBlendShaderFlattenable();
-        SkRegisterColor4ShaderFlattenable();
         SK_REGISTER_FLATTENABLE(SkColorFilterShader);
         SkRegisterColorShaderFlattenable();
         SkRegisterCoordClampShaderFlattenable();
@@ -67,6 +63,7 @@
         SkRegisterRadialGradientShaderFlattenable();
         SkRegisterSweepGradientShaderFlattenable();
         SkRegisterPerlinNoiseShaderFlattenable();
+        SkRegisterWorkingColorSpaceShaderFlattenable();
         SkShaderBase::RegisterFlattenables();
 
         // Color filters.
@@ -87,6 +84,7 @@
         SK_REGISTER_FLATTENABLE(SkEmbossMaskFilter);
         SkMaskFilter::RegisterFlattenables();
         SkShaderMaskFilter::RegisterFlattenables();
+        SkTableMaskFilter::RegisterFlattenables();
 
         // Path effects.
         SkCornerPathEffect::RegisterFlattenables();
@@ -99,9 +97,6 @@
         SkPathEffectBase::RegisterFlattenables();
 
         // Misc.
-#ifdef SK_SUPPORT_LEGACY_DRAWLOOPER
-        SK_REGISTER_FLATTENABLE(SkLayerDrawLooper);
-#endif
         SK_REGISTER_FLATTENABLE(SkRecordedDrawable);
     }
 

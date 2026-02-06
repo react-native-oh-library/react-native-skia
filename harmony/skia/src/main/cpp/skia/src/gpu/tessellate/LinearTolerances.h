@@ -8,8 +8,12 @@
 #ifndef skgpu_tessellate_LinearTolerances_DEFINED
 #define skgpu_tessellate_LinearTolerances_DEFINED
 
+#include "include/core/SkScalar.h"
+#include "include/private/base/SkAssert.h"
 #include "src/gpu/tessellate/Tessellation.h"
 #include "src/gpu/tessellate/WangsFormula.h"
+
+#include <algorithm>
 
 namespace skgpu::tess {
 
@@ -45,6 +49,8 @@ public:
 
     int requiredStrokeEdges() const {
         // The maximum rotation we can have in a stroke is 180 degrees (SK_ScalarPI radians).
+        // NOTE: This is also sufficient to handle circular caps because the shader sweeps a
+        // stroke width line 180 degrees about the center point.
         int maxRadialSegmentsInStroke =
                 std::max(SkScalarCeilToInt(fNumRadialSegmentsPerRadian * SK_ScalarPI), 1);
 

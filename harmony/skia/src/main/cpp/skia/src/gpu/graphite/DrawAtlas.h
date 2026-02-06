@@ -4,23 +4,30 @@
  * Use of this source code is governed by a BSD-style license that can be
  * found in the LICENSE file.
  */
-
 #ifndef skgpu_graphite_DrawAtlas_DEFINED
 #define skgpu_graphite_DrawAtlas_DEFINED
 
-#include <cmath>
+#include "include/core/SkPoint.h"
+#include "include/core/SkRefCnt.h"
+#include "include/core/SkSize.h"
+#include "include/private/base/SkAssert.h"
+#include "include/private/base/SkDebug.h"
+#include "src/gpu/AtlasTypes.h"
+
+#include <cstddef>
+#include <cstdint>
+#include <memory>
 #include <string>
 #include <string_view>
 #include <vector>
 
-#include "src/core/SkIPoint16.h"
-#include "src/core/SkTHash.h"
-#include "src/gpu/AtlasTypes.h"
+class SkAutoPixmapStorage;
+enum SkColorType : int;
 
 namespace skgpu::graphite {
 
+class DrawContext;
 class Recorder;
-class UploadList;
 class TextureProxy;
 
 /**
@@ -53,6 +60,9 @@ public:
     /** Is the atlas allowed to use more than one texture? */
     enum class AllowMultitexturing : bool { kNo, kYes };
 
+    /** Should the atlas use storage textures? */
+    enum class UseStorageTextures : bool { kNo, kYes };
+
     /**
      * Returns a DrawAtlas.
      *  @param ct                  The colorType which this atlas will store.
@@ -63,7 +73,9 @@ public:
      *  @param plotWidth           The height of each plot. height/plotHeight should be an integer.
      *  @param atlasGeneration     A pointer to the context's generation counter.
      *  @param allowMultitexturing Can the atlas use more than one texture.
+     *  @param useStorageTextures  Should the atlas use storage textures.
      *  @param evictor             A pointer to an eviction callback class.
+     *  @param label               Label for texture resources.
      *
      *  @return                    An initialized DrawAtlas, or nullptr if creation fails.
      */
@@ -72,6 +84,7 @@ public:
                                            int plotWidth, int plotHeight,
                                            AtlasGenerationCounter* generationCounter,
                                            AllowMultitexturing allowMultitexturing,
+                                           UseStorageTextures useStorageTextures,
                                            PlotEvictionCallback* evictor,
                                            std::string_view label);
 
@@ -103,12 +116,22 @@ public:
     };
 
     ErrorCode addToAtlas(Recorder*, int width, int height, const void* image, AtlasLocator*);
-    bool recordUploads(UploadList*, Recorder*);
+    ErrorCode addRect(Recorder*, int width, int height, AtlasLocator*);
+    // Reset Pixmap to point to backing data for the AtlasLocator's Plot.
+    // Return relative location within the Plot, as indicated by the AtlasLocator.
+    SkIPoint prepForRender(const AtlasLocator&, SkAutoPixmapStorage*);
+    bool recordUploads(DrawContext*, Recorder*);
 
     const sk_sp<TextureProxy>* getProxies() const { return fProxies; }
 
     uint32_t atlasID() const { return fAtlasID; }
     uint64_t atlasGeneration() const { return fAtlasGeneration; }
+    uint32_t numActivePages() const { return fNumActivePages; }
+    unsigned int numPlots() const { return fNumPlots; }
+    SkISize plotSize() const { return {fPlotWidth, fPlotHeight}; }
+    uint32_t getListIndex(const PlotLocator& locator) {
+        return locator.pageIndex() * fNumPlots + locator.plotIndex();
+    }
 
     bool hasID(const PlotLocator& plotLocator) {
         if (!plotLocator.isValid()) {
@@ -123,21 +146,12 @@ public:
     }
 
     /** To ensure the atlas does not evict a given entry, the client must set the last use token. */
-    void setLastUseToken(const AtlasLocator& atlasLocator, AtlasToken token) {
-        SkASSERT(this->hasID(atlasLocator.plotLocator()));
-        uint32_t plotIdx = atlasLocator.plotIndex();
-        SkASSERT(plotIdx < fNumPlots);
-        uint32_t pageIdx = atlasLocator.pageIndex();
-        SkASSERT(pageIdx < fNumActivePages);
-        Plot* plot = fPages[pageIdx].fPlotArray[plotIdx].get();
-        this->makeMRU(plot, pageIdx);
-        plot->setLastUseToken(token);
+    void setLastUseToken(const AtlasLocator& atlasLocator, Token token) {
+        Plot* plot = this->findPlot(atlasLocator);
+        this->internalSetLastUseToken(plot, atlasLocator.pageIndex(), token);
     }
 
-    uint32_t numActivePages() { return fNumActivePages; }
-
-    void setLastUseTokenBulk(const BulkUsePlotUpdater& updater,
-                             AtlasToken token) {
+    void setLastUseTokenBulk(const BulkUsePlotUpdater& updater, Token token) {
         int count = updater.count();
         for (int i = 0; i < count; i++) {
             const BulkUsePlotUpdater::PlotData& pd = updater.plotData(i);
@@ -145,13 +159,20 @@ public:
             // was deleted -- so we check to prevent a crash
             if (pd.fPageIndex < fNumActivePages) {
                 Plot* plot = fPages[pd.fPageIndex].fPlotArray[pd.fPlotIndex].get();
-                this->makeMRU(plot, pd.fPageIndex);
-                plot->setLastUseToken(token);
+                this->internalSetLastUseToken(plot, pd.fPageIndex, token);
             }
         }
     }
 
-    void compact(AtlasToken startTokenForNextFlush);
+    void compact(Token startTokenForNextFlush);
+
+    // Mark all plots with any content as full. Used only with Vello because it can't do
+    // new renders to a texture without a clear.
+    void markUsedPlotsAsFull();
+
+    // Will try to clear out any GPU resources that aren't needed for any pending uploads or draws.
+    // TODO: Delete backing data for Plots that don't have pending uploads.
+    void freeGpuResources(Token token);
 
     void evictAllPlots();
 
@@ -159,15 +180,38 @@ public:
         return fMaxPages;
     }
 
-    int numAllocated_TestingOnly() const;
-    void setMaxPages_TestingOnly(uint32_t maxPages);
+#if defined(GPU_TEST_UTILS)
+    template <typename F>
+    int iteratePlots(F&& func) const {
+        int count = 0;
+        PlotList::Iter plotIter;
+        for (uint32_t pageIndex = 0; pageIndex < this->maxPages(); ++pageIndex) {
+            plotIter.init(fPages[pageIndex].fPlotList, PlotList::Iter::kHead_IterStart);
+            while (Plot* plot = plotIter.get()) {
+                if (func(plot)) {
+                    count++;
+                }
+                plotIter.next();
+            }
+        }
+        return count;
+    }
+
+    int numAllocatedPlots() const;
+    int numNonEmptyPlots() const;
+#endif
 
 private:
-    DrawAtlas(SkColorType, size_t bpp, int width, int height, int plotWidth, int plotHeight,
+    DrawAtlas(SkColorType, size_t bpp,
+              int width, int height, int plotWidth, int plotHeight,
               AtlasGenerationCounter* generationCounter,
-              AllowMultitexturing allowMultitexturing, std::string_view label);
+              AllowMultitexturing allowMultitexturing,
+              UseStorageTextures useStorageTextures,
+              std::string_view label);
 
-    bool updatePlot(AtlasLocator*, Plot* plot);
+    bool addRectToPage(unsigned int pageIdx, int width, int height, AtlasLocator*);
+
+    void updatePlot(Plot* plot, AtlasLocator*);
 
     inline void makeMRU(Plot* plot, int pageIdx) {
         if (fPages[pageIdx].fPlotList.head() == plot) {
@@ -181,17 +225,25 @@ private:
         // the front and remove from the back there is no need for MRU.
     }
 
-    bool addToPage(unsigned int pageIdx, int width, int height, const void* image, AtlasLocator*);
+    Plot* findPlot(const AtlasLocator& atlasLocator) {
+        SkASSERT(this->hasID(atlasLocator.plotLocator()));
+        uint32_t pageIdx = atlasLocator.pageIndex();
+        uint32_t plotIdx = atlasLocator.plotIndex();
+        return fPages[pageIdx].fPlotArray[plotIdx].get();
+    }
+
+    void internalSetLastUseToken(Plot* plot, uint32_t pageIdx, Token token) {
+        this->makeMRU(plot, pageIdx);
+        plot->setLastUseToken(token);
+    }
 
     bool createPages(AtlasGenerationCounter*);
     bool activateNewPage(Recorder*);
     void deactivateLastPage();
 
-    void processEviction(PlotLocator);
-    inline void processEvictionAndResetRects(Plot* plot) {
-        this->processEviction(plot->plotLocator());
-        plot->resetRects();
-    }
+    // If freeData is true, this will free the backing data as well. This should only be used
+    // when we know we won't be adding to the Plot immediately afterwards.
+    void processEvictionAndResetRects(Plot* plot, bool freeData);
 
     SkColorType           fColorType;
     size_t                fBytesPerPixel;
@@ -200,6 +252,7 @@ private:
     int                   fPlotWidth;
     int                   fPlotHeight;
     unsigned int          fNumPlots;
+    UseStorageTextures    fUseStorageTextures;
     const std::string     fLabel;
     uint32_t              fAtlasID;   // unique identifier for this atlas
 
@@ -213,7 +266,7 @@ private:
 
     // nextFlushToken() value at the end of the previous DrawPass
     // TODO: rename
-    AtlasToken fPrevFlushToken;
+    Token fPrevFlushToken;
 
     // the number of flushes since this atlas has been last used
     // TODO: rename

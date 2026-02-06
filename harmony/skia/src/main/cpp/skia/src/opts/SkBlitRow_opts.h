@@ -8,9 +8,9 @@
 #ifndef SkBlitRow_opts_DEFINED
 #define SkBlitRow_opts_DEFINED
 
-#include "include/private/SkColorData.h"
 #include "src/base/SkMSAN.h"
 #include "src/base/SkVx.h"
+#include "src/core/SkColorData.h"
 
 // Helpers for blit_row_s32a_opaque(),
 // then blit_row_s32a_opaque() itself,
@@ -116,6 +116,48 @@
 
 #endif
 
+#if SK_CPU_LSX_LEVEL >= SK_CPU_LSX_LEVEL_LASX
+    #include <lasxintrin.h>
+
+    static inline __m256i SkPMSrcOver_LASX(const __m256i& src, const __m256i& dst) {
+        __m256i val = __lasx_xvreplgr2vr_w(256);
+        __m256i scale = __lasx_xvsub_w(val, __lasx_xvsrli_w(src, 24));
+        __m256i scale_x2 = __lasx_xvor_v(__lasx_xvslli_w(scale, 16), scale);
+
+        val = __lasx_xvreplgr2vr_w(0x00ff00ff);
+        __m256i rb = __lasx_xvand_v(val, dst);
+        rb = __lasx_xvmul_h(rb, scale_x2);
+        rb = __lasx_xvsrli_h(rb, 8);
+
+        __m256i ga = __lasx_xvsrli_h(dst, 8);
+        ga = __lasx_xvmul_h(ga, scale_x2);
+        ga = __lasx_xvandn_v(val, ga);
+
+        return __lasx_xvsadd_bu(src, __lasx_xvor_v(rb, ga));
+    }
+#endif
+
+#if SK_CPU_LSX_LEVEL >= SK_CPU_LSX_LEVEL_LSX
+    #include <lsxintrin.h>
+
+    static inline __m128i SkPMSrcOver_LSX(const __m128i& src, const __m128i& dst) {
+        __m128i val = __lsx_vreplgr2vr_w(256);
+        __m128i scale = __lsx_vsub_w(val, __lsx_vsrli_w(src, 24));
+        __m128i scale_x2 = __lsx_vor_v(__lsx_vslli_w(scale, 16), scale);
+
+        val = __lsx_vreplgr2vr_w(0x00ff00ff);
+        __m128i rb = __lsx_vand_v(val, dst);
+        rb = __lsx_vmul_h(rb, scale_x2);
+        rb = __lsx_vsrli_h(rb, 8);
+
+        __m128i ga = __lsx_vsrli_h(dst, 8);
+        ga = __lsx_vmul_h(ga, scale_x2);
+        ga = __lsx_vandn_v(val, ga);
+
+        return __lsx_vsadd_bu(src, __lsx_vor_v(rb, ga));
+    }
+#endif
+
 namespace SK_OPTS_NS {
 
 /*not static*/
@@ -169,6 +211,26 @@ inline void blit_row_s32a_opaque(SkPMColor* dst, const SkPMColor* src, int len, 
     return;
 #endif
 
+#if SK_CPU_LSX_LEVEL >= SK_CPU_LSX_LEVEL_LASX
+    while (len >= 8) {
+        __lasx_xvst(SkPMSrcOver_LASX(__lasx_xvld(src, 0),
+                                     __lasx_xvld(dst, 0)), (__m256i*)dst, 0);
+        src += 8;
+        dst += 8;
+        len -= 8;
+    }
+#endif
+
+#if SK_CPU_LSX_LEVEL >= SK_CPU_LSX_LEVEL_LSX
+    while (len >= 4) {
+        __lsx_vst(SkPMSrcOver_LSX(__lsx_vld(src, 0),
+                                  __lsx_vld(dst, 0)), (__m128i*)dst, 0);
+        src += 4;
+        dst += 4;
+        len -= 4;
+    }
+#endif
+
     while (len --> 0) {
         *dst = SkPMSrcOver(*src, *dst);
         src++;
@@ -184,18 +246,21 @@ inline void blit_row_color32(SkPMColor* dst, int count, SkPMColor color) {
     using U16 = skvx::Vec<4*N, uint16_t>;
     using U8  = skvx::Vec<4*N, uint8_t>;
 
+    // Note when the kernel is used below, the "src" is the existing pixel color.
     auto kernel = [color](U32 src) {
-        unsigned invA = 255 - SkGetPackedA32(color);
-        invA += invA >> 7;
+        unsigned invA = SkAlpha255To256(255 - SkGetPackedA32(color));
         SkASSERT(0 < invA && invA < 256);  // We handle alpha == 0 or alpha == 255 specially.
 
-        // (src * invA + (color << 8) + 128) >> 8
-        // Should all fit in 16 bits.
+        // color is premul, so the channels have already been
+        // scaled by alpha. We just need to scale src by (255 - a)
+        // using the trick of adding 1 and dividing by 256 which is
+        // much faster than dividing by 255. Then we can add that
+        // to color to get the result.
         U8 s = sk_bit_cast<U8>(src),
            a = U8(invA);
         U16 c = skvx::cast<uint16_t>(sk_bit_cast<U8>(U32(color))),
-            d = (mull(s,a) + (c << 8) + 128)>>8;
-        return sk_bit_cast<U32>(skvx::cast<uint8_t>(d));
+            r = (mull(s,a) >> 8) + c;
+        return sk_bit_cast<U32>(skvx::cast<uint8_t>(r));
     };
 
     while (count >= N) {

@@ -11,14 +11,14 @@
 #include "include/core/SkString.h"
 #include "include/private/base/SkAlign.h"
 #include "include/private/base/SkTArray.h"
+#include "include/private/base/SkTFitsIn.h"
 #include "include/private/base/SkTo.h"
-#include "include/private/gpu/ganesh/GrTypesPriv.h"
 
-#include <limits.h>
+#include <cstdint>
+#include <cstring>
 
 class GrCaps;
 class GrProgramInfo;
-class GrRenderTarget;
 
 /** This class is used to generate a generic program cache key. The Dawn, Metal and Vulkan
  *  backends derive backend-specific versions which add additional information.
@@ -51,7 +51,7 @@ public:
 
     uint32_t initialKeyLength() const { return fInitialKeyLength; }
 
-    // TODO(skia:11372): Incorporate this into caps interface (part of makeDesc, or a parallel
+    // TODO(skbug.com/40042745): Incorporate this into caps interface (part of makeDesc, or a parallel
     // function), so other backends can include their information in the description.
     static SkString Describe(const GrProgramInfo&, const GrCaps&);
 
@@ -88,13 +88,12 @@ protected:
         return true;
     }
 
-    enum {
-        kHeaderSize            = 1,    // "header" in ::Build
-        kMaxPreallocProcessors = 8,
-        kIntsPerProcessor      = 4,    // This is an overestimate of the average effect key size.
-        kPreAllocSize = kHeaderSize +
-                        kMaxPreallocProcessors * kIntsPerProcessor,
-    };
+    static constexpr size_t kHeaderSize            = 1;    // "header" in ::Build
+    static constexpr size_t kMaxPreallocProcessors = 8;
+    // This is an overestimate of the average effect key size.
+    static constexpr size_t kIntsPerProcessor      = 4;
+    static constexpr size_t kPreAllocSize          =
+            kHeaderSize + kMaxPreallocProcessors * kIntsPerProcessor;
 
     using KeyType = skia_private::STArray<kPreAllocSize, uint32_t, true>;
 

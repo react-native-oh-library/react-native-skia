@@ -79,10 +79,12 @@ public:
     [[nodiscard]] bool readS8(int8_t*);
     [[nodiscard]] bool readS16(int16_t*);
     [[nodiscard]] bool readS32(int32_t*);
+    [[nodiscard]] bool readS64(int64_t*);
 
-    [[nodiscard]] bool readU8(uint8_t* i) { return this->readS8((int8_t*)i); }
+    [[nodiscard]] bool readU8(uint8_t* i)   { return this->readS8((int8_t*)i); }
     [[nodiscard]] bool readU16(uint16_t* i) { return this->readS16((int16_t*)i); }
     [[nodiscard]] bool readU32(uint32_t* i) { return this->readS32((int32_t*)i); }
+    [[nodiscard]] bool readU64(uint64_t* i) { return this->readS64((int64_t*)i); }
 
     [[nodiscard]] bool readBool(bool* b) {
         uint8_t i;
@@ -138,8 +140,8 @@ public:
 
 //SkStreamMemory
     /** Returns the starting address for the data. If this cannot be done, returns NULL. */
-    //TODO: replace with virtual const SkData* getData()
     virtual const void* getMemoryBase() { return nullptr; }
+    virtual sk_sp<SkData> getData() const { return nullptr; }
 
 private:
     virtual SkStream* onDuplicate() const { return nullptr; }
@@ -240,8 +242,11 @@ public:
         uint16_t v = SkToU16(value);
         return this->write(&v, 2);
     }
-    bool write32(uint32_t v) {
-        return this->write(&v, 4);
+    bool write32(uint32_t value) {
+        return this->write(&value, 4);
+    }
+    bool write64(uint64_t value) {
+        return this->write(&value, 8);
     }
 
     bool writeText(const char text[]) {
@@ -392,10 +397,9 @@ public:
     */
     void setMemoryOwned(const void* data, size_t length);
 
-    sk_sp<SkData> asData() const { return fData; }
+    sk_sp<SkData> getData() const override { return fData; }
     void setData(sk_sp<SkData> data);
 
-    void skipToAlign4();
     const void* getAtPos();
 
     size_t read(void* buffer, size_t size) override;

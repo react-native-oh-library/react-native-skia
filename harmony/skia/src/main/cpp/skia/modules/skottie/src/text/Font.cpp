@@ -7,11 +7,21 @@
 
 #include "modules/skottie/src/text/Font.h"
 
+#include "include/core/SkMatrix.h"
 #include "include/core/SkPath.h"
+#include "include/core/SkPathBuilder.h"
+#include "include/core/SkRect.h"
+#include "include/core/SkSize.h"
+#include "include/core/SkString.h"
+#include "include/core/SkTypeface.h"
+#include "include/private/base/SkTFitsIn.h"
+#include "include/private/base/SkTo.h"
+#include "modules/jsonreader/SkJSONReader.h"
 #include "modules/skottie/src/SkottieJson.h"
 #include "modules/skottie/src/SkottiePriv.h"
 #include "modules/sksg/include/SkSGPath.h"
 #include "modules/sksg/include/SkSGTransform.h"
+#include "src/base/SkUTF.h"
 
 namespace skottie::internal {
 
@@ -75,7 +85,7 @@ bool CustomFont::Builder::parseGlyph(const AnimationBuilder* abuilder,
         return false;
     }
 
-    path.transform(SkMatrix::Scale(kPtScale, kPtScale));
+    path = path.makeTransform(SkMatrix::Scale(kPtScale, kPtScale));
 
     fCustomBuilder.setGlyph(glyph_id, advance, path);
 
@@ -109,6 +119,7 @@ bool CustomFont::Builder::ParseGlyphPath(const skottie::internal::AnimationBuild
         return true;
     }
 
+    SkPathBuilder builder;
     for (const skjson::ObjectValue* jgrp : *jshapes) {
         if (!jgrp) {
             return false;
@@ -134,9 +145,10 @@ bool CustomFont::Builder::ParseGlyphPath(const skottie::internal::AnimationBuild
                 return false;
             }
 
-            path->addPath(path_node->getPath());
+            builder.addPath(path_node->getPath());
         }
     }
+    *path = builder.detach();
 
     return true;
 }
@@ -156,7 +168,8 @@ CustomFont::Builder::ParseGlyphComp(const AnimationBuilder* abuilder,
     //       "ks": <transform info>
     //   }
 
-    AnimationBuilder::LayerInfo linfo{
+    LayerInfo linfo{
+        ParseDefault<SkString>(jdata["nm"], SkString()),
         {0,0},
         ParseDefault<float>(jdata["ip"], 0.0f),
         ParseDefault<float>(jdata["op"], 0.0f)

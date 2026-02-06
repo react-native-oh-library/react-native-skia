@@ -1,8 +1,10 @@
-load("//bazel:skia_rules.bzl", "exports_files_legacy")
+load("@rules_cc//cc:cc_binary.bzl", "cc_binary")
+
+package(
+    default_applicable_licenses = ["//:license"],
+)
 
 licenses(["notice"])
-
-exports_files_legacy()
 
 cc_binary(
     name = "sksllex",

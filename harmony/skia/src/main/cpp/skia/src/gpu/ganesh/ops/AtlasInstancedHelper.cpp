@@ -1,15 +1,19 @@
 /*
- * Copyright 2020 Google LLC.
+ * Copyright 2020 Google LLC
  *
  * Use of this source code is governed by a BSD-style license that can be
  * found in the LICENSE file.
  */
-
 #include "src/gpu/ganesh/ops/AtlasInstancedHelper.h"
 
+#include "include/core/SkSize.h"
+#include "include/private/gpu/ganesh/GrTypesPriv.h"
+#include "src/core/SkSLTypeShared.h"
 #include "src/gpu/BufferWriter.h"
 #include "src/gpu/KeyBuilder.h"
+#include "src/gpu/ganesh/GrShaderVar.h"
 #include "src/gpu/ganesh/glsl/GrGLSLFragmentShaderBuilder.h"
+#include "src/gpu/ganesh/glsl/GrGLSLProgramDataManager.h"
 #include "src/gpu/ganesh/glsl/GrGLSLVarying.h"
 #include "src/gpu/ganesh/glsl/GrGLSLVertexGeoBuilder.h"
 
@@ -73,10 +77,11 @@ void AtlasInstancedHelper::injectShaderCode(
         GrGLSLVarying atlasBounds(SkSLType::kFloat4);
         args.fVaryingHandler->addVarying("atlasbounds", &atlasBounds,
                                          GrGLSLVaryingHandler::Interpolation::kCanBeFlat);
-        args.fVertBuilder->codeAppendf(R"(
-        float4 atlasBounds = atlasTopLeft.xyxy + (transposed ? sizeInAtlas.00yx
-                                                             : sizeInAtlas.00xy);
-        %s = atlasBounds * %s.xyxy;)", atlasBounds.vsOut(), atlasAdjustName);
+        args.fVertBuilder->codeAppendf(
+        "float4 atlasBounds = atlasTopLeft.xyxy + (transposed ? sizeInAtlas.00yx"
+                                                             ": sizeInAtlas.00xy);"
+        "%s = atlasBounds * %s.xyxy;",
+        atlasBounds.vsOut(), atlasAdjustName);
 
         args.fFragBuilder->codeAppendf(
         "half atlasCoverage = 0;"
@@ -86,8 +91,9 @@ void AtlasInstancedHelper::injectShaderCode(
             "all(lessThan(atlasCoord, atlasBounds.zw))) {"
             "atlasCoverage = ", atlasCoord.fsIn(), atlasBounds.fsIn());
         args.fFragBuilder->appendTextureLookup(args.fTexSamplers[0], "atlasCoord");
-        args.fFragBuilder->codeAppendf(R"(.a;
-        })");
+        args.fFragBuilder->codeAppendf(
+            ".a;"
+        "}");
     } else {
         args.fFragBuilder->codeAppendf("half atlasCoverage = ");
         args.fFragBuilder->appendTextureLookup(args.fTexSamplers[0], atlasCoord.fsIn());

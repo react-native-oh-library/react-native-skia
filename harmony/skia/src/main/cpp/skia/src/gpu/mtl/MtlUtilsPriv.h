@@ -10,7 +10,8 @@
 
 #import <Metal/Metal.h>
 
-#include "src/gpu/PipelineUtils.h"
+#include "include/core/SkTextureCompressionType.h"
+#include "src/gpu/SkSLToBackend.h"
 #include "src/sksl/codegen/SkSLMetalCodeGenerator.h"
 
 namespace SkSL {
@@ -30,29 +31,32 @@ inline bool SkSLToMSL(const SkSL::ShaderCaps* caps,
                       const std::string& sksl,
                       SkSL::ProgramKind programKind,
                       const SkSL::ProgramSettings& settings,
-                      std::string* msl,
+                      SkSL::NativeShader* msl,
                       SkSL::ProgramInterface* outInterface,
                       ShaderErrorHandler* errorHandler) {
-    return SkSLToBackend(caps, &SkSL::ToMetal, "MSL",
-                         sksl, programKind, settings, msl, outInterface, errorHandler);
+    return SkSLToBackend(caps,
+                         &SkSL::ToMetal,
+                         "MSL",
+                         sksl,
+                         programKind,
+                         settings,
+                         msl,
+                         outInterface,
+                         errorHandler);
 }
 
-bool MtlFormatIsDepthOrStencil(MTLPixelFormat);
-bool MtlFormatIsDepth(MTLPixelFormat);
-bool MtlFormatIsStencil(MTLPixelFormat);
 bool MtlFormatIsCompressed(MTLPixelFormat);
+
+// NOTE: All of these functions are actually only used by Ganesh. When building Graphite in
+// isolation, the linker should drop them.
 
 uint32_t MtlFormatChannels(MTLPixelFormat);
 
 size_t MtlFormatBytesPerBlock(MTLPixelFormat);
 
-#if defined(SK_DEBUG) || defined(GR_TEST_UTILS)
-const char* MtlFormatToString(MTLPixelFormat);
-#endif
+SkTextureCompressionType MtlFormatToCompressionType(MTLPixelFormat);
 
-#ifdef SK_BUILD_FOR_IOS
-bool MtlIsAppInBackground();
-#endif
+const char* MtlFormatToString(MTLPixelFormat);
 
 }  // namespace skgpu
 

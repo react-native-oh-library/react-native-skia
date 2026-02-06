@@ -23,6 +23,7 @@
 #include "include/private/base/SkTDArray.h"
 #include "src/base/SkZip.h"
 #include "src/core/SkDevice.h"
+#include "src/core/SkDraw.h"
 #include "src/core/SkDrawShadowInfo.h"
 #include "src/core/SkGlyph.h"
 #include "src/core/SkGlyphRunPainter.h"
@@ -58,7 +59,7 @@ SkOverdrawCanvas::SkOverdrawCanvas(SkCanvas* canvas)
 }
 
 namespace {
-class TextDevice : public SkNoPixelsDevice, public SkGlyphRunListPainterCPU::BitmapDevicePainter {
+class TextDevice : public SkNoPixelsDevice, public skcpu::BitmapDevicePainter {
 public:
     TextDevice(SkCanvas* overdrawCanvas, const SkSurfaceProps& props)
             : SkNoPixelsDevice{SkIRect::MakeWH(32767, 32767), props},
@@ -69,7 +70,7 @@ public:
         for (auto [glyph, pos] : accepted) {
             SkMask mask = glyph->mask(pos);
             // We need to ignore any matrix on the overdraw canvas (it's already been baked into
-            // our glyph positions). Otherwise, the CTM is double-applied. (skbug.com/13732)
+            // our glyph positions). Otherwise, the CTM is double-applied. (skbug.com/40044818)
             fOverdrawCanvas->save();
             fOverdrawCanvas->resetMatrix();
             fOverdrawCanvas->drawRect(SkRect::Make(mask.fBounds), SkPaint());
@@ -82,16 +83,15 @@ public:
 
     void onDrawGlyphRunList(SkCanvas* canvas,
                             const sktext::GlyphRunList& glyphRunList,
-                            const SkPaint& initialPaint,
-                            const SkPaint& drawingPaint) override {
+                            const SkPaint& paint) override {
         SkASSERT(!glyphRunList.hasRSXForm());
-        fPainter.drawForBitmapDevice(canvas, this, glyphRunList, drawingPaint,
-                                     fOverdrawCanvas->getTotalMatrix());
+        fPainter.drawForBitmapDevice(
+                canvas, this, glyphRunList, paint, fOverdrawCanvas->getTotalMatrix());
     }
 
 private:
     SkCanvas* const fOverdrawCanvas;
-    SkGlyphRunListPainterCPU fPainter;
+    skcpu::GlyphRunListPainter fPainter;
 };
 }  // namespace
 
@@ -102,14 +102,13 @@ void SkOverdrawCanvas::onDrawTextBlob(
     this->onDrawGlyphRunList(glyphRunList, paint);
 }
 
-void SkOverdrawCanvas::onDrawGlyphRunList(
-        const sktext::GlyphRunList& glyphRunList,
-        const SkPaint& paint) {
+void SkOverdrawCanvas::onDrawGlyphRunList(const sktext::GlyphRunList& glyphRunList,
+                                          const SkPaint& paint) {
     SkSurfaceProps props;
     this->getProps(&props);
     TextDevice device{this, props};
 
-    device.drawGlyphRunList(this, glyphRunList, paint, paint);
+    device.drawGlyphRunList(this, glyphRunList, paint);
 }
 
 void SkOverdrawCanvas::onDrawPatch(const SkPoint cubics[12], const SkColor colors[4],
@@ -221,7 +220,6 @@ void SkOverdrawCanvas::onDrawDrawable(SkDrawable* drawable, const SkMatrix* matr
 
 void SkOverdrawCanvas::onDrawPicture(const SkPicture*, const SkMatrix*, const SkPaint*) {
     SkASSERT(false);
-    return;
 }
 
 void SkOverdrawCanvas::onDrawAnnotation(const SkRect&, const char[], SkData*) {}
@@ -235,7 +233,7 @@ void SkOverdrawCanvas::onDrawShadowRec(const SkPath& path, const SkDrawShadowRec
 void SkOverdrawCanvas::onDrawEdgeAAQuad(const SkRect& rect, const SkPoint clip[4],
                                         QuadAAFlags aa, const SkColor4f& color, SkBlendMode mode) {
     if (clip) {
-        fList[0]->onDrawPath(SkPath::Polygon(clip, 4, true), fPaint);
+        fList[0]->onDrawPath(SkPath::Polygon({clip, 4}, true), fPaint);
     } else {
         fList[0]->onDrawRect(rect, fPaint);
     }
@@ -254,7 +252,7 @@ void SkOverdrawCanvas::onDrawEdgeAAImageSet2(const ImageSetEntry set[], int coun
             fList[0]->concat(preViewMatrices[set[i].fMatrixIndex]);
         }
         if (set[i].fHasClip) {
-            fList[0]->onDrawPath(SkPath::Polygon(dstClips + clipIndex, 4, true), fPaint);
+            fList[0]->onDrawPath(SkPath::Polygon({dstClips + clipIndex, 4}, true), fPaint);
             clipIndex += 4;
         } else {
             fList[0]->onDrawRect(set[i].fDstRect, fPaint);

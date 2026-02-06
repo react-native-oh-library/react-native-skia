@@ -7,14 +7,21 @@
 
 #include "modules/skottie/src/effects/Effects.h"
 
+#include "modules/skottie/include/Skottie.h"
+#include "modules/skottie/include/SkottieProperty.h"
 #include "modules/skottie/src/Composition.h"
 #include "modules/skottie/src/Layer.h"
 #include "modules/skottie/src/SkottieJson.h"
+#include "modules/skottie/src/SkottiePriv.h"
 #include "modules/sksg/include/SkSGRenderEffect.h"
-#include "src/utils/SkJSON.h"
+#include "modules/sksg/include/SkSGRenderNode.h"
 
 #include <algorithm>
+#include <cstdint>
+#include <cstring>
 #include <iterator>
+#include <limits>
+#include <utility>
 
 namespace skottie {
 namespace internal {
@@ -184,6 +191,14 @@ const skjson::Value& EffectBuilder::GetPropValue(const skjson::ArrayValue& jprop
     const skjson::ObjectValue* jprop = jprops[prop_index];
 
     return jprop ? (*jprop)["v"] : kNull;
+}
+
+EffectBuilder::LayerContent EffectBuilder::getLayerContent(int layer_index) const {
+    if (LayerBuilder* lbuilder = fCompBuilder->layerBuilder(layer_index)) {
+        return { lbuilder->getContentTree(*fBuilder, fCompBuilder), lbuilder->size() };
+    }
+
+    return { nullptr, {0, 0} };
 }
 
 MaskShaderEffectBase::MaskShaderEffectBase(sk_sp<sksg::RenderNode> child, const SkSize& ls)

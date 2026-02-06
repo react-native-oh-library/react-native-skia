@@ -21,12 +21,8 @@ public:
     SkiaPictureViewProps() = default;
 
     SkiaPictureViewProps(const PropsParserContext &context, const SkiaPictureViewProps &sourceProps, const RawProps &rawProps)
-        : ViewProps(context, sourceProps, rawProps),
-          mode(sourceProps.mode),
-          debug(sourceProps.debug) {}
-
-    std::string mode{};
-    bool debug{true};
+        : ViewProps(context, sourceProps, rawProps)
+        {}
 };
 
 class SkiaPictureViewEventEmitter : public ViewEventEmitter {
@@ -37,11 +33,7 @@ public:
 using SkiaPictureViewShadowNode =
     ConcreteViewShadowNode<SkiaPictureViewComponentName, SkiaPictureViewProps, SkiaPictureViewEventEmitter>;
 
-class SkiaPictureViewComponentDescriptor final : public ConcreteComponentDescriptor<SkiaPictureViewShadowNode> {
-public:
-    SkiaPictureViewComponentDescriptor(ComponentDescriptorParameters const &parameters)
-        : ConcreteComponentDescriptor(parameters) {}
-};
+using SkiaPictureViewComponentDescriptor = ConcreteComponentDescriptor<SkiaPictureViewShadowNode>;
 
 } // namespace react
 } // namespace facebook

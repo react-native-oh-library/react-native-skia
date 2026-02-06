@@ -18,32 +18,13 @@
 #include "RNOHCorePackage/ComponentBinders/ViewComponentJSIBinder.h"
 
 namespace rnoh {
-class SkiaDomViewJSIBinder : public ViewComponentJSIBinder {
-protected:
-    facebook::jsi::Object createNativeProps(facebook::jsi::Runtime &rt) override {
-        auto object = ViewComponentJSIBinder::createNativeProps(rt);
-        object.setProperty(rt, "mode", true);
-        object.setProperty(rt, "debug", true);
-        return object;
-    }
-
-    facebook::jsi::Object createBubblingEventTypes(facebook::jsi::Runtime &rt) override {
-        facebook::jsi::Object events(rt);
-        events.setProperty(rt, "topBubblingEvent", createBubblingCapturedEvent(rt, "onBubblingEvent"));
-        return events;
-    }
-
-    facebook::jsi::Object createDirectEventTypes(facebook::jsi::Runtime &rt) override {
-        facebook::jsi::Object events(rt);
-        events.setProperty(rt, "topDirectEvent", createDirectEvent(rt, "onDirectEvent"));
-        return events;
-    }
-};
-
 class SkiaPictureViewJSIBinder : public ViewComponentJSIBinder {
 protected:
     facebook::jsi::Object createNativeProps(facebook::jsi::Runtime &rt) override {
         auto object = ViewComponentJSIBinder::createNativeProps(rt);
+        object.setProperty(rt, "debug", true);
+        object.setProperty(rt, "colorSpace", "Object");
+        object.setProperty(rt, "opaque", true);
         return object;
     }
 

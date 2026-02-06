@@ -8,20 +8,25 @@
 #ifndef skgpu_graphite_TextAtlasManager_DEFINED
 #define skgpu_graphite_TextAtlasManager_DEFINED
 
-#include "include/gpu/graphite/TextureInfo.h"
+#include "include/core/SkRefCnt.h"  // IWYU pragma: keep
+#include "include/private/base/SkAssert.h"
 #include "src/gpu/AtlasTypes.h"
-#include "src/gpu/graphite/Caps.h"
 #include "src/gpu/graphite/DrawAtlas.h"
+
+#include <cstdint>
+#include <memory>
+
+class SkGlyph;
 
 namespace sktext::gpu {
 class Glyph;
 }
-class SkGlyph;
 
 namespace skgpu::graphite {
 
+class DrawContext;
 class Recorder;
-class UploadList;
+class TextureProxy;
 
 //////////////////////////////////////////////////////////////////////////////////////////////////
 /** The TextAtlasManager manages the lifetime of and access to DrawAtlases used in glyph rendering.
@@ -45,7 +50,7 @@ public:
         return nullptr;
     }
 
-    void freeAll();
+    void freeGpuResources();
 
     bool hasGlyph(MaskFormat, sktext::gpu::Glyph*);
 
@@ -59,15 +64,15 @@ public:
     // For convenience, this function will also set the use token for the current glyph if required
     // NOTE: the bulk uploader is only valid if the subrun has a valid atlasGeneration
     void addGlyphToBulkAndSetUseToken(BulkUsePlotUpdater*, MaskFormat,
-                                      sktext::gpu::Glyph*, AtlasToken);
+                                      sktext::gpu::Glyph*, Token);
 
     void setUseTokenBulk(const BulkUsePlotUpdater& updater,
-                         AtlasToken token,
+                         Token token,
                          MaskFormat format) {
         this->getAtlas(format)->setLastUseTokenBulk(updater, token);
     }
 
-    bool recordUploads(UploadList*);
+    bool recordUploads(DrawContext* dc);
 
     void evictAtlases() {
         for (int i = 0; i < kMaskFormatCount; ++i) {
@@ -77,8 +82,10 @@ public:
         }
     }
 
+    void compact();
+
     // Some clients may wish to verify the integrity of the texture backing store of the
-    // GrDrawOpAtlas. The atlasGeneration returned below is a monotonically increasing number which
+    // DrawAtlas. The atlasGeneration returned below is a monotonically increasing number which
     // changes every time something is removed from the texture backing store.
     uint64_t atlasGeneration(skgpu::MaskFormat format) const {
         return this->getAtlas(format)->atlasGeneration();

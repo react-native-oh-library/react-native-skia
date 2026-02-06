@@ -6,30 +6,74 @@
  */
 
 #include "src/gpu/graphite/GraphicsPipeline.h"
+
+#include "src/core/SkTraceEvent.h"
+#include "src/gpu/graphite/ContextUtils.h"
+#include "src/gpu/graphite/GraphicsPipelineDesc.h"
+#include "src/gpu/graphite/PaintParamsKey.h"
+#include "src/gpu/graphite/Renderer.h"
+#include "src/gpu/graphite/ShaderCodeDictionary.h"
+#include "src/gpu/graphite/ShaderInfo.h"
 #include "src/utils/SkShaderUtils.h"
 
 namespace skgpu::graphite {
 
-GraphicsPipeline::GraphicsPipeline(const SharedContext* sharedContext, PipelineInfo* pipelineInfo)
+GraphicsPipeline::GraphicsPipeline(const SharedContext* sharedContext,
+                                   const PipelineInfo& pipelineInfo)
         : Resource(sharedContext,
                    Ownership::kOwned,
-                   skgpu::Budgeted::kYes,
-                   /*gpuMemorySize=*/0,
-                   /*label=*/"GraphicsPipeline") {
-#if defined(GRAPHITE_TEST_UTILS)
-    if (pipelineInfo) {
-        fPipelineInfo.fRenderStepID = pipelineInfo->fRenderStepID;
-        fPipelineInfo.fPaintID = pipelineInfo->fPaintID;
-        fPipelineInfo.fSkSLVertexShader =
-                SkShaderUtils::PrettyPrint(pipelineInfo->fSkSLVertexShader);
-        fPipelineInfo.fSkSLFragmentShader =
-                SkShaderUtils::PrettyPrint(pipelineInfo->fSkSLFragmentShader);
-        fPipelineInfo.fNativeVertexShader = std::move(pipelineInfo->fNativeVertexShader);
-        fPipelineInfo.fNativeFragmentShader = std::move(pipelineInfo->fNativeFragmentShader);
-    }
+                   /*gpuMemorySize=*/0)
+        , fPipelineInfo(pipelineInfo) {}
+
+GraphicsPipeline::~GraphicsPipeline() {
+#if defined(SK_PIPELINE_LIFETIME_LOGGING)
+    static const char* kNames[2] = { "DeletionN", "DeletionP" };
+    TRACE_EVENT_INSTANT2("skia.gpu",
+                         TRACE_STR_STATIC(kNames[this->fromPrecompile()]),
+                         TRACE_EVENT_SCOPE_THREAD,
+                         "key", this->getPipelineInfo().fUniqueKeyHash,
+                         "compilationID", this->getPipelineInfo().fCompilationID);
 #endif
 }
 
-GraphicsPipeline::~GraphicsPipeline() = default;
+GraphicsPipeline::PipelineInfo::PipelineInfo(
+            const ShaderInfo& shaderInfo,
+            SkEnumBitMask<PipelineCreationFlags> pipelineCreationFlags,
+            uint32_t uniqueKeyHash,
+            uint32_t compilationID)
+        : fDstReadStrategy(shaderInfo.dstReadStrategy())
+        , fNumFragTexturesAndSamplers(shaderInfo.numFragmentTexturesAndSamplers())
+        , fHasPaintUniforms(shaderInfo.hasPaintUniforms())
+        , fHasStepUniforms(shaderInfo.hasStepUniforms())
+        , fHasGradientBuffer(shaderInfo.hasGradientBuffer())
+        , fUniqueKeyHash(uniqueKeyHash)
+        , fCompilationID(compilationID)
+        , fFromPrecompile(pipelineCreationFlags & PipelineCreationFlags::kForPrecompilation) {
+#if defined(GPU_TEST_UTILS)
+    fSkSLVertexShader = SkShaderUtils::PrettyPrint(shaderInfo.vertexSkSL());
+    fSkSLFragmentShader = SkShaderUtils::PrettyPrint(shaderInfo.fragmentSkSL());
+#endif
+
+#if defined(SK_TRACE_GRAPHITE_PIPELINE_USE) || defined(GPU_TEST_UTILS)
+    // For pipelines that shade, the FS label includes the same info as the VS label. But for
+    // depth-only clip draws there is no FS label, so switch to the VS label.
+    fLabel = shaderInfo.fsLabel().empty() ? shaderInfo.vsLabel() : shaderInfo.fsLabel();
+#endif
+}
+
+#if defined(GPU_TEST_UTILS)
+SkString GraphicsPipelineDesc::toString(ShaderCodeDictionary* dict) const {
+    SkString tmp;
+
+    tmp.append(RenderStep::RenderStepName(fRenderStepID));
+    tmp.append(" - ");
+
+    PaintParamsKey key = dict->lookup(fPaintID);
+
+    tmp.append(key.toString(dict));
+
+    return tmp;
+}
+#endif
 
 }  // namespace skgpu::graphite

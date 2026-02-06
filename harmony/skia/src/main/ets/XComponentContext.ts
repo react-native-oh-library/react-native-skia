@@ -5,7 +5,7 @@
  */
 
 export default interface XComponentContext {
-  registerView(xComponentId: string, nativeId: number): void;
+  registerView(xComponentId: string, nativeId: number, isColorSpace: boolean): void;
   setModeAndDebug(xComponentId: string, mode: string, show: boolean): void;
   onSurfaceSizeChanged(xComponentId: string, nativeId: number, width: number, height: number): void;
   unregisterView(xComponentId: string, nativeId: number): void;

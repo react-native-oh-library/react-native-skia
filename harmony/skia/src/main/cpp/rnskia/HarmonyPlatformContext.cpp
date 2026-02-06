@@ -23,13 +23,13 @@
 #include "include/ports/SkFontMgr_android.h"
 #include "include/gpu/ganesh/SkImageGanesh.h"
 #include "plugin_manager.h"
-#include "src/gpu/ganesh/gl/GrGLDefines.h"
 #include "SkiaManager.h"
 #include "skia_ohos/SkFontMgr_ohos.h"
 #include "RNOH/RNInstance.h"
 #include "RNOH/RNInstanceCAPI.h"
 #include "RNSkHarmonyVideo.h"
 #include "RNSkiaModule.h"
+#include "OpenGLWindowContext.h"
 
 namespace RNSkia {
 
@@ -38,40 +38,12 @@ thread_local SkiaOpenGLContext ThreadContextHarmonyHolder::ThreadSkiaOpenGLConte
 
 HarmonyPlatformContext::HarmonyPlatformContext(jsi::Runtime *runtime, std::shared_ptr<react::CallInvoker> callInvoker,
                                                float pixelDensity)
-    : RNSkPlatformContext(runtime, callInvoker, pixelDensity), drawLoopActive(false),
-      playLink(std::make_unique<PlayLink>([this](double deltaTime) {
-        runOnMainThread([this](){
-            notifyDrawLoop(false);
-        });
-      })) {
+    : RNSkPlatformContext(callInvoker, pixelDensity) {
     mainThread = std::thread(&HarmonyPlatformContext::runTaskOnMainThread, this);
     _runtime = runtime;
 }
 
 HarmonyPlatformContext::~HarmonyPlatformContext() { SetStopRunOnMainThread(); }
-
-// 启动绘图循环
-void HarmonyPlatformContext::startDrawLoop() {
-    if (drawLoopActive) {
-        return;
-    }
-    // 确保不会重复启动绘图循环
-    drawLoopActive = true;
-
-    if (playLink) {
-        playLink->startDrawLoop();
-    }
-}
-
-void HarmonyPlatformContext::stopDrawLoop() {
-    if (drawLoopActive) {
-        drawLoopActive = false;
-    }
-
-    if (playLink) {
-        playLink->stopDrawLoop();
-    }
-}
 
 // 添加任务队列，通知主线程
 void HarmonyPlatformContext::runTaskOnMainThread() {
@@ -107,31 +79,6 @@ void HarmonyPlatformContext::runOnMainThread(std::function<void()> task) {
 
 // 从本地缓冲区（native buffer）转为Skia的SkImage对象
 sk_sp<SkImage> HarmonyPlatformContext::makeImageFromNativeBuffer(void *buffer) {
-//     OH_NativeBuffer *nativeBuffer = static_cast<OH_NativeBuffer *>(buffer);
-//
-//     DeleteImageProc deleteImageProc = nullptr;
-//     UpdateImageProc updateImageProc = nullptr;
-//     TexImageCtx deleteImageCtx = nullptr;
-//
-//     OH_NativeBuffer_Config config;
-//     if(nativeBuffer) {
-//         OH_NativeBuffer_GetConfig(nativeBuffer, &config);
-//     }
-//     DLOG(INFO) << "HarmonyPlatformContext config.width: "<<config.width<<" config.height: " <<config.height;
-//     GrBackendFormat format = GrBackendFormats::MakeGL(GR_GL_RGBA8, GR_GL_TEXTURE_EXTERNAL);
-//
-//     auto backendTex = MakeGLBackendTexture(ThreadContextHarmonyHolder::ThreadSkiaOpenGLContext.directContext.get(),
-//                                            nativeBuffer, config.width, config.height,
-//                                            &deleteImageProc, &updateImageProc, 
-//                                             &deleteImageCtx,false, format, false);
-//     if (!backendTex.isValid()) {
-//         DLOG(INFO) << "HarmonyPlatformContext OpenGL Texture 转换失败";
-//         return nullptr;
-//     }
-//
-//     sk_sp<SkImage> image = SkImages::BorrowTextureFrom(ThreadContextHarmonyHolder::ThreadSkiaOpenGLContext.directContext.get(),
-//                                                        backendTex, kTopLeft_GrSurfaceOrigin, kRGB_565_SkColorType,
-//                                                        kOpaque_SkAlphaType, nullptr, deleteImageProc, deleteImageCtx);
     return SkiaOpenGLSurfaceFactory::makeImageFromHardwareBuffer(buffer);
 }
 
@@ -488,8 +435,89 @@ void HarmonyPlatformContext::setNativeResourceManager(const NativeResourceManage
     this->nativeResourceManager = nativeResMgr;
 }
 
-// void HarmonyPlatformContext::runOnDrawThread(std::function<void()> task){
-//     playLink->runOnDrawThread(task);
-// }
+
+GrDirectContext *HarmonyPlatformContext::getDirectContext() {
+    return ThreadContextHarmonyHolder::ThreadSkiaOpenGLContext.directContext.get();
+}
+
+
+sk_sp<SkImage> HarmonyPlatformContext::makeImageFromNativeTexture(const TextureInfo &texInfo,
+                                            int width, int height,
+                                            bool mipMapped) {
+    GrGLTextureInfo textureInfo;
+    textureInfo.fTarget = (GrGLenum)texInfo.glTarget;
+    textureInfo.fID = (GrGLuint)texInfo.glID;
+    textureInfo.fFormat = (GrGLenum)texInfo.glFormat;
+    textureInfo.fProtected =
+        texInfo.glProtected ? skgpu::Protected::kYes : skgpu::Protected::kNo;
+
+    SkiaOpenGLHelper::makeCurrent(&ThreadContextHarmonyHolder::ThreadSkiaOpenGLContext,
+                                       ThreadContextHarmonyHolder::ThreadSkiaOpenGLContext.gl1x1Surface);
+    if (glIsTexture(textureInfo.fID) == GL_FALSE) {
+      throw std::runtime_error("Invalid textureInfo");
+    }
+    GrBackendTexture backendTexture = GrBackendTextures::MakeGL(
+        width, height,
+        mipMapped ? skgpu::Mipmapped::kYes : skgpu::Mipmapped::kNo,
+        textureInfo);
+    return SkImages::BorrowTextureFrom(
+        ThreadContextHarmonyHolder::ThreadSkiaOpenGLContext.directContext.get(), backendTexture,
+        kTopLeft_GrSurfaceOrigin, kRGBA_8888_SkColorType, kUnpremul_SkAlphaType,
+        nullptr);
+  }
+
+   static TextureInfo getTextureInfo(const GrBackendTexture &texture) {
+    if (!texture.isValid()) {
+      throw std::runtime_error("invalid backend texture");
+    }
+    GrGLTextureInfo textureInfo;
+    if (!GrBackendTextures::GetGLTextureInfo(texture, &textureInfo)) {
+      throw std::runtime_error("couldn't get OpenGL texture");
+    }
+
+    SkiaOpenGLHelper::makeCurrent(&ThreadContextHarmonyHolder::ThreadSkiaOpenGLContext,
+                                       ThreadContextHarmonyHolder::ThreadSkiaOpenGLContext.gl1x1Surface);
+    glFlush();
+
+    TextureInfo texInfo;
+    texInfo.glProtected = textureInfo.isProtected();
+    texInfo.glID = textureInfo.fID;
+    texInfo.glFormat = textureInfo.fFormat;
+    texInfo.glTarget = textureInfo.fTarget;
+    return texInfo;
+  }
+
+   const TextureInfo HarmonyPlatformContext::getTexture(sk_sp<SkImage> image) {
+    GrBackendTexture texture;
+    if (!SkImages::GetBackendTextureFromImage(image, &texture, true)) {
+      throw std::runtime_error("Couldn't get backend texture from image.");
+    }
+    return getTextureInfo(texture);
+  }
+
+    const TextureInfo HarmonyPlatformContext::getTexture(sk_sp<SkSurface> surface) {
+    GrBackendTexture texture = SkSurfaces::GetBackendTexture(
+        surface.get(), SkSurface::BackendHandleAccess::kFlushRead);
+    return getTextureInfo(texture);
+  }
+
+  std::vector<std::string> HarmonyPlatformContext::getSystemFontFamilies() {
+    return {};
+  }
+
+  std::string HarmonyPlatformContext::resolveFontFamily(const std::string &familyName) {
+    return "";
+  }
+
+    std::shared_ptr<WindowContext>
+  HarmonyPlatformContext::makeContextFromNativeSurface(void *surface, int width, int height) {
+    auto aWindow = reinterpret_cast<OHNativeWindow *>(surface);
+    auto display = OpenGLResourceHolder::getInstance().glDisplay.load(std::memory_order_acquire);
+    return std::make_unique<OpenGLWindowContext>(
+        ThreadContextHarmonyHolder::ThreadSkiaOpenGLContext.directContext.get(), &display, &ThreadContextHarmonyHolder::ThreadSkiaOpenGLContext.glContext, aWindow,
+        OpenGLResourceHolder::getInstance().glConfig);
+  }
+
+
 
 } // namespace RNSkia

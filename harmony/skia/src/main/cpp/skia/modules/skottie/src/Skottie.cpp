@@ -10,36 +10,49 @@
 #include "include/core/SkCanvas.h"
 #include "include/core/SkData.h"
 #include "include/core/SkFontMgr.h"
-#include "include/core/SkImage.h"
-#include "include/core/SkPaint.h"
-#include "include/core/SkPoint.h"
+#include "include/core/SkMatrix.h"
+#include "include/core/SkRect.h"
 #include "include/core/SkStream.h"
-#include "include/private/base/SkTArray.h"
+#include "include/private/base/SkDebug.h"
+#include "include/private/base/SkFloatingPoint.h"
 #include "include/private/base/SkTPin.h"
 #include "include/private/base/SkTo.h"
+#include "modules/jsonreader/SkJSONReader.h"
 #include "modules/skottie/include/ExternalLayer.h"
 #include "modules/skottie/include/SkottieProperty.h"
+#include "modules/skottie/include/SlotManager.h"
+#include "modules/skottie/src/Adapter.h"
 #include "modules/skottie/src/Composition.h"
 #include "modules/skottie/src/SkottieJson.h"
 #include "modules/skottie/src/SkottiePriv.h"
 #include "modules/skottie/src/SkottieValue.h"
-#include "modules/skottie/src/Transform.h"
+#include "modules/skottie/src/Transform.h"  // IWYU pragma: keep
+#include "modules/skottie/src/animator/Animator.h"
 #include "modules/skottie/src/text/TextAdapter.h"
-#include "modules/sksg/include/SkSGInvalidationController.h"
 #include "modules/sksg/include/SkSGOpacityEffect.h"
-#include "modules/sksg/include/SkSGPaint.h"
-#include "modules/sksg/include/SkSGPath.h"
-#include "modules/sksg/include/SkSGRenderEffect.h"
 #include "modules/sksg/include/SkSGRenderNode.h"
-#include "modules/sksg/include/SkSGTransform.h"
+#include "modules/skshaper/include/SkShaper_factory.h"
+#include "src/core/SkTHash.h"
 #include "src/core/SkTraceEvent.h"
 
+#include <algorithm>
 #include <chrono>
 #include <cmath>
+#include <cstdarg>
+#include <cstdio>
+#include <cstring>
+#include <functional>
 #include <memory>
 #include <ratio>
+#include <utility>
 
-#include <stdlib.h>
+#if !defined(SK_DISABLE_LEGACY_SHAPER_FACTORY)
+#include "modules/skshaper/utils/FactoryHelpers.h"
+#endif
+
+namespace sksg {
+class Color;
+}
 
 namespace skottie {
 
@@ -128,6 +141,7 @@ AnimationBuilder::AnimationBuilder(sk_sp<ResourceProvider> rp, sk_sp<SkFontMgr> 
                                    sk_sp<PropertyObserver> pobserver, sk_sp<Logger> logger,
                                    sk_sp<MarkerObserver> mobserver, sk_sp<PrecompInterceptor> pi,
                                    sk_sp<ExpressionManager> expressionmgr,
+                                   sk_sp<SkShapers::Factory> shapingFactory,
                                    Animation::Builder::Stats* stats,
                                    const SkSize& comp_size, float duration, float framerate,
                                    uint32_t flags)
@@ -138,6 +152,7 @@ AnimationBuilder::AnimationBuilder(sk_sp<ResourceProvider> rp, sk_sp<SkFontMgr> 
     , fMarkerObserver(std::move(mobserver))
     , fPrecompInterceptor(std::move(pi))
     , fExpressionManager(std::move(expressionmgr))
+    , fShapingFactory(std::move(shapingFactory))
     , fRevalidator(sk_make_sp<SceneGraphRevalidator>())
     , fSlotManager(sk_make_sp<SlotManager>(fRevalidator))
     , fStats(stats)
@@ -166,7 +181,7 @@ AnimationBuilder::AnimationInfo AnimationBuilder::parse(const skjson::ObjectValu
     fRevalidator->setRoot(root);
     fRevalidator->revalidate();
 
-    return { std::move(root), std::move(animators), std::move(fSlotManager)};
+    return { std::move(root), std::move(animators), std::move(fSlotManager), std::move(fLayerInfo)};
 }
 
 void AnimationBuilder::parseAssets(const skjson::ArrayValue* jassets) {
@@ -286,9 +301,9 @@ void AnimationBuilder::AutoPropertyTracker::updateContext(PropertyObserver* obse
 
 } // namespace internal
 
-void Logger::log(Level, const char[], const char*) {}
-
 Animation::Builder::Builder(uint32_t flags) : fFlags(flags) {}
+Animation::Builder::Builder(const Builder&) = default;
+Animation::Builder::Builder(Builder&&) = default;
 Animation::Builder::~Builder() = default;
 
 Animation::Builder& Animation::Builder::setResourceProvider(sk_sp<ResourceProvider> rp) {
@@ -323,6 +338,11 @@ Animation::Builder& Animation::Builder::setPrecompInterceptor(sk_sp<PrecompInter
 
 Animation::Builder& Animation::Builder::setExpressionManager(sk_sp<ExpressionManager> em) {
     fExpressionManager = std::move(em);
+    return *this;
+}
+
+Animation::Builder& Animation::Builder::setTextShapingFactory(sk_sp<SkShapers::Factory> factory) {
+    fShapingFactory = std::move(factory);
     return *this;
 }
 
@@ -382,18 +402,23 @@ sk_sp<Animation> Animation::Builder::make(const char* data, size_t data_len) {
                outPoint = std::max(ParseDefault<float>(json["op"], SK_ScalarMax), inPoint),
                duration = sk_ieee_float_divide(outPoint - inPoint, fps);
 
-    if (size.isEmpty() || version.isEmpty() || fps <= 0 ||
-        !SkScalarIsFinite(inPoint) || !SkScalarIsFinite(outPoint) || !SkScalarIsFinite(duration)) {
+    if (size.isEmpty() || fps <= 0 ||
+        !SkIsFinite(inPoint, outPoint, duration)) {
         if (fLogger) {
             const auto msg = SkStringPrintf(
-                         "Invalid animation params (version: %s, size: [%f %f], frame rate: %f, "
+                         "Invalid animation params (size: [%f %f], frame rate: %f, "
                          "in-point: %f, out-point: %f)\n",
-                         version.c_str(), size.width(), size.height(), fps, inPoint, outPoint);
+                         size.width(), size.height(), fps, inPoint, outPoint);
             fLogger->log(Logger::Level::kError, msg.c_str());
         }
         return nullptr;
     }
 
+#if defined(SK_DISABLE_LEGACY_SHAPER_FACTORY)
+    auto factory = fShapingFactory ? fShapingFactory : ::SkShapers::Primitive::Factory();
+#else
+    auto factory = fShapingFactory ? fShapingFactory : ::SkShapers::BestAvailable();
+#endif
     SkASSERT(resolvedProvider);
     internal::AnimationBuilder builder(std::move(resolvedProvider), fFontMgr,
                                        std::move(fPropertyObserver),
@@ -401,10 +426,12 @@ sk_sp<Animation> Animation::Builder::make(const char* data, size_t data_len) {
                                        std::move(fMarkerObserver),
                                        std::move(fPrecompInterceptor),
                                        std::move(fExpressionManager),
+                                       std::move(factory),
                                        &fStats, size, duration, fps, fFlags);
     auto ainfo = builder.parse(json);
 
     fSlotManager = ainfo.fSlotManager;
+    fLayerInfo = std::move(ainfo.fLayerInfo);
 
     const auto t2 = std::chrono::steady_clock::now();
     fStats.fSceneParseTimeMS = std::chrono::duration<float, std::milli>{t2-t1}.count();
@@ -467,7 +494,7 @@ void Animation::render(SkCanvas* canvas, const SkRect* dstR, RenderFlags renderF
 
     const SkRect srcR = SkRect::MakeSize(this->size());
     if (dstR) {
-        canvas->concat(SkMatrix::RectToRect(srcR, *dstR, SkMatrix::kCenter_ScaleToFit));
+        canvas->concat(SkMatrix::RectToRectOrIdentity(srcR, *dstR, SkMatrix::kCenter_ScaleToFit));
     }
 
     if (!(renderFlags & RenderFlag::kDisableTopLevelClipping)) {

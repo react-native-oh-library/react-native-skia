@@ -4,16 +4,23 @@
  * Use of this source code is governed by a BSD-style license that can be
  * found in the LICENSE file.
  */
+
 #include "modules/svg/include/SkSVGFilterContext.h"
 
 #include "include/core/SkBlendMode.h"
+#include "include/core/SkColor.h"
 #include "include/core/SkColorFilter.h"
 #include "include/core/SkColorSpace.h"
+#include "include/core/SkPaint.h"
+#include "include/core/SkShader.h"
 #include "include/effects/SkColorMatrix.h"
 #include "include/effects/SkImageFilters.h"
-#include "modules/svg/include/SkSVGNode.h"
+#include "include/private/base/SkAssert.h"
+#include "include/private/base/SkDebug.h"
 #include "modules/svg/include/SkSVGRenderContext.h"
 #include "modules/svg/include/SkSVGTypes.h"
+
+#include <utility>
 
 namespace {
 
@@ -98,7 +105,7 @@ std::tuple<sk_sp<SkImageFilter>, SkSVGColorspace> SkSVGFilterContext::getInput(
             break;
         case SkSVGFeInputType::Type::kFillPaint: {
             const auto& fillPaint = ctx.fillPaint();
-            if (fillPaint.isValid()) {
+            if (fillPaint.has_value()) {
                 auto dither = fillPaint->isDither() ? SkImageFilters::Dither::kYes
                                                     : SkImageFilters::Dither::kNo;
                 result = SkImageFilters::Shader(paint_as_shader(*fillPaint), dither);
@@ -109,7 +116,7 @@ std::tuple<sk_sp<SkImageFilter>, SkSVGColorspace> SkSVGFilterContext::getInput(
             // The paint filter doesn't apply fill/stroke styling, but use the paint settings
             // defined for strokes.
             const auto& strokePaint = ctx.strokePaint();
-            if (strokePaint.isValid()) {
+            if (strokePaint.has_value()) {
                 auto dither = strokePaint->isDither() ? SkImageFilters::Dither::kYes
                                                       : SkImageFilters::Dither::kNo;
                 result = SkImageFilters::Shader(paint_as_shader(*strokePaint), dither);
@@ -130,7 +137,7 @@ std::tuple<sk_sp<SkImageFilter>, SkSVGColorspace> SkSVGFilterContext::getInput(
             break;
         }
         default:
-            SkDebugf("unhandled filter input type %d\n", (int)inputType.type());
+            SkDEBUGF("unhandled filter input type %d\n", (int)inputType.type());
             break;
     }
 

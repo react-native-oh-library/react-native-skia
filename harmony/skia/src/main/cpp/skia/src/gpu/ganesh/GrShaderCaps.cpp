@@ -8,7 +8,7 @@
 
 #include "src/gpu/ganesh/GrShaderCaps.h"
 
-#include "include/gpu/GrContextOptions.h"
+#include "include/gpu/ganesh/GrContextOptions.h"
 
 ////////////////////////////////////////////////////////////////////////////////////////////
 
@@ -63,6 +63,8 @@ void GrShaderCaps::dumpJSON(SkJSONWriter* writer) const {
     writer->appendBool("Rewrite matrix equality comparisons", fRewriteMatrixComparisons);
     writer->appendBool("Rounding fix required for Perlin noise", fPerlinNoiseRoundingFix);
     writer->appendBool("Must declare fragment front-facing", fMustDeclareFragmentFrontFacing);
+    writer->appendBool("Cannot apply RelaxedPrecision to YCbCr sampling op",
+                       fCannotUseRelaxedPrecisionOnImageSample);
     writer->appendBool("Flat interpolation support", fFlatInterpolationSupport);
     writer->appendBool("Prefer flat interpolation", fPreferFlatInterpolation);
     writer->appendBool("No perspective interpolation support", fNoPerspectiveInterpolationSupport);
@@ -113,11 +115,12 @@ void GrShaderCaps::applyOptionsOverrides(const GrContextOptions& options) {
         SkASSERT(!fRewriteMatrixComparisons);
         SkASSERT(!fPerlinNoiseRoundingFix);
         SkASSERT(!fMustDeclareFragmentFrontFacing);
+        SkASSERT(!fCannotUseRelaxedPrecisionOnImageSample);
     }
     if (options.fReducedShaderVariations) {
         fReducedShaderMode = true;
     }
-#if defined(GR_TEST_UTILS)
+#if defined(GPU_TEST_UTILS)
     if (options.fSuppressDualSourceBlending) {
         fDualSourceBlendingSupport = false;
     }

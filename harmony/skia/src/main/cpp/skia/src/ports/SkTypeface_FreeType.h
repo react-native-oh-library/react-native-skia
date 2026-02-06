@@ -9,6 +9,7 @@
 #ifndef SkTypeface_Freetype_DEFINED
 #define SkTypeface_Freetype_DEFINED
 
+#include "include/core/SkFontScanner.h"
 #include "include/core/SkSpan.h"
 #include "include/core/SkTypeface.h"
 #include "include/core/SkTypes.h"
@@ -17,7 +18,6 @@
 #include "include/private/base/SkNoncopyable.h"
 #include "include/private/base/SkTArray.h"
 #include "src/base/SkSharedMutex.h"
-#include "src/core/SkFontScanner.h"
 #include "src/utils/SkCharToGlyphCache.h"
 
 class SkFontData;
@@ -31,37 +31,6 @@ typedef struct FT_BBox_ FT_BBox;
 
 class SkTypeface_FreeType : public SkTypeface {
 public:
-    /** For SkFontMgrs to make use of our ability to extract
-     *  name and style from a stream, using FreeType's API.
-     */
-    class Scanner : ::SkNoncopyable {
-    public:
-        Scanner();
-        ~Scanner();
-        struct AxisDefinition {
-            SkFourByteTag fTag;
-            SkFixed fMinimum;
-            SkFixed fDefault;
-            SkFixed fMaximum;
-        };
-        using AxisDefinitions = skia_private::STArray<4, AxisDefinition, true>;
-        bool recognizedFont(SkStreamAsset* stream, int* numFonts) const;
-        bool scanFont(SkStreamAsset* stream, int ttcIndex,
-                      SkString* name, SkFontStyle* style, bool* isFixedPitch,
-                      AxisDefinitions* axes) const;
-        static void computeAxisValues(
-            AxisDefinitions axisDefinitions,
-            const SkFontArguments::VariationPosition position,
-            SkFixed* axisValues,
-            const SkString& name,
-            const SkFontArguments::VariationPosition::Coordinate* currentPosition = nullptr);
-        static bool GetAxes(FT_Face face, AxisDefinitions* axes);
-    private:
-        FT_Face openFace(SkStreamAsset* stream, int ttcIndex, FT_Stream ftStream) const;
-        FT_Library fLibrary;
-        mutable SkMutex fLibraryMutex;
-    };
-
     /** Fetch units/EM from "head" table if needed (ie for bitmap fonts) */
     static int GetUnitsPerEm(FT_Face face);
 
@@ -77,28 +46,32 @@ protected:
     SkTypeface_FreeType(const SkFontStyle& style, bool isFixedPitch);
     ~SkTypeface_FreeType() override;
 
-    std::unique_ptr<SkFontData> cloneFontData(const SkFontArguments&) const;
-    std::unique_ptr<SkScalerContext> onCreateScalerContext(const SkScalerContextEffects&,
-                                                           const SkDescriptor*) const override;
+    std::unique_ptr<SkFontData> cloneFontData(const SkFontArguments&, SkFontStyle* style) const;
+    std::unique_ptr<SkScalerContext> onCreateScalerContext(
+            const SkScalerContextEffects&,
+            const SkDescriptor*) const override;
+    std::unique_ptr<SkScalerContext> onCreateScalerContextAsProxyTypeface(
+            const SkScalerContextEffects&,
+            const SkDescriptor*,
+            SkTypeface* proxyTypeface) const override;
     void onFilterRec(SkScalerContextRec*) const override;
-    void getGlyphToUnicodeMap(SkUnichar*) const override;
+    void getGlyphToUnicodeMap(SkSpan<SkUnichar>) const override;
     std::unique_ptr<SkAdvancedTypefaceMetrics> onGetAdvancedMetrics() const override;
     void getPostScriptGlyphNames(SkString* dstArray) const override;
     bool onGetPostScriptName(SkString*) const override;
     int onGetUPEM() const override;
-    bool onGetKerningPairAdjustments(const uint16_t glyphs[], int count,
-                                     int32_t adjustments[]) const override;
-    void onCharsToGlyphs(const SkUnichar uni[], int count, SkGlyphID glyphs[]) const override;
+    bool onGetKerningPairAdjustments(SkSpan<const SkGlyphID>,
+                                     SkSpan<int32_t> adjustments) const override;
+    void onCharsToGlyphs(SkSpan<const SkUnichar>, SkSpan<SkGlyphID>) const override;
     int onCountGlyphs() const override;
 
     LocalizedStrings* onCreateFamilyNameIterator() const override;
 
     bool onGlyphMaskNeedsCurrentColor() const override;
-    int onGetVariationDesignPosition(SkFontArguments::VariationPosition::Coordinate coordinates[],
-                                     int coordinateCount) const override;
-    int onGetVariationDesignParameters(SkFontParameters::Variation::Axis parameters[],
-                                       int parameterCount) const override;
-    int onGetTableTags(SkFontTableTag tags[]) const override;
+    int onGetVariationDesignPosition(
+                             SkSpan<SkFontArguments::VariationPosition::Coordinate>) const override;
+    int onGetVariationDesignParameters(SkSpan<SkFontParameters::Variation::Axis>) const override;
+    int onGetTableTags(SkSpan<SkFontTableTag>) const override;
     size_t onGetTableData(SkFontTableTag, size_t offset,
                           size_t length, void* data) const override;
     sk_sp<SkData> onCopyTableData(SkFontTableTag) const override;
@@ -136,31 +109,6 @@ protected:
 private:
     const SkString fFamilyName;
     const std::unique_ptr<const SkFontData> fData;
-};
-
-class SkFontScanner_FreeType : public SkFontScanner {
-public:
-    SkFontScanner_FreeType();
-    ~SkFontScanner_FreeType() override;
-
-    bool recognizedFont(SkStreamAsset* stream, int* numFaces) const override;
-    bool scanFont(SkStreamAsset* stream,
-                  int ttcIndex,
-                  SkString* name,
-                  SkFontStyle* style,
-                  bool* isFixedPitch,
-                  SkFontScanner::AxisDefinitions* axes) const override;
-    static void computeAxisValues(
-            AxisDefinitions axisDefinitions,
-            const SkFontArguments::VariationPosition position,
-            SkFixed* axisValues,
-            const SkString& name,
-            const SkFontArguments::VariationPosition::Coordinate* currentPosition = nullptr);
-    static bool GetAxes(FT_Face face, AxisDefinitions* axes);
-private:
-    FT_Face openFace(SkStreamAsset* stream, int ttcIndex, FT_Stream ftStream) const;
-    FT_Library fLibrary;
-    mutable SkMutex fLibraryMutex;
 };
 
 #endif // SkTypeface_Freetype_DEFINED

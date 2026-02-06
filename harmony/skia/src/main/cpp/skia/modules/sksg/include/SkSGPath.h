@@ -8,19 +8,25 @@
 #ifndef SkSGPath_DEFINED
 #define SkSGPath_DEFINED
 
-#include "modules/sksg/include/SkSGGeometryNode.h"
-
 #include "include/core/SkPath.h"
+#include "include/core/SkPathTypes.h"
+#include "include/core/SkRect.h"
+#include "include/core/SkRefCnt.h"
+#include "modules/sksg/include/SkSGGeometryNode.h"
+#include "modules/sksg/include/SkSGNode.h"
 
 class SkCanvas;
+class SkMatrix;
 class SkPaint;
+struct SkPoint;
 
 namespace sksg {
+class InvalidationController;
 
 /**
  * Concrete Geometry node, wrapping an SkPath.
  */
-class Path : public GeometryNode {
+class Path final : public GeometryNode {
 public:
     static sk_sp<Path> Make()                { return sk_sp<Path>(new Path(SkPath())); }
     static sk_sp<Path> Make(const SkPath& r) { return sk_sp<Path>(new Path(r)); }

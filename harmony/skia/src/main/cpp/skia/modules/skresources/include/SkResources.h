@@ -21,6 +21,7 @@
 #include <memory>
 
 class SkAnimCodecPlayer;
+class SkCodec;
 class SkImage;
 
 namespace skresources {
@@ -98,10 +99,19 @@ enum class ImageDecodeStrategy {
 
 class MultiFrameImageAsset final : public ImageAsset {
 public:
+    // Clients must call SkCodec::Register() to load the required decoding image codecs before
+    // calling Make. For example:
+    //     SkCodec::Register(SkPngDecoder::Decoder());
     static sk_sp<MultiFrameImageAsset> Make(sk_sp<SkData>,
+                                            ImageDecodeStrategy = ImageDecodeStrategy::kLazyDecode);
+    // If the client has already decoded the data, they can use this constructor.
+    static sk_sp<MultiFrameImageAsset> Make(std::unique_ptr<SkCodec>,
                                             ImageDecodeStrategy = ImageDecodeStrategy::kLazyDecode);
 
     bool isMultiFrame() override;
+
+    // Animation duration, in ms.
+    float duration() const;
 
     sk_sp<SkImage> getFrame(float t) override;
 
@@ -203,6 +213,7 @@ public:
 
 class FileResourceProvider final : public ResourceProvider {
 public:
+    // To decode images, clients must call SkCodecs::Register() before calling Make.
     static sk_sp<FileResourceProvider> Make(SkString base_dir,
                                             ImageDecodeStrategy = ImageDecodeStrategy::kLazyDecode);
 
@@ -251,10 +262,11 @@ private:
     using INHERITED = ResourceProviderProxyBase;
 };
 
-class DataURIResourceProviderProxy final : public ResourceProviderProxyBase {
+class SK_API DataURIResourceProviderProxy final : public ResourceProviderProxyBase {
 public:
     // If font data is supplied via base64 encoding, this needs a provided SkFontMgr to process
-    // that font data into an SkTypeface.
+    // that font data into an SkTypeface. To decode images, clients must call SkCodecs::Register()
+    // before calling Make.
     static sk_sp<DataURIResourceProviderProxy> Make(
             sk_sp<ResourceProvider> rp,
             ImageDecodeStrategy = ImageDecodeStrategy::kLazyDecode,

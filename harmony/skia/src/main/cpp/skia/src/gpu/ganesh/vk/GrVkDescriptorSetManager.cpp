@@ -7,10 +7,20 @@
 
 #include "src/gpu/ganesh/vk/GrVkDescriptorSetManager.h"
 
+#include "include/core/SkTypes.h"
+#include "include/private/base/SkTo.h"
+#include "include/private/gpu/ganesh/GrTypesPriv.h"
+#include "src/gpu/ganesh/vk/GrVkCaps.h"
 #include "src/gpu/ganesh/vk/GrVkDescriptorPool.h"
 #include "src/gpu/ganesh/vk/GrVkDescriptorSet.h"
 #include "src/gpu/ganesh/vk/GrVkGpu.h"
+#include "src/gpu/ganesh/vk/GrVkResourceProvider.h"
+#include "src/gpu/ganesh/vk/GrVkSampler.h"
 #include "src/gpu/ganesh/vk/GrVkUniformHandler.h"
+#include "src/gpu/ganesh/vk/GrVkUtil.h"
+
+#include <string.h>
+#include <memory>
 
 using namespace skia_private;
 
@@ -104,7 +114,7 @@ static bool get_layout_and_desc_count(GrVkGpu* gpu,
         dsSamplerLayoutCreateInfo.pBindings = numBindings ? dsSamplerBindings.get() : nullptr;
 
 #if defined(SK_ENABLE_SCOPED_LSAN_SUPPRESSIONS)
-        // skia:8713
+        // skbug.com/40040004
         __lsan::ScopedDisabler lsanDisabler;
 #endif
         VkResult result;
@@ -135,7 +145,7 @@ static bool get_layout_and_desc_count(GrVkGpu* gpu,
         uniformLayoutCreateInfo.pBindings = &dsUniBinding;
 
 #if defined(SK_ENABLE_SCOPED_LSAN_SUPPRESSIONS)
-        // skia:8713
+        // skbug.com/40040004
         __lsan::ScopedDisabler lsanDisabler;
 #endif
         VkResult result;
@@ -170,7 +180,7 @@ static bool get_layout_and_desc_count(GrVkGpu* gpu,
         inputLayoutCreateInfo.pBindings = &dsInpuBinding;
 
 #if defined(SK_ENABLE_SCOPED_LSAN_SUPPRESSIONS)
-        // skia:8713
+        // skbug.com/40040004
         __lsan::ScopedDisabler lsanDisabler;
 #endif
         VkResult result;
@@ -289,7 +299,7 @@ bool GrVkDescriptorSetManager::isZeroSampler() const {
     if (VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER != fPoolManager.fDescType) {
         return false;
     }
-    if (fBindingVisibilities.size()) {
+    if (!fBindingVisibilities.empty()) {
         return false;
     }
     return true;

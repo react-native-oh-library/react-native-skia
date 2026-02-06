@@ -22,14 +22,14 @@ namespace skia {
 namespace textlayout {
 
 static inline bool nearlyZero(SkScalar x, SkScalar tolerance = SK_ScalarNearlyZero) {
-    if (SkScalarIsFinite(x)) {
+    if (SkIsFinite(x)) {
         return SkScalarNearlyZero(x, tolerance);
     }
     return false;
 }
 
 static inline bool nearlyEqual(SkScalar x, SkScalar y, SkScalar tolerance = SK_ScalarNearlyZero) {
-    if (SkScalarIsFinite(x) && SkScalarIsFinite(x)) {
+    if (SkIsFinite(x, y)) {
         return SkScalarNearlyEqual(x, y, tolerance);
     }
     // Inf == Inf, anything else is false
@@ -287,6 +287,15 @@ public:
     bool isPlaceholder() const { return fIsPlaceholder; }
     void setPlaceholder() { fIsPlaceholder = true; }
 
+    void setFontEdging(SkFont::Edging edging) { fEdging = edging; }
+    SkFont::Edging getFontEdging() const { return fEdging; }
+
+    void setSubpixel(bool subpixel) { fSubpixel = subpixel; }
+    bool getSubpixel() const { return fSubpixel; }
+
+    void setFontHinting(SkFontHinting hinting) { fHinting = hinting; }
+    SkFontHinting getFontHinting() const { return fHinting; }
+
 private:
     static const std::vector<SkString>* kDefaultFontFamilies;
 
@@ -305,6 +314,9 @@ private:
     std::vector<SkString> fFontFamilies = *kDefaultFontFamilies;
 
     SkScalar fFontSize = 14.0;
+    SkFont::Edging fEdging = SkFont::Edging::kAntiAlias;
+    bool fSubpixel = true;
+    SkFontHinting fHinting = SkFontHinting::kSlight;
     SkScalar fHeight = 1.0;
     bool fHeightOverride = false;
     SkScalar fBaselineShift = 0.0f;

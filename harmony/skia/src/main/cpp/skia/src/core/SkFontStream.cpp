@@ -4,14 +4,16 @@
  * Use of this source code is governed by a BSD-style license that can be
  * found in the LICENSE file.
  */
+#include "src/core/SkFontStream.h"
 
+#include "include/core/SkFourByteTag.h"
 #include "include/core/SkStream.h"
 #include "include/core/SkTypes.h"
 #include "include/private/base/SkMalloc.h"
 #include "src/base/SkAutoMalloc.h"
 #include "src/base/SkEndian.h"
-#include "src/core/SkFontStream.h"
 
+#include <algorithm>
 #include <cstdint>
 
 struct SkSFNTHeader {
@@ -157,17 +159,15 @@ int SkFontStream::CountTTCEntries(SkStream* stream) {
     }
 }
 
-int SkFontStream::GetTableTags(SkStream* stream, int ttcIndex,
-                               SkFontTableTag tags[]) {
+int SkFontStream::GetTableTags(SkStream* stream, int ttcIndex, SkSpan<SkFontTableTag> tags) {
     SfntHeader  header;
     if (!header.init(stream, ttcIndex)) {
         return 0;
     }
 
-    if (tags) {
-        for (int i = 0; i < header.fCount; i++) {
-            tags[i] = SkEndian_SwapBE32(header.fDir[i].fTag);
-        }
+    const size_t n = std::min((size_t)header.fCount, tags.size());
+    for (size_t i = 0; i < n; i++) {
+        tags[i] = SkEndian_SwapBE32(header.fDir[i].fTag);
     }
     return header.fCount;
 }

@@ -21,7 +21,6 @@
 #include "src/core/SkRasterPipelineOpList.h"
 #include "src/core/SkReadBuffer.h"
 #include "src/core/SkWriteBuffer.h"
-#include "src/shaders/SkLocalMatrixShader.h"
 #include "src/shaders/SkShaderBase.h"
 #include "src/shaders/gradients/SkGradientBaseShader.h"
 
@@ -45,11 +44,11 @@ bool SkConicalGradient::FocalData::set(SkScalar r0, SkScalar r1, SkMatrix* matri
     // Map {focal point, (1, 0)} to {(0, 0), (1, 0)}
     const SkPoint from[2]   = { {fFocalX, 0}, {1, 0} };
     const SkPoint to[2]     = { {0, 0}, {1, 0} };
-    SkMatrix focalMatrix;
-    if (!focalMatrix.setPolyToPoly(from, to, 2)) {
+    const auto focalMatrix = SkMatrix::PolyToPoly(from, to);
+    if (!focalMatrix) {
         return false;
     }
-    matrix->postConcat(focalMatrix);
+    matrix->postConcat(*focalMatrix);
     fR1 = r1 / SkScalarAbs(1 - fFocalX);  // focalMatrix has a scale of 1/(1-f)
 
     // The following transformations are just to accelerate the shader computation by saving
@@ -61,6 +60,13 @@ bool SkConicalGradient::FocalData::set(SkScalar r0, SkScalar r1, SkMatrix* matri
     }
     matrix->postScale(SkScalarAbs(1 - fFocalX), SkScalarAbs(1 - fFocalX));  // scale |1 - f|
     return true;
+}
+
+std::optional<SkMatrix> SkConicalGradient::MapToUnitX(const SkPoint &startCenter,
+                                                      const SkPoint &endCenter) {
+    const SkPoint centers[2] = { startCenter, endCenter };
+    const SkPoint unitvec[2] = { {0, 0}, {1, 0} };
+    return SkMatrix::PolyToPoly(centers, unitvec);
 }
 
 sk_sp<SkShader> SkConicalGradient::Create(const SkPoint& c0,
@@ -85,13 +91,12 @@ sk_sp<SkShader> SkConicalGradient::Create(const SkPoint& c0,
 
         gradientType = Type::kRadial;
     } else {
-        const SkPoint centers[2] = { c0    , c1     };
-        const SkPoint unitvec[2] = { {0, 0}, {1, 0} };
-
-        if (!gradientMatrix.setPolyToPoly(centers, unitvec, 2)) {
+        auto mx = MapToUnitX(c0, c1);
+        if (!mx) {
             // Degenerate case.
             return nullptr;
         }
+        gradientMatrix = *mx;
 
         gradientType = SkScalarNearlyZero(r1 - r0) ? Type::kStrip : Type::kFocal;
     }
@@ -103,8 +108,10 @@ sk_sp<SkShader> SkConicalGradient::Create(const SkPoint& c0,
             return nullptr;
         }
     }
-    return SkLocalMatrixShader::MakeWrapped<SkConicalGradient>(
-            localMatrix, c0, r0, c1, r1, desc, gradientType, gradientMatrix, focalData);
+
+    sk_sp<SkShader> s = sk_make_sp<SkConicalGradient>(
+            c0, r0, c1, r1, desc, gradientType, gradientMatrix, focalData);
+    return s->makeWithLocalMatrix(localMatrix ? *localMatrix : SkMatrix::I());
 }
 
 SkConicalGradient::SkConicalGradient(const SkPoint& start,
@@ -153,9 +160,12 @@ SkShaderBase::GradientType SkConicalGradient::asGradient(GradientInfo* info,
 
 sk_sp<SkFlattenable> SkConicalGradient::CreateProc(SkReadBuffer& buffer) {
     DescriptorScope desc;
-    SkMatrix legacyLocalMatrix;
+    SkMatrix legacyLocalMatrix, *lmPtr = nullptr;
     if (!desc.unflatten(buffer, &legacyLocalMatrix)) {
         return nullptr;
+    }
+    if (!legacyLocalMatrix.isIdentity()) {
+        lmPtr = &legacyLocalMatrix;
     }
     SkPoint c1 = buffer.readPoint();
     SkPoint c2 = buffer.readPoint();
@@ -175,7 +185,7 @@ sk_sp<SkFlattenable> SkConicalGradient::CreateProc(SkReadBuffer& buffer) {
                                                  desc.fColorCount,
                                                  desc.fTileMode,
                                                  desc.fInterpolation,
-                                                 &legacyLocalMatrix);
+                                                 lmPtr);
 }
 
 void SkConicalGradient::flatten(SkWriteBuffer& buffer) const {
@@ -203,7 +213,7 @@ void SkConicalGradient::appendGradientStages(SkArenaAlloc* alloc,
     }
 
     if (fType == Type::kStrip) {
-        auto* ctx = alloc->make<SkRasterPipeline_2PtConicalCtx>();
+        auto* ctx = alloc->make<SkRasterPipelineContexts::Conical2PtCtx>();
         SkScalar scaledR0 = fRadius1 / this->getCenterX1();
         ctx->fP0 = scaledR0 * scaledR0;
         p->append(SkRasterPipelineOp::xy_to_2pt_conical_strip, ctx);
@@ -212,7 +222,7 @@ void SkConicalGradient::appendGradientStages(SkArenaAlloc* alloc,
         return;
     }
 
-    auto* ctx = alloc->make<SkRasterPipeline_2PtConicalCtx>();
+    auto* ctx = alloc->make<SkRasterPipelineContexts::Conical2PtCtx>();
     ctx->fP0 = 1 / fFocalData.fR1;
     ctx->fP1 = fFocalData.fFocalX;
 

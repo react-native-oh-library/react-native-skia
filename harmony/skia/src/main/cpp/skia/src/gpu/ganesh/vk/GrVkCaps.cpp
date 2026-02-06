@@ -7,33 +7,44 @@
 
 #include "src/gpu/ganesh/vk/GrVkCaps.h"
 
-#include <memory>
-
+#include "include/core/SkRect.h"
+#include "include/core/SkSize.h"
 #include "include/core/SkTextureCompressionType.h"
-#include "include/gpu/GrBackendSurface.h"
-#include "include/gpu/GrContextOptions.h"
+#include "include/core/SkTypes.h"
+#include "include/gpu/GpuTypes.h"
+#include "include/gpu/ganesh/GrBackendSurface.h"
+#include "include/gpu/ganesh/GrContextOptions.h"
 #include "include/gpu/ganesh/vk/GrVkBackendSurface.h"
-#include "include/gpu/vk/GrVkBackendContext.h"
 #include "include/gpu/vk/VulkanExtensions.h"
+#include "include/gpu/vk/VulkanTypes.h"
 #include "src/core/SkCompressedDataUtils.h"
 #include "src/gpu/KeyBuilder.h"
 #include "src/gpu/ganesh/GrBackendUtils.h"
+#include "src/gpu/ganesh/GrPipeline.h"
 #include "src/gpu/ganesh/GrProgramDesc.h"
+#include "src/gpu/ganesh/GrProgramInfo.h"
 #include "src/gpu/ganesh/GrRenderTarget.h"
 #include "src/gpu/ganesh/GrRenderTargetProxy.h"
 #include "src/gpu/ganesh/GrShaderCaps.h"
 #include "src/gpu/ganesh/GrStencilSettings.h"
-#include "src/gpu/ganesh/GrUtil.h"
-#include "src/gpu/ganesh/SkGr.h"
+#include "src/gpu/ganesh/GrSurface.h"
+#include "src/gpu/ganesh/GrSurfaceProxy.h"
+#include "src/gpu/ganesh/GrXferProcessor.h"
 #include "src/gpu/ganesh/TestFormatColorTypeCombination.h"
 #include "src/gpu/ganesh/vk/GrVkGpu.h"
 #include "src/gpu/ganesh/vk/GrVkImage.h"
+#include "src/gpu/ganesh/vk/GrVkRenderPass.h"
 #include "src/gpu/ganesh/vk/GrVkRenderTarget.h"
+#include "src/gpu/ganesh/vk/GrVkSampler.h"
 #include "src/gpu/ganesh/vk/GrVkTexture.h"
 #include "src/gpu/ganesh/vk/GrVkUniformHandler.h"
 #include "src/gpu/ganesh/vk/GrVkUtil.h"
-#include "src/gpu/vk/VulkanInterface.h"
 #include "src/gpu/vk/VulkanUtilsPriv.h"
+
+#include <limits.h>
+#include <algorithm>
+#include <cstring>
+#include <memory>
 
 #ifdef SK_BUILD_FOR_ANDROID
 #include <sys/system_properties.h>
@@ -301,7 +312,7 @@ void GrVkCaps::init(const GrContextOptions& contextOptions,
     VkPhysicalDeviceProperties properties;
     GR_VK_CALL(vkInterface, GetPhysicalDeviceProperties(physDev, &properties));
 
-#if defined(GR_TEST_UTILS)
+#if defined(GPU_TEST_UTILS)
     this->setDeviceName(properties.deviceName);
 #endif
 
@@ -314,81 +325,33 @@ void GrVkCaps::init(const GrContextOptions& contextOptions,
         fSupportsSwapchain = true;
     }
 
-    if (physicalDeviceVersion >= VK_MAKE_VERSION(1, 1, 0) ||
-        extensions.hasExtension(VK_KHR_GET_PHYSICAL_DEVICE_PROPERTIES_2_EXTENSION_NAME, 1)) {
-        fSupportsPhysicalDeviceProperties2 = true;
-    }
-
-    if (physicalDeviceVersion >= VK_MAKE_VERSION(1, 1, 0) ||
-        extensions.hasExtension(VK_KHR_GET_MEMORY_REQUIREMENTS_2_EXTENSION_NAME, 1)) {
-        fSupportsMemoryRequirements2 = true;
-    }
-
-    if (physicalDeviceVersion >= VK_MAKE_VERSION(1, 1, 0) ||
-        extensions.hasExtension(VK_KHR_BIND_MEMORY_2_EXTENSION_NAME, 1)) {
-        fSupportsBindMemory2 = true;
-    }
-
-    if (physicalDeviceVersion >= VK_MAKE_VERSION(1, 1, 0) ||
-        extensions.hasExtension(VK_KHR_MAINTENANCE1_EXTENSION_NAME, 1)) {
-        fSupportsMaintenance1 = true;
-    }
-
-    if (physicalDeviceVersion >= VK_MAKE_VERSION(1, 1, 0) ||
-        extensions.hasExtension(VK_KHR_MAINTENANCE2_EXTENSION_NAME, 1)) {
-        fSupportsMaintenance2 = true;
-    }
-
-    if (physicalDeviceVersion >= VK_MAKE_VERSION(1, 1, 0) ||
-        extensions.hasExtension(VK_KHR_MAINTENANCE3_EXTENSION_NAME, 1)) {
-        fSupportsMaintenance3 = true;
-    }
-
-    if (physicalDeviceVersion >= VK_MAKE_VERSION(1, 1, 0) ||
-        (extensions.hasExtension(VK_KHR_DEDICATED_ALLOCATION_EXTENSION_NAME, 1) &&
-         this->supportsMemoryRequirements2())) {
-        fSupportsDedicatedAllocation = true;
-    }
-
-    if (physicalDeviceVersion >= VK_MAKE_VERSION(1, 1, 0) ||
-        (extensions.hasExtension(VK_KHR_EXTERNAL_MEMORY_CAPABILITIES_EXTENSION_NAME, 1) &&
-         this->supportsPhysicalDeviceProperties2() &&
-         extensions.hasExtension(VK_KHR_EXTERNAL_MEMORY_EXTENSION_NAME, 1) &&
-         this->supportsDedicatedAllocation())) {
-        fSupportsExternalMemory = true;
-    }
-
 #ifdef SK_BUILD_FOR_ANDROID
     // Currently Adreno devices are not supporting the QUEUE_FAMILY_FOREIGN_EXTENSION, so until they
     // do we don't explicitly require it here even the spec says it is required.
-    if (extensions.hasExtension(
-            VK_ANDROID_EXTERNAL_MEMORY_ANDROID_HARDWARE_BUFFER_EXTENSION_NAME, 2) &&
-       /* extensions.hasExtension(VK_EXT_QUEUE_FAMILY_FOREIGN_EXTENSION_NAME, 1) &&*/
-        this->supportsExternalMemory() &&
-        this->supportsBindMemory2()) {
+    if (extensions.hasExtension(VK_ANDROID_EXTERNAL_MEMORY_ANDROID_HARDWARE_BUFFER_EXTENSION_NAME,
+                                2)
+        /* && extensions.hasExtension(VK_EXT_QUEUE_FAMILY_FOREIGN_EXTENSION_NAME, 1)*/
+    ) {
         fSupportsAndroidHWBExternalMemory = true;
         fSupportsAHardwareBufferImages = true;
     }
 #endif
 
-    auto ycbcrFeatures = skgpu::GetExtensionFeatureStruct<
-            VkPhysicalDeviceSamplerYcbcrConversionFeatures>(
-                    features,
-                    VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SAMPLER_YCBCR_CONVERSION_FEATURES);
-    if (ycbcrFeatures && ycbcrFeatures->samplerYcbcrConversion &&
-        (physicalDeviceVersion >= VK_MAKE_VERSION(1, 1, 0) ||
-         (extensions.hasExtension(VK_KHR_SAMPLER_YCBCR_CONVERSION_EXTENSION_NAME, 1) &&
-          this->supportsMaintenance1() && this->supportsBindMemory2() &&
-          this->supportsMemoryRequirements2() && this->supportsPhysicalDeviceProperties2()))) {
-        fSupportsYcbcrConversion = true;
-    }
+    const auto ycbcrFeatures =
+            skgpu::GetExtensionFeatureStruct<VkPhysicalDeviceSamplerYcbcrConversionFeatures>(
+                    features, VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SAMPLER_YCBCR_CONVERSION_FEATURES);
+    const auto vk11Features = skgpu::GetExtensionFeatureStruct<VkPhysicalDeviceVulkan11Features>(
+            features, VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_1_FEATURES);
+    fSupportsYcbcrConversion = (ycbcrFeatures && ycbcrFeatures->samplerYcbcrConversion) ||
+                               (vk11Features && vk11Features->samplerYcbcrConversion);
 
-    // We always push back the default GrVkYcbcrConversionInfo so that the case of no conversion
-    // will return a key of 0.
-    fYcbcrInfos.push_back(GrVkYcbcrConversionInfo());
+    // We always push back the default skgpu::VulkanYcbcrConversionInfo so that the case of no
+    // conversion will return a key of 0.
+    fYcbcrInfos.push_back(skgpu::VulkanYcbcrConversionInfo());
 
-    if ((isProtected == GrProtected::kYes) &&
-        (physicalDeviceVersion >= VK_MAKE_VERSION(1, 1, 0))) {
+    // Ganesh requires Vulkan version 1.1 or later, which always has protected support. The
+    // protectedMemory feature is assumed enabled if isProtected is true.
+    if (isProtected == GrProtected::kYes) {
         fSupportsProtectedContent = true;
         fAvoidUpdateBuffers = true;
         fShouldAlwaysUseDedicatedImageMemory = true;
@@ -397,6 +360,26 @@ void GrVkCaps::init(const GrContextOptions& contextOptions,
     if (extensions.hasExtension(VK_EXT_IMAGE_DRM_FORMAT_MODIFIER_EXTENSION_NAME, 1)) {
         fSupportsDRMFormatModifiers = true;
     }
+
+    const auto deviceFaultFeatures =
+            skgpu::GetExtensionFeatureStruct<VkPhysicalDeviceFaultFeaturesEXT>(
+                    features, VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FAULT_FEATURES_EXT);
+    fSupportsDeviceFaultInfo = deviceFaultFeatures && deviceFaultFeatures->deviceFault;
+
+    const auto frameBoundaryFeatures =
+            skgpu::GetExtensionFeatureStruct<VkPhysicalDeviceFrameBoundaryFeaturesEXT>(
+                    features, VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FRAME_BOUNDARY_FEATURES_EXT);
+    fSupportsFrameBoundary = frameBoundaryFeatures && frameBoundaryFeatures->frameBoundary;
+
+    const auto cacheControlFeatures =
+            skgpu::GetExtensionFeatureStruct<VkPhysicalDevicePipelineCreationCacheControlFeatures>(
+                    features,
+                    VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PIPELINE_CREATION_CACHE_CONTROL_FEATURES);
+    const auto vk13Features = skgpu::GetExtensionFeatureStruct<VkPhysicalDeviceVulkan13Features>(
+            features, VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_3_FEATURES);
+    fSupportsPipelineCreationCacheControl =
+            (cacheControlFeatures && cacheControlFeatures->pipelineCreationCacheControl) ||
+            (vk13Features && vk13Features->pipelineCreationCacheControl);
 
     fMaxInputAttachmentDescriptors = properties.limits.maxDescriptorSetInputAttachments;
 
@@ -411,7 +394,7 @@ void GrVkCaps::init(const GrContextOptions& contextOptions,
     // we do expect this to be a big win on tilers.
     //
     // On ARM devices we are seeing an average perf win of around 50%-60% across the board.
-    if (kARM_VkVendor == properties.vendorID) {
+    if (skgpu::kARM_VkVendor == properties.vendorID) {
         // We currently don't see any Vulkan devices that expose a memory type that supports
         // both lazy allocated and protected memory. So for simplicity we just disable the
         // use of memoryless attachments when using protected memory. In the future, if we ever
@@ -424,7 +407,7 @@ void GrVkCaps::init(const GrContextOptions& contextOptions,
     this->initGrCaps(vkInterface, physDev, properties, memoryProperties, features, extensions);
     this->initShaderCaps(properties, features);
 
-    if (kQualcomm_VkVendor == properties.vendorID) {
+    if (skgpu::kQualcomm_VkVendor == properties.vendorID) {
         // A "clear" load for atlases runs faster on QC than a "discard" load followed by a
         // scissored clear.
         // On NVIDIA and Intel, the discard load followed by clear is faster.
@@ -432,7 +415,8 @@ void GrVkCaps::init(const GrContextOptions& contextOptions,
         fPreferFullscreenClears = true;
     }
 
-    if (properties.vendorID == kNvidia_VkVendor || properties.vendorID == kAMD_VkVendor) {
+    if (properties.vendorID == skgpu::kNvidia_VkVendor ||
+        properties.vendorID == skgpu::kAMD_VkVendor) {
         // On discrete GPUs it can be faster to read gpu only memory compared to memory that is also
         // mappable on the host.
         fGpuOnlyBuffersMorePerformant = true;
@@ -445,15 +429,15 @@ void GrVkCaps::init(const GrContextOptions& contextOptions,
         fShouldPersistentlyMapCpuToGpuBuffers = false;
     }
 
-    if (kQualcomm_VkVendor == properties.vendorID) {
+    if (skgpu::kQualcomm_VkVendor == properties.vendorID) {
         // On Qualcomm it looks like using vkCmdUpdateBuffer is slower than using a transfer buffer
         // even for small sizes.
         fAvoidUpdateBuffers = true;
     }
 
     fNativeDrawIndirectSupport = features.features.drawIndirectFirstInstance;
-    if (properties.vendorID == kQualcomm_VkVendor) {
-        // Indirect draws seem slow on QC. Disable until we can investigate. http://skbug.com/11139
+    if (properties.vendorID == skgpu::kQualcomm_VkVendor) {
+        // Indirect draws seem slow on QC. Disable until we can investigate. skbug.com/40042512
         fNativeDrawIndirectSupport = false;
     }
 
@@ -463,7 +447,7 @@ void GrVkCaps::init(const GrContextOptions& contextOptions,
     }
 
 #ifdef SK_BUILD_FOR_UNIX
-    if (kNvidia_VkVendor == properties.vendorID) {
+    if (skgpu::kNvidia_VkVendor == properties.vendorID) {
         // On nvidia linux we see a big perf regression when not using dedicated image allocations.
         fShouldAlwaysUseDedicatedImageMemory = true;
     }
@@ -486,11 +470,12 @@ void GrVkCaps::init(const GrContextOptions& contextOptions,
 
 void GrVkCaps::applyDriverCorrectnessWorkarounds(const VkPhysicalDeviceProperties& properties) {
 #if defined(SK_BUILD_FOR_WIN)
-    if (kNvidia_VkVendor == properties.vendorID || kIntel_VkVendor == properties.vendorID) {
+    if (skgpu::kNvidia_VkVendor == properties.vendorID ||
+        skgpu::kIntel_VkVendor == properties.vendorID) {
         fMustSyncCommandBuffersWithQueue = true;
     }
 #elif defined(SK_BUILD_FOR_ANDROID)
-    if (kImagination_VkVendor == properties.vendorID) {
+    if (skgpu::kImagination_VkVendor == properties.vendorID) {
         fMustSyncCommandBuffersWithQueue = true;
     }
 #endif
@@ -508,20 +493,20 @@ void GrVkCaps::applyDriverCorrectnessWorkarounds(const VkPhysicalDevicePropertie
 #endif
 
     // Protected memory features have problems in Android P and earlier.
-    if (fSupportsProtectedContent && (kQualcomm_VkVendor == properties.vendorID)) {
+    if (fSupportsProtectedContent && (skgpu::kQualcomm_VkVendor == properties.vendorID)) {
         if (androidAPIVersion <= 28) {
             fSupportsProtectedContent = false;
         }
     }
 
     // On Mali galaxy s7 we see lots of rendering issues when we suballocate VkImages.
-    if (kARM_VkVendor == properties.vendorID && androidAPIVersion <= 28) {
+    if (skgpu::kARM_VkVendor == properties.vendorID && androidAPIVersion <= 28) {
         fShouldAlwaysUseDedicatedImageMemory = true;
     }
 
     // On Mali galaxy s7 and s9 we see lots of rendering issues with image filters dropping out when
     // using only primary command buffers. We also see issues on the P30 running android 28.
-    if (kARM_VkVendor == properties.vendorID && androidAPIVersion <= 28) {
+    if (skgpu::kARM_VkVendor == properties.vendorID && androidAPIVersion <= 28) {
         fPreferPrimaryOverSecondaryCommandBuffers = false;
         // If we are using secondary command buffers our code isn't setup to insert barriers into
         // the secondary cb so we need to disable support for them.
@@ -532,21 +517,22 @@ void GrVkCaps::applyDriverCorrectnessWorkarounds(const VkPhysicalDevicePropertie
     // We've seen numerous driver bugs on qualcomm devices running on android P (api 28) or earlier
     // when trying to using discardable msaa attachments and loading from resolve. So we disable the
     // feature for those devices.
-    if (properties.vendorID == kQualcomm_VkVendor && androidAPIVersion <= 28) {
+    if (properties.vendorID == skgpu::kQualcomm_VkVendor && androidAPIVersion <= 28) {
         fPreferDiscardableMSAAAttachment = false;
         fSupportsDiscardableMSAAForDMSAA = false;
     }
 
     // On the Mali G76 and T880, the Perlin noise code needs to aggressively snap to multiples
     // of 1/255 to avoid artifacts in the double table lookup.
-    if (kARM_VkVendor == properties.vendorID) {
+    if (skgpu::kARM_VkVendor == properties.vendorID) {
         fShaderCaps->fPerlinNoiseRoundingFix = true;
     }
 
     // On various devices, when calling vkCmdClearAttachments on a primary command buffer, it
     // corrupts the bound buffers on the command buffer. As a workaround we invalidate our knowledge
     // of bound buffers so that we will rebind them on the next draw.
-    if (kQualcomm_VkVendor == properties.vendorID || kAMD_VkVendor == properties.vendorID) {
+    if (skgpu::kQualcomm_VkVendor == properties.vendorID ||
+        skgpu::kAMD_VkVendor == properties.vendorID) {
         fMustInvalidatePrimaryCmdBufferStateAfterClearAttachments = true;
     }
 
@@ -554,9 +540,9 @@ void GrVkCaps::applyDriverCorrectnessWorkarounds(const VkPhysicalDevicePropertie
     // discardable msaa attachments. This causes the resolve to resolve uninitialized data from the
     // msaa image into the resolve image.
     // This also occurs on swiftshader: b/303705884
-    if (properties.vendorID == kQualcomm_VkVendor ||
-        properties.vendorID == kARM_VkVendor ||
-        (properties.vendorID == kGoogle_VkVendor &&
+    if (properties.vendorID == skgpu::kQualcomm_VkVendor ||
+        properties.vendorID == skgpu::kARM_VkVendor ||
+        (properties.vendorID == skgpu::kGoogle_VkVendor &&
          properties.deviceID == kSwiftshader_DeviceID)) {
         fMustLoadFullImageWithDiscardableMSAA = true;
     }
@@ -566,7 +552,8 @@ void GrVkCaps::applyDriverCorrectnessWorkarounds(const VkPhysicalDevicePropertie
     // (https://ci.chromium.org/ui/p/chromium/builders/try/linux-rel/1585128/overview).
     // Since swiftshader is only really used for testing, to try and make things more stable we
     // disable the reuse of buffers.
-    if (properties.vendorID == kGoogle_VkVendor && properties.deviceID == kSwiftshader_DeviceID) {
+    if (properties.vendorID == skgpu::kGoogle_VkVendor &&
+        properties.deviceID == kSwiftshader_DeviceID) {
         fReuseScratchBuffers = false;
     }
 
@@ -574,18 +561,18 @@ void GrVkCaps::applyDriverCorrectnessWorkarounds(const VkPhysicalDevicePropertie
     // GrCaps workarounds
     ////////////////////////////////////////////////////////////////////////////
 
-    if (kARM_VkVendor == properties.vendorID) {
+    if (skgpu::kARM_VkVendor == properties.vendorID) {
         fAvoidWritePixelsFastPath = true; // bugs.skia.org/8064
     }
 
     // AMD advertises support for MAX_UINT vertex input attributes, but in reality only supports 32.
-    if (kAMD_VkVendor == properties.vendorID) {
+    if (skgpu::kAMD_VkVendor == properties.vendorID) {
         fMaxVertexAttributes = std::min(fMaxVertexAttributes, 32);
     }
 
     // Adreno devices fail when trying to read the dest using an input attachment and texture
     // barriers.
-    if (kQualcomm_VkVendor == properties.vendorID) {
+    if (skgpu::kQualcomm_VkVendor == properties.vendorID) {
         fTextureBarrierSupport = false;
     }
 
@@ -600,7 +587,7 @@ void GrVkCaps::applyDriverCorrectnessWorkarounds(const VkPhysicalDevicePropertie
     // https://www.intel.com/content/www/us/en/download/762755/intel-6th-10th-gen-processor-graphics-windows.html.
     // This is likely due to bugs in the driver. As a temporary workaround, we disable texture
     // barrier support in Skylake and newer generations (i.e. 9th gen or newer).
-    if (kIntel_VkVendor == properties.vendorID &&
+    if (skgpu::kIntel_VkVendor == properties.vendorID &&
         GetIntelGen(GetIntelGPUType(properties.deviceID)) >= 9) {
         fTextureBarrierSupport = false;
     }
@@ -608,7 +595,7 @@ void GrVkCaps::applyDriverCorrectnessWorkarounds(const VkPhysicalDevicePropertie
 
     // On ARM indirect draws are broken on Android 9 and earlier. This was tested on a P30 and
     // Mate 20x running android 9.
-    if (properties.vendorID == kARM_VkVendor && androidAPIVersion <= 28) {
+    if (properties.vendorID == skgpu::kARM_VkVendor && androidAPIVersion <= 28) {
         fNativeDrawIndirectSupport = false;
     }
 
@@ -616,14 +603,20 @@ void GrVkCaps::applyDriverCorrectnessWorkarounds(const VkPhysicalDevicePropertie
     // GrShaderCaps workarounds
     ////////////////////////////////////////////////////////////////////////////
 
-    if (kImagination_VkVendor == properties.vendorID) {
+    if (skgpu::kImagination_VkVendor == properties.vendorID) {
         fShaderCaps->fAtan2ImplementedAsAtanYOverX = true;
     }
 
     // ARM GPUs calculate `matrix * vector` in SPIR-V at full precision, even when the inputs are
-    // RelaxedPrecision. Rewriting the multiply as a sum of vector*scalar fixes this. (skia:11769)
-    if (kARM_VkVendor == properties.vendorID) {
+    // RelaxedPrecision. Rewriting the multiply as a sum of vector*scalar fixes this. (skbug.com/40042841)
+    if (skgpu::kARM_VkVendor == properties.vendorID) {
         fShaderCaps->fRewriteMatrixVectorMultiply = true;
+    }
+
+    // Avoid RelaxedPrecision with OpImageSampleImplicitLod due to driver bug with YCbCr sampling.
+    // (skbug.com/421927604)
+    if (skgpu::kNvidia_VkVendor == properties.vendorID) {
+        fShaderCaps->fCannotUseRelaxedPrecisionOnImageSample = true;
     }
 }
 
@@ -672,9 +665,7 @@ void GrVkCaps::initGrCaps(const skgpu::VulkanInterface* vkInterface,
 
     fOversizedStencilSupport = true;
 
-    if (extensions.hasExtension(VK_EXT_BLEND_OPERATION_ADVANCED_EXTENSION_NAME, 2) &&
-        this->supportsPhysicalDeviceProperties2()) {
-
+    if (extensions.hasExtension(VK_EXT_BLEND_OPERATION_ADVANCED_EXTENSION_NAME, 2)) {
         VkPhysicalDeviceBlendOperationAdvancedPropertiesEXT blendProps;
         blendProps.sType =
                 VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_BLEND_OPERATION_ADVANCED_PROPERTIES_EXT;
@@ -702,7 +693,7 @@ void GrVkCaps::initGrCaps(const skgpu::VulkanInterface* vkInterface,
         }
     }
 
-    if (kARM_VkVendor == properties.vendorID) {
+    if (skgpu::kARM_VkVendor == properties.vendorID) {
         fShouldCollapseSrcOverToSrcWhenAble = true;
     }
 }
@@ -720,7 +711,7 @@ void GrVkCaps::initShaderCaps(const VkPhysicalDeviceProperties& properties,
     shaderCaps->fFlatInterpolationSupport = true;
     // Flat interpolation appears to be slow on Qualcomm GPUs. This was tested in GL and is assumed
     // to be true with Vulkan as well.
-    shaderCaps->fPreferFlatInterpolation = kQualcomm_VkVendor != properties.vendorID;
+    shaderCaps->fPreferFlatInterpolation = skgpu::kQualcomm_VkVendor != properties.vendorID;
 
     shaderCaps->fSampleMaskSupport = true;
 
@@ -1018,7 +1009,7 @@ void GrVkCaps::initFormatTable(const GrContextOptions& contextOptions,
         auto& info = this->getFormatInfo(format);
         info.init(contextOptions, interface, physDev, properties, format);
         if (SkToBool(info.fOptimalFlags & FormatInfo::kTexturable_Flag)) {
-            info.fColorTypeInfoCount = 2;
+            info.fColorTypeInfoCount = 3;
             info.fColorTypeInfos = std::make_unique<ColorTypeInfo[]>(info.fColorTypeInfoCount);
             int ctIdx = 0;
             // Format: VK_FORMAT_R16G16B16A16_SFLOAT, Surface: GrColorType::kRGBA_F16
@@ -1036,6 +1027,15 @@ void GrVkCaps::initFormatTable(const GrContextOptions& contextOptions,
                 ctInfo.fColorType = ct;
                 ctInfo.fTransferColorType = ct;
                 ctInfo.fFlags = ColorTypeInfo::kUploadData_Flag | ColorTypeInfo::kRenderable_Flag;
+            }
+            // Format: VK_FORMAT_R16G16B16A16_SFLOAT, Surface: GrColorType::kRGB_F16F16F16x
+            {
+                constexpr GrColorType ct = GrColorType::kRGB_F16F16F16x;
+                auto& ctInfo = info.fColorTypeInfos[ctIdx++];
+                ctInfo.fColorType = ct;
+                ctInfo.fTransferColorType = ct;
+                ctInfo.fFlags = ColorTypeInfo::kUploadData_Flag;
+                ctInfo.fReadSwizzle = skgpu::Swizzle::RGB1();
             }
         }
     }
@@ -1105,7 +1105,7 @@ void GrVkCaps::initFormatTable(const GrContextOptions& contextOptions,
         auto& info = this->getFormatInfo(format);
         info.init(contextOptions, interface, physDev, properties, format);
         if (SkToBool(info.fOptimalFlags & FormatInfo::kTexturable_Flag)) {
-            info.fColorTypeInfoCount = 1;
+            info.fColorTypeInfoCount = 2;
             info.fColorTypeInfos = std::make_unique<ColorTypeInfo[]>(info.fColorTypeInfoCount);
             int ctIdx = 0;
             // Format: VK_FORMAT_A2B10G10R10_UNORM_PACK32, Surface: kRGBA_1010102
@@ -1115,6 +1115,15 @@ void GrVkCaps::initFormatTable(const GrContextOptions& contextOptions,
                 ctInfo.fColorType = ct;
                 ctInfo.fTransferColorType = ct;
                 ctInfo.fFlags = ColorTypeInfo::kUploadData_Flag | ColorTypeInfo::kRenderable_Flag;
+            }
+            // Format: VK_FORMAT_A2B10G10R10_UNORM_PACK32, Surface: kRGB_101010x
+            {
+                constexpr GrColorType ct = GrColorType::kRGB_101010x;
+                auto& ctInfo = info.fColorTypeInfos[ctIdx++];
+                ctInfo.fColorType = ct;
+                ctInfo.fTransferColorType = ct;
+                ctInfo.fFlags = ColorTypeInfo::kUploadData_Flag;
+                ctInfo.fReadSwizzle = skgpu::Swizzle::RGB1();
             }
         }
     }
@@ -1138,19 +1147,14 @@ void GrVkCaps::initFormatTable(const GrContextOptions& contextOptions,
         }
     }
 
-    bool supportsRGBA10x6 = false;
-    if (extensions.hasExtension(VK_EXT_RGBA10X6_FORMATS_EXTENSION_NAME, 1)) {
-        auto rgba10x6Feature =
-                skgpu::GetExtensionFeatureStruct<VkPhysicalDeviceRGBA10X6FormatsFeaturesEXT>(
-                        features, VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RGBA10X6_FORMATS_FEATURES_EXT);
-        // Technically without this extension and exabled feature we could still use this format to
-        // sample with a ycbcr sampler. But for simplicity until we have clients requesting that, we
-        // limit the use of this format to cases where we have the extension supported.
-        supportsRGBA10x6 = rgba10x6Feature  && rgba10x6Feature->formatRgba10x6WithoutYCbCrSampler;
-    }
-
     // Format: VK_FORMAT_R10X6G10X6B10X6A10X6_UNORM_4PACK16
-    if (supportsRGBA10x6) {
+    // Technically without this extension and enabled feature we could still use this format to
+    // sample with a ycbcr sampler. But for simplicity until we have clients requesting that, we
+    // limit the use of this format to cases where we have the extension supported.
+    const auto rgba10x6Feature =
+            skgpu::GetExtensionFeatureStruct<VkPhysicalDeviceRGBA10X6FormatsFeaturesEXT>(
+                    features, VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RGBA10X6_FORMATS_FEATURES_EXT);
+    if (rgba10x6Feature && rgba10x6Feature->formatRgba10x6WithoutYCbCrSampler) {
         constexpr VkFormat format = VK_FORMAT_R10X6G10X6B10X6A10X6_UNORM_4PACK16;
         auto& info = this->getFormatInfo(format);
         info.init(contextOptions, interface, physDev, properties, format);
@@ -1417,10 +1421,12 @@ void GrVkCaps::initFormatTable(const GrContextOptions& contextOptions,
     this->setColorType(GrColorType::kBGRA_8888,        { VK_FORMAT_B8G8R8A8_UNORM });
     this->setColorType(GrColorType::kRGBA_1010102,     { VK_FORMAT_A2B10G10R10_UNORM_PACK32 });
     this->setColorType(GrColorType::kBGRA_1010102,     { VK_FORMAT_A2R10G10B10_UNORM_PACK32 });
+    this->setColorType(GrColorType::kRGB_101010x,      { VK_FORMAT_A2B10G10R10_UNORM_PACK32 });
     this->setColorType(GrColorType::kGray_8,           { VK_FORMAT_R8_UNORM });
     this->setColorType(GrColorType::kAlpha_F16,        { VK_FORMAT_R16_SFLOAT });
     this->setColorType(GrColorType::kRGBA_F16,         { VK_FORMAT_R16G16B16A16_SFLOAT });
     this->setColorType(GrColorType::kRGBA_F16_Clamped, { VK_FORMAT_R16G16B16A16_SFLOAT });
+    this->setColorType(GrColorType::kRGB_F16F16F16x,   { VK_FORMAT_R16G16B16A16_SFLOAT});
     this->setColorType(GrColorType::kAlpha_16,         { VK_FORMAT_R16_UNORM });
     this->setColorType(GrColorType::kRG_1616,          { VK_FORMAT_R16G16_UNORM });
     this->setColorType(GrColorType::kRGBA_16161616,    { VK_FORMAT_R16G16B16A16_UNORM });
@@ -1471,11 +1477,11 @@ void GrVkCaps::FormatInfo::initSampleCounts(const GrContextOptions& contextOptio
     if (flags & VK_SAMPLE_COUNT_1_BIT) {
         fColorSampleCounts.push_back(1);
     }
-    if (kImagination_VkVendor == physProps.vendorID) {
+    if (skgpu::kImagination_VkVendor == physProps.vendorID) {
         // MSAA does not work on imagination
         return;
     }
-    if (kIntel_VkVendor == physProps.vendorID) {
+    if (skgpu::kIntel_VkVendor == physProps.vendorID) {
         if (GetIntelGen(GetIntelGPUType(physProps.deviceID)) < 12 ||
             !contextOptions.fAllowMSAAOnNewIntel) {
             // MSAA doesn't work well on Intel GPUs chromium:527565, chromium:983926
@@ -1517,7 +1523,8 @@ void GrVkCaps::FormatInfo::init(const GrContextOptions& contextOptions,
 // external the VkFormat will be VK_NULL_HANDLE which is not handled by our various format
 // capability checks.
 static bool backend_format_is_external(const GrBackendFormat& format) {
-    const GrVkYcbcrConversionInfo* ycbcrInfo = GrBackendFormats::GetVkYcbcrConversionInfo(format);
+    const skgpu::VulkanYcbcrConversionInfo* ycbcrInfo =
+            GrBackendFormats::GetVkYcbcrConversionInfo(format);
     SkASSERT(ycbcrInfo);
 
     // All external formats have a valid ycbcrInfo used for sampling and a non zero external format.
@@ -1612,7 +1619,7 @@ int GrVkCaps::getRenderTargetSampleCount(int requestedCount, VkFormat format) co
     }
 
     if (1 == requestedCount) {
-        SkASSERT(info.fColorSampleCounts.size() && info.fColorSampleCounts[0] == 1);
+        SkASSERT(!info.fColorSampleCounts.empty() && info.fColorSampleCounts[0] == 1);
         return 1;
     }
 
@@ -1636,7 +1643,7 @@ int GrVkCaps::maxRenderTargetSampleCount(VkFormat format) const {
     const FormatInfo& info = this->getFormatInfo(format);
 
     const auto& table = info.fColorSampleCounts;
-    if (!table.size()) {
+    if (table.empty()) {
         return 0;
     }
     return table[table.size() - 1];
@@ -1742,7 +1749,8 @@ bool GrVkCaps::onAreColorTypeAndFormatCompatible(GrColorType ct,
     if (!GrBackendFormats::AsVkFormat(format, &vkFormat)) {
         return false;
     }
-    const GrVkYcbcrConversionInfo* ycbcrInfo = GrBackendFormats::GetVkYcbcrConversionInfo(format);
+    const skgpu::VulkanYcbcrConversionInfo* ycbcrInfo =
+            GrBackendFormats::GetVkYcbcrConversionInfo(format);
     SkASSERT(ycbcrInfo);
 
     if (ycbcrInfo->isValid() && !skgpu::VkFormatNeedsYcbcrSampler(vkFormat)) {
@@ -1822,7 +1830,8 @@ skgpu::Swizzle GrVkCaps::onGetReadSwizzle(const GrBackendFormat& format,
                                           GrColorType colorType) const {
     VkFormat vkFormat;
     SkAssertResult(GrBackendFormats::AsVkFormat(format, &vkFormat));
-    const GrVkYcbcrConversionInfo* ycbcrInfo = GrBackendFormats::GetVkYcbcrConversionInfo(format);
+    const skgpu::VulkanYcbcrConversionInfo* ycbcrInfo =
+            GrBackendFormats::GetVkYcbcrConversionInfo(format);
     SkASSERT(ycbcrInfo);
     if (ycbcrInfo->isValid() && ycbcrInfo->fExternalFormat != 0) {
         // We allow these to work with any color type and never swizzle. See
@@ -1875,7 +1884,8 @@ uint64_t GrVkCaps::computeFormatKey(const GrBackendFormat& format) const {
 
 #ifdef SK_DEBUG
     // We should never be trying to compute a key for an external format
-    const GrVkYcbcrConversionInfo* ycbcrInfo = GrBackendFormats::GetVkYcbcrConversionInfo(format);
+    const skgpu::VulkanYcbcrConversionInfo* ycbcrInfo =
+            GrBackendFormats::GetVkYcbcrConversionInfo(format);
     SkASSERT(ycbcrInfo);
     SkASSERT(!ycbcrInfo->isValid() || ycbcrInfo->fExternalFormat == 0);
 #endif
@@ -1926,7 +1936,8 @@ int GrVkCaps::getFragmentUniformSet() const {
 void GrVkCaps::addExtraSamplerKey(skgpu::KeyBuilder* b,
                                   GrSamplerState samplerState,
                                   const GrBackendFormat& format) const {
-    const GrVkYcbcrConversionInfo* ycbcrInfo = GrBackendFormats::GetVkYcbcrConversionInfo(format);
+    const skgpu::VulkanYcbcrConversionInfo* ycbcrInfo =
+            GrBackendFormats::GetVkYcbcrConversionInfo(format);
     if (!ycbcrInfo) {
         return;
     }
@@ -2052,53 +2063,48 @@ VkShaderStageFlags GrVkCaps::getPushConstantStageFlags() const {
     return stageFlags;
 }
 
-template <size_t N>
-static bool intel_deviceID_present(const std::array<uint32_t, N>& array, uint32_t deviceID) {
-    return std::find(array.begin(), array.end(), deviceID) != array.end();
-}
-
-
 GrVkCaps::IntelGPUType GrVkCaps::GetIntelGPUType(uint32_t deviceID) {
-    // Some common Intel GPU models, currently we cover SKL/ICL/RKL/TGL/ADL
-    // Referenced from the following Mesa source files:
-    // https://github.com/mesa3d/mesa/blob/master/include/pci_ids/i965_pci_ids.h
-    // https://github.com/mesa3d/mesa/blob/master/include/pci_ids/iris_pci_ids.h
-    static constexpr std::array<uint32_t, 25> kSkyLakeIDs = {
-        {0x1902, 0x1906, 0x190A, 0x190B, 0x190E, 0x1912, 0x1913,
-         0x1915, 0x1916, 0x1917, 0x191A, 0x191B, 0x191D, 0x191E,
-         0x1921, 0x1923, 0x1926, 0x1927, 0x192A, 0x192B, 0x192D,
-         0x1932, 0x193A, 0x193B, 0x193D}};
-    static constexpr std::array<uint32_t, 14> kIceLakeIDs = {
-        {0x8A50, 0x8A51, 0x8A52, 0x8A53, 0x8A54, 0x8A56, 0x8A57,
-         0x8A58, 0x8A59, 0x8A5A, 0x8A5B, 0x8A5C, 0x8A5D, 0x8A71}};
-    static constexpr  std::array<uint32_t, 5> kRocketLakeIDs = {
-        {0x4c8a, 0x4c8b, 0x4c8c, 0x4c90, 0x4c9a}};
-    static constexpr  std::array<uint32_t, 11> kTigerLakeIDs = {
-        {0x9A40, 0x9A49, 0x9A59, 0x9A60, 0x9A68, 0x9A70,
-         0x9A78, 0x9AC0, 0x9AC9, 0x9AD9, 0x9AF8}};
-    static constexpr  std::array<uint32_t, 10> kAlderLakeIDs = {
-        {0x4680, 0x4681, 0x4682, 0x4683, 0x4690,
-         0x4691, 0x4692, 0x4693, 0x4698, 0x4699}};
-
-    if (intel_deviceID_present(kSkyLakeIDs, deviceID)) {
-        return IntelGPUType::kSkyLake;
-    }
-    if (intel_deviceID_present(kIceLakeIDs, deviceID)) {
-        return IntelGPUType::kIceLake;
-    }
-    if (intel_deviceID_present(kRocketLakeIDs, deviceID)) {
-        return IntelGPUType::kRocketLake;
-    }
-    if (intel_deviceID_present(kTigerLakeIDs, deviceID)) {
-        return IntelGPUType::kTigerLake;
-    }
-    if (intel_deviceID_present(kAlderLakeIDs, deviceID)) {
-        return IntelGPUType::kAlderLake;
+    // Some common Intel GPU models, currently we cover SKL, ICL, JSL, and Gen12+ up to PTL.
+    // Referenced from the following Mesa source file:
+    // https://gitlab.freedesktop.org/mesa/mesa/-/blob/main/include/pci_ids/iris_pci_ids.h
+    //
+    // Generally, only the top two bytes define the GPU type. MTL/ARL are an uncommon exception.
+    switch (deviceID & 0xFF00) {
+        case 0x1900:
+            return IntelGPUType::kSkyLake;
+        case 0x8A00:
+            return IntelGPUType::kIceLake;
+        case 0x4E00:
+            return IntelGPUType::kJasperLake;
+        case 0x4C00:
+            return IntelGPUType::kRocketLake;
+        case 0x9A00:
+            return IntelGPUType::kTigerLake;
+        case 0x4600:
+            return IntelGPUType::kAlderLake;
+        case 0xA700:
+            return IntelGPUType::kRaptorLake;
+        case 0xB600:
+            return IntelGPUType::kArrowLake;
+        case 0x5600:
+            return IntelGPUType::kAlchemist;
+        case 0x6400:
+            return IntelGPUType::kLunarLake;
+        case 0xE200:
+            return IntelGPUType::kBattlemage;
+        case 0xB000:
+            return IntelGPUType::kPantherLake;
+        case 0x7D00:
+            if (deviceID == 0x7D41 || deviceID == 0x7D51 || deviceID == 0x7D67 ||
+                deviceID == 0x7DD1) {
+                return IntelGPUType::kArrowLake;
+            }
+            return IntelGPUType::kMeteorLake;
     }
     return IntelGPUType::kOther;
 }
 
-#if defined(GR_TEST_UTILS)
+#if defined(GPU_TEST_UTILS)
 std::vector<GrTest::TestFormatColorTypeCombination> GrVkCaps::getTestingCombinations() const {
     std::vector<GrTest::TestFormatColorTypeCombination> combos = {
         { GrColorType::kAlpha_8,          GrBackendFormats::MakeVk(VK_FORMAT_R8_UNORM)            },
@@ -2115,12 +2121,14 @@ std::vector<GrTest::TestFormatColorTypeCombination> GrVkCaps::getTestingCombinat
         { GrColorType::kBGRA_8888,        GrBackendFormats::MakeVk(VK_FORMAT_B8G8R8A8_UNORM)      },
         { GrColorType::kRGBA_1010102, GrBackendFormats::MakeVk(VK_FORMAT_A2B10G10R10_UNORM_PACK32)},
         { GrColorType::kBGRA_1010102, GrBackendFormats::MakeVk(VK_FORMAT_A2R10G10B10_UNORM_PACK32)},
+        { GrColorType::kRGB_101010x, GrBackendFormats::MakeVk(VK_FORMAT_A2B10G10R10_UNORM_PACK32)},
         { GrColorType::kRGBA_10x6,
           GrBackendFormats::MakeVk(VK_FORMAT_R10X6G10X6B10X6A10X6_UNORM_4PACK16)},
         { GrColorType::kGray_8,           GrBackendFormats::MakeVk(VK_FORMAT_R8_UNORM)            },
         { GrColorType::kAlpha_F16,        GrBackendFormats::MakeVk(VK_FORMAT_R16_SFLOAT)          },
         { GrColorType::kRGBA_F16,         GrBackendFormats::MakeVk(VK_FORMAT_R16G16B16A16_SFLOAT) },
         { GrColorType::kRGBA_F16_Clamped, GrBackendFormats::MakeVk(VK_FORMAT_R16G16B16A16_SFLOAT) },
+        { GrColorType::kRGB_F16F16F16x,   GrBackendFormats::MakeVk(VK_FORMAT_R16G16B16A16_SFLOAT) },
         { GrColorType::kAlpha_16,         GrBackendFormats::MakeVk(VK_FORMAT_R16_UNORM)           },
         { GrColorType::kRG_1616,          GrBackendFormats::MakeVk(VK_FORMAT_R16G16_UNORM)        },
         { GrColorType::kRGBA_16161616,    GrBackendFormats::MakeVk(VK_FORMAT_R16G16B16A16_UNORM)  },

@@ -8,19 +8,24 @@
 #ifndef SkRect_DEFINED
 #define SkRect_DEFINED
 
+#include "include/core/SkPathTypes.h"
 #include "include/core/SkPoint.h"
 #include "include/core/SkSize.h"
+#include "include/core/SkSpan.h"
 #include "include/core/SkTypes.h"
 #include "include/private/base/SkFloatingPoint.h"
 #include "include/private/base/SkSafe32.h"
 #include "include/private/base/SkTFitsIn.h"
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <cstdint>
 #include <cstring>
+#include <optional>
 
 struct SkRect;
+class SkString;
 
 /** \struct SkIRect
     SkIRect holds four 32-bit integer coordinates describing the upper and
@@ -570,6 +575,13 @@ struct SK_API SkIRect {
         return MakeLTRB(std::min(fLeft, fRight), std::min(fTop, fBottom),
                         std::max(fLeft, fRight), std::max(fTop, fBottom));
     }
+
+    /** Returns pointer to first int32 in SkIRect, to treat it as an array with four
+        entries.
+
+        @return  pointer to fLeft
+    */
+    const int32_t* asInt32s() const { return &fLeft; }
 };
 
 /** \struct SkRect
@@ -709,18 +721,7 @@ struct SK_API SkRect {
         @return  true if no member is infinite or NaN
     */
     bool isFinite() const {
-        float accum = 0;
-        accum *= fLeft;
-        accum *= fTop;
-        accum *= fRight;
-        accum *= fBottom;
-
-        // accum is either NaN or it is finite (zero).
-        SkASSERT(0 == accum || std::isnan(accum));
-
-        // value==value will be true iff value is not NaN
-        // TODO: is it faster to say !accum or accum==accum?
-        return !std::isnan(accum);
+        return SkIsFinite(fLeft, fTop, fRight, fBottom);
     }
 
     /** Returns left edge of SkRect, if sorted. Call isSorted() to see if SkRect is valid.
@@ -833,16 +834,39 @@ struct SK_API SkRect {
         return !(a == b);
     }
 
-    /** Returns four points in quad that enclose SkRect ordered as: top-left, top-right,
-        bottom-right, bottom-left.
+    SkPoint TL() const { return {fLeft,  fTop}; }
+    SkPoint TR() const { return {fRight, fTop}; }
+    SkPoint BL() const { return {fLeft,  fBottom}; }
+    SkPoint BR() const { return {fRight, fBottom}; }
 
-        TODO: Consider adding parameter to control whether quad is clockwise or counterclockwise.
+    /** Returns four points in quad that enclose SkRect,
+     *  respect the specified path-direction.
+     */
+    std::array<SkPoint, 4> toQuad(SkPathDirection dir = SkPathDirection::kCW) const {
+        std::array<SkPoint, 4> storage;
+        this->copyToQuad(storage, dir);
+        return storage;
+    }
 
-        @param quad  storage for corners of SkRect
+    // Same as toQuad(), but copies the 4 points into the specified storage
+    // which must be at least a size of 4.
+    void copyToQuad(SkSpan<SkPoint> pts, SkPathDirection dir = SkPathDirection::kCW) const {
+        SkASSERT(pts.size() >= 4);
+        pts[0] = this->TL();
+        pts[2] = this->BR();
+        if (dir == SkPathDirection::kCW) {
+            pts[1] = this->TR();
+            pts[3] = this->BL();
+        } else {
+            pts[1] = this->BL();
+            pts[3] = this->TR();
+        }
+    }
 
-        example: https://fiddle.skia.org/c/@Rect_toQuad
-    */
-    void toQuad(SkPoint quad[4]) const;
+    // DEPRECATED: use std::array or copyToQuad versions
+    void toQuad(SkPoint quad[4]) const {
+        this->copyToQuad({quad, 4});
+    }
 
     /** Sets SkRect to (0, 0, 0, 0).
 
@@ -880,43 +904,64 @@ struct SK_API SkRect {
         fBottom = bottom;
     }
 
+    /**
+     * Compute the bounds of the span of points.
+     * If the span is empty, returns the empty-rect {0, 0, 0, 0.
+     * If the span contains non-finite values (inf or nan), returns {}
+     */
+    static std::optional<SkRect> Bounds(SkSpan<const SkPoint> pts);
+
+    static SkRect BoundsOrEmpty(SkSpan<const SkPoint> pts) {
+        if (auto bounds = Bounds(pts)) {
+            return bounds.value();
+        } else {
+            return MakeEmpty();
+        }
+    }
+
     /** Sets to bounds of SkPoint array with count entries. If count is zero or smaller,
         or if SkPoint array contains an infinity or NaN, sets to (0, 0, 0, 0).
 
         Result is either empty or sorted: fLeft is less than or equal to fRight, and
         fTop is less than or equal to fBottom.
 
-        @param pts    SkPoint array
-        @param count  entries in array
+        @param pts    SkPoint span
     */
-    void setBounds(const SkPoint pts[], int count) {
-        (void)this->setBoundsCheck(pts, count);
+    void setBounds(SkSpan<const SkPoint> pts) {
+        (void)this->setBoundsCheck(pts);
     }
 
-    /** Sets to bounds of SkPoint array with count entries. Returns false if count is
-        zero or smaller, or if SkPoint array contains an infinity or NaN; in these cases
-        sets SkRect to (0, 0, 0, 0).
+    /** Sets to bounds of the span of points, and return true (if all point values were finite).
+     *
+     * If the span is empty, set the rect to empty() and return true.
+     * If any point contains an infinity or NaN, set the rect to empty and return false.
+     *
+     * @param pts    SkPoint span
+     * example: https://fiddle.skia.org/c/@Rect_setBoundsCheck
+     */
+    bool setBoundsCheck(SkSpan<const SkPoint> pts);
 
-        Result is either empty or sorted: fLeft is less than or equal to fRight, and
-        fTop is less than or equal to fBottom.
+    /** Sets to bounds of the span of points.
+     *
+     * If the span is empty, set the rect to empty().
+     * If any point contains an infinity or NaN, set the rect to NaN.
+     *
+     * @param pts    SkPoint span
+     * example: https://fiddle.skia.org/c/@Rect_setBoundsNoCheck
+     */
+    void setBoundsNoCheck(SkSpan<const SkPoint> pts);
 
-        @param pts    SkPoint array
-        @param count  entries in array
-        @return       true if all SkPoint values are finite
-
-        example: https://fiddle.skia.org/c/@Rect_setBoundsCheck
-    */
-    bool setBoundsCheck(const SkPoint pts[], int count);
-
-    /** Sets to bounds of SkPoint pts array with count entries. If any SkPoint in pts
-        contains infinity or NaN, all SkRect dimensions are set to NaN.
-
-        @param pts    SkPoint array
-        @param count  entries in array
-
-        example: https://fiddle.skia.org/c/@Rect_setBoundsNoCheck
-    */
-    void setBoundsNoCheck(const SkPoint pts[], int count);
+#ifdef SK_SUPPORT_UNSPANNED_APIS
+    void setBounds(const SkPoint pts[], int count) {
+        this->setBounds({pts, count});
+    }
+    void setBoundsNoCheck(const SkPoint pts[], int count) {
+        this->setBoundsNoCheck({pts, count});
+    }
+    bool setBoundsCheck(const SkPoint pts[], int count) {
+        return this->setBoundsCheck({pts, count});
+    }
+#endif
 
     /** Sets bounds to the smallest SkRect enclosing SkPoint p0 and p1. The result is
         sorted and may be empty. Does not check to see if values are finite.
@@ -1257,14 +1302,14 @@ public:
 
     /** Sets SkRect by discarding the fractional portion of fLeft and fTop; and rounding
         up fRight and fBottom, using
-        (sk_float_floor(fLeft), sk_float_floor(fTop),
-         sk_float_ceil(fRight), sk_float_ceil(fBottom)).
+        (std::floor(fLeft), std::floor(fTop),
+         std::ceil(fRight), std::ceil(fBottom)).
 
         @param dst  storage for SkRect
     */
     void roundOut(SkRect* dst) const {
-        dst->setLTRB(sk_float_floor(fLeft), sk_float_floor(fTop),
-                     sk_float_ceil(fRight), sk_float_ceil(fBottom));
+        dst->setLTRB(std::floor(fLeft), std::floor(fTop),
+                     std::ceil(fRight), std::ceil(fBottom));
     }
 
     /** Sets SkRect by rounding up fLeft and fTop; and discarding the fractional portion
@@ -1358,6 +1403,7 @@ public:
         example: https://fiddle.skia.org/c/@Rect_dump
     */
     void dump(bool asHex) const;
+    SkString dumpToString(bool asHex) const;
 
     /** Writes text representation of SkRect to standard output. The representation may be
         directly compiled as C++ code. Floating point values are written

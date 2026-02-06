@@ -8,20 +8,25 @@
 #ifndef skgpu_AtlasTypes_DEFINED
 #define skgpu_AtlasTypes_DEFINED
 
-#include <array>
-
 #include "include/core/SkColorType.h"
+#include "include/core/SkPoint.h"
 #include "include/core/SkRect.h"
 #include "include/core/SkRefCnt.h"
 #include "include/core/SkTypes.h"
+#include "include/private/base/SkDebug.h"
 #include "include/private/base/SkTArray.h"
 #include "include/private/base/SkTo.h"
 #include "src/base/SkTInternalLList.h"
 #include "src/core/SkIPoint16.h"
 #include "src/gpu/RectanizerSkyline.h"
+#include "src/gpu/Token.h"
 
-class GrOpFlushState;
-class TestingUploadTarget;
+#include <array>
+#include <cstdint>
+#include <cstring>
+#include <utility>
+
+class SkAutoPixmapStorage;
 namespace skgpu::graphite { class RecorderPriv; }
 
 /**
@@ -137,90 +142,6 @@ public:
 
 private:
     uint64_t fGeneration{1};
-};
-
-/**
- * AtlasToken is used to sequence uploads relative to each other and to batches of draws.
- */
-class AtlasToken {
-public:
-    static AtlasToken InvalidToken() { return AtlasToken(0); }
-
-    AtlasToken(const AtlasToken&) = default;
-    AtlasToken& operator=(const AtlasToken&) = default;
-
-    bool operator==(const AtlasToken& that) const {
-        return fSequenceNumber == that.fSequenceNumber;
-    }
-    bool operator!=(const AtlasToken& that) const { return !(*this == that); }
-    bool operator<(const AtlasToken that) const {
-        return fSequenceNumber < that.fSequenceNumber;
-    }
-    bool operator<=(const AtlasToken that) const {
-        return fSequenceNumber <= that.fSequenceNumber;
-    }
-    bool operator>(const AtlasToken that) const {
-        return fSequenceNumber > that.fSequenceNumber;
-    }
-    bool operator>=(const AtlasToken that) const {
-        return fSequenceNumber >= that.fSequenceNumber;
-    }
-
-    AtlasToken& operator++() {
-        ++fSequenceNumber;
-        return *this;
-    }
-    AtlasToken operator++(int) {
-        auto old = fSequenceNumber;
-        ++fSequenceNumber;
-        return AtlasToken(old);
-    }
-
-    AtlasToken next() const { return AtlasToken(fSequenceNumber + 1); }
-
-    /** Is this token in the [start, end] inclusive interval? */
-    bool inInterval(const AtlasToken& start, const AtlasToken& end) {
-        return *this >= start && *this <= end;
-    }
-
-private:
-    AtlasToken() = delete;
-    explicit AtlasToken(uint64_t sequenceNumber) : fSequenceNumber(sequenceNumber) {}
-    uint64_t fSequenceNumber;
-};
-
-/**
- * The TokenTracker encapsulates the incrementing and distribution of AtlasTokens.
- */
-class TokenTracker {
-public:
-    /**
-     * Gets the token one beyond the last token that has been flushed,
-     * either in GrDrawingManager::flush() or Device::flushPendingWorkToRecorder()
-     */
-    AtlasToken nextFlushToken() const { return fCurrentFlushToken.next(); }
-
-    /**
-     * Gets the next draw token. This can be used to record that the next draw
-     * issued will use a resource (e.g. texture) while preparing that draw.
-     * Not used by Graphite.
-     */
-    AtlasToken nextDrawToken() const { return fCurrentDrawToken.next(); }
-
-private:
-    // Only these classes get to increment the token counters
-    friend class ::GrOpFlushState;
-    friend class ::TestingUploadTarget;
-    friend class skgpu::graphite::RecorderPriv;
-
-    // Issues the next token for a draw.
-    AtlasToken issueDrawToken() { return ++fCurrentDrawToken; }
-
-    // Advances the next token for a flush.
-    AtlasToken issueFlushToken() { return ++fCurrentFlushToken; }
-
-    AtlasToken fCurrentDrawToken = AtlasToken::InvalidToken();
-    AtlasToken fCurrentFlushToken = AtlasToken::InvalidToken();
 };
 
 /**
@@ -346,7 +267,7 @@ public:
     }
 
 private:
-    PlotLocator fPlotLocator{0, 0, 0};
+    PlotLocator fPlotLocator{AtlasGenerationCounter::kInvalidGeneration, 0, 0};
 
     // The inset padded bounds in the atlas in the lower 13 bits, and page index in bits 13 &
     // 14 of the Us.
@@ -448,6 +369,18 @@ public:
     }
     SkDEBUGCODE(size_t bpp() const { return fBytesPerPixel; })
 
+    /**
+     * To add data to the Plot, first call addRect to see if it's possible. If successful,
+     * use the atlasLocator to get a pointer to the location in the atlas via dataAt() and render to
+     * that location, or if you already have data use copySubImage().
+     */
+    bool addRect(int width, int height, AtlasLocator* atlasLocator);
+    void* dataAt(const AtlasLocator& atlasLocator);
+    void copySubImage(const AtlasLocator& atlasLocator, const void* image);
+    // Reset Pixmap to point to backing data for this Plot,
+    // and return render location specified by AtlasLocator but relative to this Plot.
+    SkIPoint prepForRender(const AtlasLocator&, SkAutoPixmapStorage*);
+    // TODO: Utility method for Ganesh, consider removing
     bool addSubImage(int width, int height, const void* image, AtlasLocator* atlasLocator);
 
     /**
@@ -457,10 +390,10 @@ public:
      * use lastUse to determine when we can evict a plot from the cache, i.e. if the last use
      * has already flushed through the gpu then we can reuse the plot.
      */
-    skgpu::AtlasToken lastUploadToken() const { return fLastUpload; }
-    skgpu::AtlasToken lastUseToken() const { return fLastUse; }
-    void setLastUploadToken(skgpu::AtlasToken token) { fLastUpload = token; }
-    void setLastUseToken(skgpu::AtlasToken token) { fLastUse = token; }
+    skgpu::Token lastUploadToken() const { return fLastUpload; }
+    skgpu::Token lastUseToken() const { return fLastUse; }
+    void setLastUploadToken(skgpu::Token token) { fLastUpload = token; }
+    void setLastUseToken(skgpu::Token token) { fLastUse = token; }
 
     int flushesSinceLastUsed() { return fFlushesSinceLastUse; }
     void resetFlushesSinceLastUsed() { fFlushesSinceLastUse = 0; }
@@ -468,7 +401,15 @@ public:
 
     bool needsUpload() { return !fDirtyRect.isEmpty(); }
     std::pair<const void*, SkIRect> prepareForUpload();
-    void resetRects();
+    // Re-initialize Plot. The client should ensure that they process any eviction callbacks
+    // before calling this, otherwise any cached references will point to invalid data.
+    // If freeData is true, this will free the backing data as well. This should only be used
+    // when we know we won't be adding to the Plot immediately afterwards.
+    void resetRects(bool freeData);
+
+    void markFullIfUsed() { fIsFull = !fDirtyRect.isEmpty(); }
+    bool isEmpty() const { return fRectanizer.percentFull() == 0; }
+    bool hasAllocation() const { return fData != nullptr; }
 
     /**
      * Create a clone of this plot. The cloned plot will take the place of the current plot in
@@ -490,9 +431,9 @@ public:
 private:
     ~Plot() override;
 
-    skgpu::AtlasToken fLastUpload;
-    skgpu::AtlasToken fLastUse;
-    int               fFlushesSinceLastUse;
+    skgpu::Token fLastUpload;
+    skgpu::Token fLastUse;
+    int          fFlushesSinceLastUse;
 
     struct {
         const uint32_t fPageIndex : 16;
@@ -511,7 +452,8 @@ private:
     const SkColorType fColorType;
     const size_t fBytesPerPixel;
     SkIRect fDirtyRect;  // area in the Plot that needs to be uploaded
-    SkDEBUGCODE(bool fDirty);
+    bool fIsFull;
+    SkDEBUGCODE(bool fDirty;)
 };
 
 typedef SkTInternalLList<Plot> PlotList;

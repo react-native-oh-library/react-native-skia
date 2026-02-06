@@ -20,6 +20,7 @@
 #include "include/private/base/SkMath.h"
 #include "modules/skcms/skcms.h"
 #include "src/base/SkArenaAlloc.h"
+#include "src/core/SkBitmapProcState.h"
 #include "src/core/SkColorSpaceXformSteps.h"
 #include "src/core/SkEffectPriv.h"
 #include "src/core/SkImageInfoPriv.h"
@@ -33,7 +34,6 @@
 #include "src/core/SkSamplingPriv.h"
 #include "src/core/SkWriteBuffer.h"
 #include "src/image/SkImage_Base.h"
-#include "src/shaders/SkLocalMatrixShader.h"
 
 #ifdef SK_ENABLE_LEGACY_SHADERCONTEXT
 #include "src/shaders/SkBitmapProcShader.h"
@@ -159,7 +159,7 @@ sk_sp<SkFlattenable> SkImageShader::CreateProc(SkReadBuffer& buffer) {
     bool raw = buffer.isVersionLT(SkPicturePriv::Version::kRawImageShaders) ? false
                                                                             : buffer.readBool();
 
-    // TODO(skbug.com/12784): Subset is not serialized yet; it's only used by special images so it
+    // TODO(skbug.com/40043877): Subset is not serialized yet; it's only used by special images so it
     // will never be written to an SKP.
 
     return raw ? SkImageShader::MakeRaw(std::move(img), tmx, tmy, sampling, &localMatrix)
@@ -175,7 +175,7 @@ void SkImageShader::flatten(SkWriteBuffer& buffer) const {
     buffer.writeImage(fImage.get());
     SkASSERT(fClampAsIfUnpremul == false);
 
-    // TODO(skbug.com/12784): Subset is not serialized yet; it's only used by special images so it
+    // TODO(skbug.com/40043877): Subset is not serialized yet; it's only used by special images so it
     // will never be written to an SKP.
     SkASSERT(!needs_subset(fImage.get(), fSubset));
 
@@ -192,8 +192,8 @@ bool SkImageShader::isOpaque() const {
 static bool legacy_shader_can_handle(const SkMatrix& inv) {
     SkASSERT(!inv.hasPerspective());
 
-    // We only have methods for scale+translate
-    if (!inv.isScaleTranslate()) {
+    // Scale+translate methods are always present, but affine might not be.
+    if (!SkOpts::S32_alpha_D32_filter_DXDY && !inv.isScaleTranslate()) {
         return false;
     }
 
@@ -215,7 +215,7 @@ static bool legacy_shader_can_handle(const SkMatrix& inv) {
 
 SkShaderBase::Context* SkImageShader::onMakeContext(const ContextRec& rec,
                                                     SkArenaAlloc* alloc) const {
-    SkASSERT(!needs_subset(fImage.get(), fSubset)); // TODO(skbug.com/12784)
+    SkASSERT(!needs_subset(fImage.get(), fSubset)); // TODO(skbug.com/40043877)
     if (fImage->alphaType() == kUnpremul_SkAlphaType) {
         return nullptr;
     }
@@ -266,8 +266,8 @@ SkShaderBase::Context* SkImageShader::onMakeContext(const ContextRec& rec,
         return nullptr;
     }
 
-    SkMatrix inv;
-    if (!rec.fMatrixRec.totalInverse(&inv) || !legacy_shader_can_handle(inv)) {
+    auto inv = rec.fMatrixRec.totalInverse();
+    if (!inv || !legacy_shader_can_handle(*inv)) {
         return nullptr;
     }
 
@@ -311,13 +311,14 @@ sk_sp<SkShader> SkImageShader::MakeRaw(sk_sp<SkImage> image,
         return SkShaders::Empty();
     }
     auto subset = SkRect::Make(image->dimensions());
-    return SkLocalMatrixShader::MakeWrapped<SkImageShader>(localMatrix,
-                                                           image,
-                                                           subset,
-                                                           tmx, tmy,
-                                                           options,
-                                                           /*raw=*/true,
-                                                           /*clampAsIfUnpremul=*/false);
+
+    sk_sp<SkShader> s = sk_make_sp<SkImageShader>(image,
+                                                  subset,
+                                                  tmx, tmy,
+                                                  options,
+                                                  /*raw=*/true,
+                                                  /*clampAsIfUnpremul=*/false);
+    return s->makeWithLocalMatrix(localMatrix ? *localMatrix : SkMatrix::I());
 }
 
 sk_sp<SkShader> SkImageShader::MakeSubset(sk_sp<SkImage> image,
@@ -342,13 +343,14 @@ sk_sp<SkShader> SkImageShader::MakeSubset(sk_sp<SkImage> image,
     if (!SkRect::Make(image->bounds()).contains(subset)) {
         return nullptr;
     }
-    return SkLocalMatrixShader::MakeWrapped<SkImageShader>(localMatrix,
-                                                           std::move(image),
-                                                           subset,
-                                                           tmx, tmy,
-                                                           options,
-                                                           /*raw=*/false,
-                                                           clampAsIfUnpremul);
+
+    sk_sp<SkShader> s = sk_make_sp<SkImageShader>(std::move(image),
+                                                  subset,
+                                                  tmx, tmy,
+                                                  options,
+                                                  /*raw=*/false,
+                                                  clampAsIfUnpremul);
+    return s->makeWithLocalMatrix(localMatrix ? *localMatrix : SkMatrix::I());
 }
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////
@@ -386,7 +388,7 @@ SkRect SkModifyPaintAndDstForDrawImageRect(const SkImage* image,
     SkRect imgBounds = SkRect::Make(image->bounds());
 
     SkASSERT(src.isFinite() && dst.isFinite() && dst.isSorted());
-    SkMatrix localMatrix = SkMatrix::RectToRect(src, dst);
+    SkMatrix localMatrix = SkMatrix::RectToRectOrIdentity(src, dst);
     if (!imgBounds.contains(src)) {
         if (!src.intersect(imgBounds)) {
             return SkRect::MakeEmpty(); // Nothing to draw for this entry
@@ -427,16 +429,16 @@ namespace {
 struct MipLevelHelper {
     SkPixmap pm;
     SkMatrix inv;
-    SkRasterPipeline_GatherCtx* gather;
-    SkRasterPipeline_TileCtx* limitX;
-    SkRasterPipeline_TileCtx* limitY;
-    SkRasterPipeline_DecalTileCtx* decalCtx = nullptr;
+    SkRasterPipelineContexts::GatherCtx* gather;
+    SkRasterPipelineContexts::TileCtx* limitX;
+    SkRasterPipelineContexts::TileCtx* limitY;
+    SkRasterPipelineContexts::DecalTileCtx* decalCtx = nullptr;
 
     void allocAndInit(SkArenaAlloc* alloc,
                       const SkSamplingOptions& sampling,
                       SkTileMode tileModeX,
                       SkTileMode tileModeY) {
-        gather = alloc->make<SkRasterPipeline_GatherCtx>();
+        gather = alloc->make<SkRasterPipelineContexts::GatherCtx>();
         gather->pixels = pm.addr();
         gather->stride = pm.rowBytesAsPixels();
         gather->width = pm.width();
@@ -447,8 +449,8 @@ struct MipLevelHelper {
                     .getColMajor(gather->weights);
         }
 
-        limitX = alloc->make<SkRasterPipeline_TileCtx>();
-        limitY = alloc->make<SkRasterPipeline_TileCtx>();
+        limitX = alloc->make<SkRasterPipelineContexts::TileCtx>();
+        limitY = alloc->make<SkRasterPipelineContexts::TileCtx>();
         limitX->scale = pm.width();
         limitX->invScale = 1.0f / pm.width();
         limitY->scale = pm.height();
@@ -473,7 +475,7 @@ struct MipLevelHelper {
         }
 
         if (tileModeX == SkTileMode::kDecal || tileModeY == SkTileMode::kDecal) {
-            decalCtx = alloc->make<SkRasterPipeline_DecalTileCtx>();
+            decalCtx = alloc->make<SkRasterPipelineContexts::DecalTileCtx>();
             decalCtx->limit_x = limitX->scale;
             decalCtx->limit_y = limitY->scale;
 
@@ -505,7 +507,7 @@ static SkSamplingOptions tweak_sampling(SkSamplingOptions sampling, const SkMatr
 }
 
 bool SkImageShader::appendStages(const SkStageRec& rec, const SkShaders::MatrixRec& mRec) const {
-    SkASSERT(!needs_subset(fImage.get(), fSubset));  // TODO(skbug.com/12784)
+    SkASSERT(!needs_subset(fImage.get(), fSubset));  // TODO(skbug.com/40043877)
 
     // We only support certain sampling options in stages so far
     auto sampling = fSampling;
@@ -519,9 +521,11 @@ bool SkImageShader::appendStages(const SkStageRec& rec, const SkShaders::MatrixR
     SkMatrix baseInv;
     // If the total matrix isn't valid then we will always access the base MIP level.
     if (mRec.totalMatrixIsValid()) {
-        if (!mRec.totalInverse(&baseInv)) {
+        auto inv = mRec.totalInverse();
+        if (!inv) {
             return false;
         }
+        baseInv = *inv;
         baseInv.normalizePerspective();
     }
 
@@ -548,11 +552,11 @@ bool SkImageShader::appendStages(const SkStageRec& rec, const SkShaders::MatrixR
     upper.allocAndInit(alloc, sampling, fTileModeX, fTileModeY);
 
     MipLevelHelper lower;
-    SkRasterPipeline_MipmapCtx* mipmapCtx = nullptr;
+    SkRasterPipelineContexts::MipmapCtx* mipmapCtx = nullptr;
     float lowerWeight = access->lowerWeight();
     if (lowerWeight > 0) {
         std::tie(lower.pm, lower.inv) = access->lowerLevel();
-        mipmapCtx = alloc->make<SkRasterPipeline_MipmapCtx>();
+        mipmapCtx = alloc->make<SkRasterPipelineContexts::MipmapCtx>();
         mipmapCtx->lowerWeight = lowerWeight;
         mipmapCtx->scaleX = static_cast<float>(lower.pm.width()) / upper.pm.width();
         mipmapCtx->scaleY = static_cast<float>(lower.pm.height()) / upper.pm.height();
@@ -619,6 +623,10 @@ bool SkImageShader::appendStages(const SkStageRec& rec, const SkShaders::MatrixR
             case kRGBA_F16Norm_SkColorType:
             case kRGBA_F16_SkColorType:     p->append(SkRasterPipelineOp::gather_f16,   ctx); break;
             case kRGBA_F32_SkColorType:     p->append(SkRasterPipelineOp::gather_f32,   ctx); break;
+            case kBGRA_10101010_XR_SkColorType:
+                p->append(SkRasterPipelineOp::gather_10101010_xr,  ctx);
+                p->append(SkRasterPipelineOp::swap_rb);
+                break;
             case kRGBA_10x6_SkColorType:    p->append(SkRasterPipelineOp::gather_10x6,  ctx); break;
 
             case kGray_8_SkColorType:       p->append(SkRasterPipelineOp::gather_a8,    ctx);
@@ -629,7 +637,10 @@ bool SkImageShader::appendStages(const SkStageRec& rec, const SkShaders::MatrixR
 
             case kRGB_888x_SkColorType:     p->append(SkRasterPipelineOp::gather_8888,  ctx);
                                             p->append(SkRasterPipelineOp::force_opaque     ); break;
-
+            case kRGB_F16F16F16x_SkColorType:
+                p->append(SkRasterPipelineOp::gather_f16,  ctx);
+                p->append(SkRasterPipelineOp::force_opaque);
+                break;
             case kBGRA_1010102_SkColorType:
                 p->append(SkRasterPipelineOp::gather_1010102, ctx);
                 p->append(SkRasterPipelineOp::swap_rb);
@@ -706,8 +717,28 @@ bool SkImageShader::appendStages(const SkStageRec& rec, const SkShaders::MatrixR
         && !sampling.useCubic && sampling.filter == SkFilterMode::kLinear
         && sampling.mipmap != SkMipmapMode::kLinear
         && fTileModeX == SkTileMode::kClamp && fTileModeY == SkTileMode::kClamp) {
+        // Check bounding box of points we will sample to see if we can use lowp
+        // and not over/under flow.
+        bool shouldUseHighPBilerp = false;
+        if (!rec.fDstBounds.isEmpty()) {
+            std::array<SkPoint, 4> quad = rec.fDstBounds.toQuad();
+            baseInv.mapPoints(quad);
+            SkRect deviceImageSpace;
+            deviceImageSpace.setBounds(quad);
+            for (float val : SkSpan<const float>(deviceImageSpace.asScalars(), 4)) {
+                if (val > INT16_MAX || val < INT16_MIN || !std::isfinite(val)) {
+                    shouldUseHighPBilerp = true;
+                    break;
+                }
+            }
+        }
 
-        p->append(SkRasterPipelineOp::bilerp_clamp_8888, upper.gather);
+        if (shouldUseHighPBilerp) {
+            p->append(SkRasterPipelineOp::bilerp_clamp_8888_force_highp, upper.gather);
+        } else {
+            p->append(SkRasterPipelineOp::bilerp_clamp_8888, upper.gather);
+        }
+
         if (ct == kBGRA_8888_SkColorType) {
             p->append(SkRasterPipelineOp::swap_rb);
         }
@@ -726,7 +757,8 @@ bool SkImageShader::appendStages(const SkStageRec& rec, const SkShaders::MatrixR
     }
 
     // This context can be shared by both levels when doing linear mipmap filtering
-    SkRasterPipeline_SamplerCtx* sampler = alloc->make<SkRasterPipeline_SamplerCtx>();
+    SkRasterPipelineContexts::SamplerCtx* sampler =
+            alloc->make<SkRasterPipelineContexts::SamplerCtx>();
 
     auto sample = [&](SkRasterPipelineOp setup_x,
                       SkRasterPipelineOp setup_y,
@@ -788,3 +820,21 @@ bool SkImageShader::appendStages(const SkStageRec& rec, const SkShaders::MatrixR
 
     return append_misc();
 }
+
+namespace SkShaders {
+
+sk_sp<SkShader> Image(sk_sp<SkImage> image,
+                      SkTileMode tmx, SkTileMode tmy,
+                      const SkSamplingOptions& options,
+                      const SkMatrix* localMatrix) {
+    return SkImageShader::Make(std::move(image), tmx, tmy, options, localMatrix);
+}
+
+sk_sp<SkShader> RawImage(sk_sp<SkImage> image,
+                         SkTileMode tmx, SkTileMode tmy,
+                         const SkSamplingOptions& options,
+                         const SkMatrix* localMatrix) {
+    return SkImageShader::MakeRaw(std::move(image), tmx, tmy, options, localMatrix);
+}
+
+}  // namespace SkShaders

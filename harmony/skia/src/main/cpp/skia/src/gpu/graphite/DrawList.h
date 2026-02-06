@@ -4,25 +4,28 @@
  * Use of this source code is governed by a BSD-style license that can be
  * found in the LICENSE file.
  */
-
 #ifndef skgpu_graphite_DrawList_DEFINED
 #define skgpu_graphite_DrawList_DEFINED
 
-#include "include/core/SkPaint.h"
-#include "src/base/SkTBlockList.h"
+#include "include/gpu/graphite/GraphiteTypes.h"
 
+#include "include/private/base/SkDebug.h"
+#include "src/base/SkBlockAllocator.h"
+#include "src/base/SkEnumBitMask.h"
+#include "src/base/SkTBlockList.h"
 #include "src/gpu/graphite/DrawOrder.h"
 #include "src/gpu/graphite/DrawParams.h"
 #include "src/gpu/graphite/PaintParams.h"
-#include "src/gpu/graphite/geom/Geometry.h"
 #include "src/gpu/graphite/geom/Rect.h"
-#include "src/gpu/graphite/geom/Transform_graphite.h"
+#include "src/gpu/graphite/geom/Transform.h"
 
+#include <cstdint>
 #include <limits>
 #include <optional>
 
 namespace skgpu::graphite {
 
+class Geometry;
 class Renderer;
 
 /**
@@ -62,7 +65,14 @@ public:
     // shared by multiple draw calls so it's more difficult to reason about how much room is left
     // in a DrawList. Limiting it to this keeps tracking simple and ensures that the sequences in
     // DrawOrder cannot overflow since they are always less than or equal to the number of draws.
-    static constexpr int kMaxRenderSteps = std::numeric_limits<uint16_t>::max();
+    // TODO(b/322840221): The theoretic max for this value is 16-bit, but we see markedly better
+    // performance with smaller values. This should be understood and fixed directly rather than as
+    // a magic side-effect, but for now, let it go fast.
+    static constexpr int kMaxRenderSteps = 4096;
+    static_assert(kMaxRenderSteps <= std::numeric_limits<uint16_t>::max());
+
+    // Add a construtor to prevent default zero initialization of SkTBlockList members' storage.
+    DrawList() {}
 
     // DrawList requires that all Transforms be valid and asserts as much; invalid transforms should
     // be detected at the Device level or similar. The provided Renderer must be compatible with the
@@ -75,12 +85,19 @@ public:
                     const Clip& clip,
                     DrawOrder ordering,
                     const PaintParams* paint,
-                    const StrokeStyle* stroke);
+                    const StrokeStyle* stroke,
+                    bool dependsOnDst,
+                    bool dstReadReq);
 
     int renderStepCount() const { return fRenderStepCount; }
 
-    // Bounds for a dst copy required by this DrawList.
-    const Rect& dstCopyBounds() const { return fDstCopyBounds; }
+    // Bounds for a dst read required by this DrawList. These bounds are only valid if drawsReadDst
+    // returns true.
+    const Rect& dstReadBounds() const { return fDstReadBounds; }
+    bool drawsReadDst() const { return !fDstReadBounds.isEmptyNegativeOrNaN(); }
+    bool drawsRequireMSAA() const { return fRequiresMSAA; }
+    SkEnumBitMask<DepthStencilFlags> depthStencilFlags() const { return fDepthStencilFlags; }
+
 
     SkDEBUGCODE(bool hasCoverageMaskDraws() const { return fCoverageMaskShapeDrawCount > 0; })
 
@@ -88,16 +105,27 @@ private:
     friend class DrawPass;
 
     struct Draw {
-        const Renderer* fRenderer; // Owned by SharedContext of Recorder that recorded the draw
-        DrawParams fDrawParams; // The DrawParam's transform is owned by fTransforms of the DrawList
-        std::optional<PaintParams> fPaintParams; // Not present implies depth-only draw
-
+    public:
         Draw(const Renderer* renderer, const Transform& transform, const Geometry& geometry,
-             const Clip& clip, DrawOrder order, const PaintParams* paint,
-             const StrokeStyle* stroke)
+             const Clip& clip, DrawOrder order, const PaintParams* paint, const StrokeStyle* stroke,
+             bool dependsOnDst, bool dstReadReq)
                 : fRenderer(renderer)
                 , fDrawParams(transform, geometry, clip, order, stroke)
-                , fPaintParams(paint ? std::optional<PaintParams>(*paint) : std::nullopt) {}
+                , fPaintParams(paint ? std::optional<PaintParams>(*paint) : std::nullopt)
+                , fDependsOnDst(dependsOnDst)
+                , fDstReadReq(dstReadReq) {}
+        const Renderer* renderer()                      const { return fRenderer;     }
+        const DrawParams& drawParams()                  const { return fDrawParams;   }
+        const std::optional<PaintParams>& paintParams() const { return fPaintParams;  }
+        bool dependsOnDst()                             const { return fDependsOnDst; }
+        bool dstReadReq()                               const { return fDstReadReq;   }
+
+    private:
+        const Renderer* fRenderer; // Owned by SharedContext of Recorder that recorded the draw
+        DrawParams fDrawParams; // The DrawParam's transform is owned by fTransforms of the DrawList
+        std::optional<PaintParams> fPaintParams;
+        bool fDependsOnDst;
+        bool fDstReadReq;
     };
 
     // The returned Transform reference remains valid for the lifetime of the DrawList.
@@ -114,7 +142,12 @@ private:
     int fCoverageMaskShapeDrawCount = 0;
 #endif
 
-    Rect fDstCopyBounds = Rect::InfiniteInverted();
+    // Tracked for all paints that read from the dst. If it is later determined that the
+    // DstReadStrategy is not kTextureCopy, this value can simply be ignored.
+    Rect fDstReadBounds = Rect::InfiniteInverted();
+    // Other properties of draws contained within this DrawList
+    bool fRequiresMSAA = false;
+    SkEnumBitMask<DepthStencilFlags> fDepthStencilFlags = DepthStencilFlags::kNone;
 };
 
 } // namespace skgpu::graphite

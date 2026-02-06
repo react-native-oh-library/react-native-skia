@@ -14,15 +14,17 @@
 #include "src/gpu/graphite/Log.h"
 #include "src/gpu/graphite/compute/DispatchGroup.h"
 #include "src/gpu/graphite/dawn/DawnGraphicsPipeline.h"
+#include "src/gpu/graphite/dawn/DawnResourceProvider.h"
 
 #include "webgpu/webgpu_cpp.h"  // NO_G3_REWRITE
+
+#include <optional>
 
 namespace skgpu::graphite {
 class ComputePipeline;
 class DawnBuffer;
 class DawnComputePipeline;
 class DawnQueueManager;
-class DawnResourceProvider;
 class DawnSharedContext;
 class DawnTexture;
 class DispatchGroup;
@@ -35,54 +37,77 @@ public:
 
     wgpu::CommandBuffer finishEncoding();
 
+#if defined(SK_DEBUG)
+    bool hasActivePassEncoder() const {
+        return fActiveRenderPassEncoder || fActiveComputePassEncoder;
+    }
+#endif
+
+    bool startTimerQuery() override;
+    void endTimerQuery() override;
+    std::optional<GpuStats> gpuStats() override;
+
 private:
     DawnCommandBuffer(const DawnSharedContext* sharedContext,
                       DawnResourceProvider* resourceProvider);
+
+    ResourceProvider* resourceProvider() const override { return fResourceProvider; }
+
+    const DawnSampler* getSampler(const DrawPassCommands::BindTexturesAndSamplers& command,
+                                  int32_t index);
 
     void onResetCommandBuffer() override;
     bool setNewCommandBufferResources() override;
 
     bool onAddRenderPass(const RenderPassDesc&,
+                         SkIRect renderPassBounds,
                          const Texture* colorTexture,
                          const Texture* resolveTexture,
                          const Texture* depthStencilTexture,
-                         SkRect viewport,
+                         SkIPoint resolveOffset,
+                         SkIRect viewport,
                          const DrawPassList&) override;
-    bool onAddComputePass(const DispatchGroupList&) override;
+    bool onAddComputePass(DispatchGroupSpan) override;
 
     // Methods for populating a Dawn RenderPassEncoder:
     bool beginRenderPass(const RenderPassDesc&,
+                         const SkIPoint& resolveOffset,
+                         SkIRect renderPassBounds,
                          const Texture* colorTexture,
                          const Texture* resolveTexture,
                          const Texture* depthStencilTexture);
-    bool loadMSAAFromResolveAndBeginRenderPassEncoder(
-            const RenderPassDesc& frontendRenderPassDesc,
-            const wgpu::RenderPassDescriptor& wgpuRenderPassDesc,
-            const DawnTexture* msaaTexture);
+    bool emulateLoadMSAAFromResolveAndBeginRenderPassEncoder(
+            const RenderPassDesc& intendedRenderPassDesc,
+            const wgpu::RenderPassDescriptor& intendedDawnRenderPassDesc,
+            const SkIPoint& resolveOffset,
+            const SkIRect& renderPassBounds,
+            const DawnTexture* msaaTexture,
+            const DawnTexture* resolveTexture);
     bool doBlitWithDraw(const wgpu::RenderPassEncoder& renderEncoder,
-                        const RenderPassDesc& frontendRenderPassDesc,
-                        const wgpu::TextureView& sourceTextureView,
-                        int width,
-                        int height);
-    void endRenderPass();
+                        const RenderPassDesc& frontendRenderPassDescKey,
+                        const wgpu::TextureView& srcTextureView,
+                        int srcSampleCount,
+                        const SkIPoint& srcOffset,
+                        const SkIRect& dstBounds);
+    bool endRenderPass();
 
-    void addDrawPass(const DrawPass*);
+    [[nodiscard]] bool addDrawPass(DrawPass*);
 
-    void bindGraphicsPipeline(const GraphicsPipeline*);
-    void setBlendConstants(float* blendConstants);
+    bool bindGraphicsPipeline(const GraphicsPipeline*);
+    void setBlendConstants(std::array<float, 4> blendConstants);
 
-    void bindUniformBuffer(const BindUniformBufferInfo& info, UniformSlot);
-    void bindDrawBuffers(const BindBufferInfo& vertices,
-                         const BindBufferInfo& instances,
-                         const BindBufferInfo& indices,
-                         const BindBufferInfo& indirect);
+    void bindUniformBuffer(const BindBufferInfo& info, UniformSlot);
+    void bindInputBuffer(const Buffer* buffer, size_t offset, uint32_t bindingIndex);
+    void bindIndexBuffer(const Buffer* indexBuffer, size_t offset);
+    void bindIndirectBuffer(const Buffer* indirectBuffer, size_t offset);
 
     void bindTextureAndSamplers(const DrawPass& drawPass,
                                 const DrawPassCommands::BindTexturesAndSamplers& command);
 
-    void setScissor(unsigned int left, unsigned int top, unsigned int width, unsigned int height);
-    void preprocessViewport(const SkRect& viewport);
-    void setViewport(const SkRect& viewport);
+    void setScissor(const Scissor&);
+    bool updateIntrinsicUniformsAsUBO(UniformDataBlock dataBlock);
+    bool updateIntrinsicUniformsAsPushConstant(UniformDataBlock dataBlock);
+    void setViewport(SkIRect viewport);
 
     void draw(PrimitiveType type, unsigned int baseVertex, unsigned int vertexCount);
     void drawIndexed(PrimitiveType type,
@@ -108,6 +133,7 @@ private:
     void bindComputePipeline(const ComputePipeline*);
     void bindDispatchResources(const DispatchGroup&, const DispatchGroup::Dispatch&);
     void dispatchWorkgroups(const WorkgroupSize& globalSize);
+    void dispatchWorkgroupsIndirect(const Buffer* indirectBuffer, size_t indirectBufferOffset);
     void endComputePass();
 
     // Methods for doing texture/buffer to texture/buffer copying:
@@ -138,19 +164,27 @@ private:
 
     bool fBoundUniformBuffersDirty = false;
 
-    std::array<const DawnBuffer*, DawnGraphicsPipeline::kNumUniformBuffers> fBoundUniformBuffers;
-    std::array<uint32_t, DawnGraphicsPipeline::kNumUniformBuffers> fBoundUniformBufferOffsets;
-    std::array<uint32_t, DawnGraphicsPipeline::kNumUniformBuffers> fBoundUniformBufferSizes;
+    std::array<BindBufferInfo, DawnGraphicsPipeline::kNumUniformBuffers> fBoundUniforms;
 
     wgpu::CommandEncoder fCommandEncoder;
     wgpu::RenderPassEncoder fActiveRenderPassEncoder;
     wgpu::ComputePassEncoder fActiveComputePassEncoder;
 
+    struct ResolveStepEmulationInfo {
+        const DawnTexture* fMSAATexture;
+        const DawnTexture* fResolveTexture;
+        SkIPoint fMSAAAOffset;
+        SkIRect fResolveArea;
+    };
+    std::optional<ResolveStepEmulationInfo> fResolveStepEmulationInfo;
+
     wgpu::Buffer fCurrentIndirectBuffer;
     size_t fCurrentIndirectBufferOffset = 0;
 
-    sk_sp<DawnBuffer> fIntrinsicConstantBuffer;
-    int fIntrinsicConstantBufferSlotsUsed = 0;
+    bool fWroteFirstPassTimestamps = false;
+    wgpu::QuerySet fTimestampQuerySet;
+    sk_sp<DawnBuffer> fTimestampQueryBuffer;
+    sk_sp<DawnBuffer> fTimestampQueryXferBuffer;
 
     const DawnGraphicsPipeline* fActiveGraphicsPipeline = nullptr;
     const DawnComputePipeline* fActiveComputePipeline = nullptr;

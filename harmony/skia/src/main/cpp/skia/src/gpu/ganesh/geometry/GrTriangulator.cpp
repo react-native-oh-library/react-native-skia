@@ -7,15 +7,26 @@
 
 #include "src/gpu/ganesh/geometry/GrTriangulator.h"
 
+#include "include/core/SkPathTypes.h"
+#include "include/core/SkRect.h"
+#include "include/private/base/SkDebug.h"
+#include "include/private/base/SkFloatingPoint.h"
+#include "include/private/base/SkMath.h"
+#include "include/private/base/SkTPin.h"
+#include "src/base/SkVx.h"
+#include "src/core/SkGeometry.h"
+#include "src/core/SkPointPriv.h"
 #include "src/gpu/BufferWriter.h"
+#include "src/gpu/ganesh/GrColor.h"
 #include "src/gpu/ganesh/GrEagerVertexAllocator.h"
 #include "src/gpu/ganesh/geometry/GrPathUtils.h"
 
-#include "src/core/SkGeometry.h"
-#include "src/core/SkPointPriv.h"
-
 #include <algorithm>
+#include <cstddef>
+#include <limits>
+#include <memory>
 #include <tuple>
+#include <utility>
 
 #if !defined(SK_ENABLE_OPTIMIZE_SIZE)
 
@@ -99,7 +110,7 @@ static skgpu::VertexWriter emit_triangle(Vertex* v0, Vertex* v1, Vertex* v2,
     TESS_LOG("emit_triangle %g (%g, %g) %d\n", v0->fID, v0->fPoint.fX, v0->fPoint.fY, v0->fAlpha);
     TESS_LOG("              %g (%g, %g) %d\n", v1->fID, v1->fPoint.fX, v1->fPoint.fY, v1->fAlpha);
     TESS_LOG("              %g (%g, %g) %d\n", v2->fID, v2->fPoint.fX, v2->fPoint.fY, v2->fAlpha);
-#if TESSELLATOR_WIREFRAME
+#if TRIANGULATOR_WIREFRAME
     data = emit_vertex(v0, emitCoverage, std::move(data));
     data = emit_vertex(v1, emitCoverage, std::move(data));
     data = emit_vertex(v1, emitCoverage, std::move(data));
@@ -125,8 +136,8 @@ void GrTriangulator::VertexList::remove(Vertex* v) {
 // Round to nearest quarter-pixel. This is used for screenspace tessellation.
 
 static inline void round(SkPoint* p) {
-    p->fX = SkScalarRoundToScalar(p->fX * SkFloatToScalar(4.0f)) * SkFloatToScalar(0.25f);
-    p->fY = SkScalarRoundToScalar(p->fY * SkFloatToScalar(4.0f)) * SkFloatToScalar(0.25f);
+    p->fX = SkScalarRoundToScalar(p->fX * 4.0f) * 0.25f;
+    p->fY = SkScalarRoundToScalar(p->fY * 4.0f) * 0.25f;
 }
 
 static inline SkScalar double_to_clamped_scalar(double d) {
@@ -149,7 +160,7 @@ bool GrTriangulator::Line::intersect(const Line& other, SkPoint* point) const {
     double scale = 1.0 / denom;
     point->fX = double_to_clamped_scalar((fB * other.fC - other.fB * fC) * scale);
     point->fY = double_to_clamped_scalar((other.fA * fC - fA * other.fC) * scale);
-     round(point);
+    round(point);
     return point->isFinite();
 }
 
@@ -305,7 +316,7 @@ bool GrTriangulator::EdgeList::remove(Edge* edge) {
 }
 
 void GrTriangulator::MonotonePoly::addEdge(Edge* edge) {
-    if (fSide == kRight_Side) {
+    if (fSide == Side::kRight) {
         SkASSERT(!edge->fUsedInRightPoly);
         list_insert<Edge, &Edge::fRightPolyPrev, &Edge::fRightPolyNext>(
             edge, fLastEdge, nullptr, &fFirstEdge, &fLastEdge);
@@ -326,7 +337,7 @@ skgpu::VertexWriter GrTriangulator::emitMonotonePoly(const MonotonePoly* monoton
     vertices.append(e->fTop);
     int count = 1;
     while (e != nullptr) {
-        if (kRight_Side == monotonePoly->fSide) {
+        if (Side::kRight == monotonePoly->fSide) {
             vertices.append(e->fBottom);
             e = e->fRightPolyNext;
         } else {
@@ -400,10 +411,13 @@ GrTriangulator::Poly::Poly(Vertex* v, int winding)
 
 Poly* GrTriangulator::Poly::addEdge(Edge* e, Side side, GrTriangulator* tri) {
     TESS_LOG("addEdge (%g -> %g) to poly %d, %s side\n",
-             e->fTop->fID, e->fBottom->fID, fID, side == kLeft_Side ? "left" : "right");
+             e->fTop->fID,
+             e->fBottom->fID,
+             fID,
+             side == Side::kLeft ? "left" : "right");
     Poly* partner = fPartner;
     Poly* poly = this;
-    if (side == kRight_Side) {
+    if (side == Side::kRight) {
         if (e->fUsedInRightPoly) {
             return this;
         }
@@ -509,8 +523,7 @@ void GrTriangulator::generateCubicPoints(const SkPoint& p0, const SkPoint& p1, c
                                          int pointsLeft) const {
     SkScalar d1 = SkPointPriv::DistanceToLineSegmentBetweenSqd(p1, p0, p3);
     SkScalar d2 = SkPointPriv::DistanceToLineSegmentBetweenSqd(p2, p0, p3);
-    if (pointsLeft < 2 || (d1 < tolSqd && d2 < tolSqd) ||
-        !SkScalarIsFinite(d1) || !SkScalarIsFinite(d2)) {
+    if (pointsLeft < 2 || (d1 < tolSqd && d2 < tolSqd) || !SkIsFinite(d1, d2)) {
         this->appendPointToContour(p3, contour);
         return;
     }
@@ -534,68 +547,65 @@ void GrTriangulator::generateCubicPoints(const SkPoint& p0, const SkPoint& p1, c
 void GrTriangulator::pathToContours(float tolerance, const SkRect& clipBounds,
                                     VertexList* contours, bool* isLinear) const {
     SkScalar toleranceSqd = tolerance * tolerance;
-    SkPoint pts[4];
     *isLinear = true;
     VertexList* contour = contours;
-    SkPath::Iter iter(fPath, false);
     if (fPath.isInverseFillType()) {
-        SkPoint quad[4];
-        clipBounds.toQuad(quad);
+        const std::array<SkPoint, 4> quad = clipBounds.toQuad();
         for (int i = 3; i >= 0; i--) {
             this->appendPointToContour(quad[i], contours);
         }
         contour++;
     }
     SkAutoConicToQuads converter;
-    SkPath::Verb verb;
-    while ((verb = iter.next(pts)) != SkPath::kDone_Verb) {
-        switch (verb) {
-            case SkPath::kConic_Verb: {
+    SkPath::Iter iter(fPath, false);
+    while (auto rec = iter.next()) {
+        SkSpan<const SkPoint> pts = rec->fPoints;
+        switch (rec->fVerb) {
+            case SkPathVerb::kConic: {
                 *isLinear = false;
                 if (toleranceSqd == 0) {
                     this->appendPointToContour(pts[2], contour);
                     break;
                 }
-                SkScalar weight = iter.conicWeight();
-                const SkPoint* quadPts = converter.computeQuads(pts, weight, toleranceSqd);
+                const SkPoint* quadPts = converter.computeQuads(pts.data(), rec->conicWeight(),
+                                                                toleranceSqd);
                 for (int i = 0; i < converter.countQuads(); ++i) {
                     this->appendQuadraticToContour(quadPts, toleranceSqd, contour);
                     quadPts += 2;
                 }
                 break;
             }
-            case SkPath::kMove_Verb:
+            case SkPathVerb::kMove:
                 if (contour->fHead) {
                     contour++;
                 }
                 this->appendPointToContour(pts[0], contour);
                 break;
-            case SkPath::kLine_Verb: {
+            case SkPathVerb::kLine: {
                 this->appendPointToContour(pts[1], contour);
                 break;
             }
-            case SkPath::kQuad_Verb: {
+            case SkPathVerb::kQuad: {
                 *isLinear = false;
                 if (toleranceSqd == 0) {
                     this->appendPointToContour(pts[2], contour);
                     break;
                 }
-                this->appendQuadraticToContour(pts, toleranceSqd, contour);
+                this->appendQuadraticToContour(pts.data(), toleranceSqd, contour);
                 break;
             }
-            case SkPath::kCubic_Verb: {
+            case SkPathVerb::kCubic: {
                 *isLinear = false;
                 if (toleranceSqd == 0) {
                     this->appendPointToContour(pts[3], contour);
                     break;
                 }
-                int pointsLeft = GrPathUtils::cubicPointCount(pts, tolerance);
+                int pointsLeft = GrPathUtils::cubicPointCount(pts.data(), tolerance);
                 this->generateCubicPoints(pts[0], pts[1], pts[2], pts[3], toleranceSqd, contour,
                                           pointsLeft);
                 break;
             }
-            case SkPath::kClose_Verb:
-            case SkPath::kDone_Verb:
+            case SkPathVerb::kClose:
                 break;
         }
     }
@@ -747,14 +757,22 @@ static bool rewind(EdgeList* activeEdges, Vertex** current, Vertex* dst, const C
         }
         Edge* leftEdge = v->fLeftEnclosingEdge;
         for (Edge* e = v->fFirstEdgeAbove; e; e = e->fNextEdgeAbove) {
+            if (!e) {
+                return false;
+            }
             if (!activeEdges->insert(e, leftEdge)) {
                 return false;
             }
             leftEdge = e;
             Vertex* top = e->fTop;
+            if (!top ||
+                (top->fLeftEnclosingEdge && !top->fLeftEnclosingEdge->hasTopAndBottom()) ||
+                (top->fRightEnclosingEdge && !top->fRightEnclosingEdge->hasTopAndBottom())) {
+                return false;
+            }
             if (c.sweep_lt(top->fPoint, dst->fPoint) &&
-                ((top->fLeftEnclosingEdge && !top->fLeftEnclosingEdge->isLeftOf(*e->fTop)) ||
-                 (top->fRightEnclosingEdge && !top->fRightEnclosingEdge->isRightOf(*e->fTop)))) {
+                ((top->fLeftEnclosingEdge && !top->fLeftEnclosingEdge->isLeftOf(*top)) ||
+                 (top->fRightEnclosingEdge && !top->fRightEnclosingEdge->isRightOf(*top)))) {
                 dst = top;
             }
         }
@@ -858,6 +876,21 @@ bool GrTriangulator::setBottom(Edge* edge, Vertex* v, EdgeList* activeEdges, Ver
     return this->mergeCollinearEdges(edge, activeEdges, current, c);
 }
 
+/*
+ * NOTE: Also used in mergeEdgesBelow()
+ * Merges two adjacent, collinear edges. This is a complex operation with two main cases:
+ *
+ * 1. Coincident endpoints: If the edges share the exact same top/bottom vertex, one edge's winding
+ *    is absorbed into the other. The now-unused "zombie" edge is fully disconnected and also
+ *    explicitly removed from the activeEdges list to prevent state corruption that can lead to
+ *    null-pointer dereferences (b/419397557, b/421959607).
+ *
+ * 2. Non-coincident (overlapping) endpoints: One edge is shortened to meet the endpoint of the
+ *    other by modifying it in-place. This is a fragile operation that relies on the stability of
+ *    the floating point comparisons to succeed. To combat this, the geometric checks (`isLeftOf`,
+ *    etc.) use an adaptive, per-edge epsilon. This tries to ensure that the decision to merge is
+ *    mathematically sound, even with pathological floating-point coordinates.
+ */
 bool GrTriangulator::mergeEdgesAbove(Edge* edge, Edge* other, EdgeList* activeEdges,
                                      Vertex** current, const Comparator& c) const {
     if (!edge || !other) {
@@ -872,6 +905,9 @@ bool GrTriangulator::mergeEdgesAbove(Edge* edge, Edge* other, EdgeList* activeEd
         }
         other->fWinding += edge->fWinding;
         edge->disconnect();
+        if (activeEdges) {
+            activeEdges->remove(edge);
+        }
         edge->fTop = edge->fBottom = nullptr;
     } else if (c.sweep_lt(edge->fTop->fPoint, other->fTop->fPoint)) {
         if (!rewind(activeEdges, current, edge->fTop, c)) {
@@ -893,6 +929,7 @@ bool GrTriangulator::mergeEdgesAbove(Edge* edge, Edge* other, EdgeList* activeEd
     return true;
 }
 
+// NOTE: See mergeEdgesAbove() comment
 bool GrTriangulator::mergeEdgesBelow(Edge* edge, Edge* other, EdgeList* activeEdges,
                                      Vertex** current, const Comparator& c) const {
     if (!edge || !other) {
@@ -907,6 +944,9 @@ bool GrTriangulator::mergeEdgesBelow(Edge* edge, Edge* other, EdgeList* activeEd
         }
         other->fWinding += edge->fWinding;
         edge->disconnect();
+        if (activeEdges) {
+            activeEdges->remove(edge);
+        }
         edge->fTop = edge->fBottom = nullptr;
     } else if (c.sweep_lt(edge->fBottom->fPoint, other->fBottom->fPoint)) {
         if (!rewind(activeEdges, current, other->fTop, c)) {
@@ -944,8 +984,15 @@ static bool bottom_collinear(Edge* left, Edge* right) {
            !left->isLeftOf(*right->fBottom) || !right->isRightOf(*left->fBottom);
 }
 
+// How deep of a stack of mergeCollinearEdges() we'll accept
+static constexpr int kMaxMergeCollinearCalls = 64;
+
 bool GrTriangulator::mergeCollinearEdges(Edge* edge, EdgeList* activeEdges, Vertex** current,
                                          const Comparator& c) const {
+    // Stack is unreasonably deep
+    if (++fMergeCollinearStackCount > kMaxMergeCollinearCalls) {
+        return false;
+    }
     for (;;) {
         if (top_collinear(edge->fPrevEdgeAbove, edge)) {
             if (!this->mergeEdgesAbove(edge->fPrevEdgeAbove, edge, activeEdges, current, c)) {
@@ -1017,6 +1064,7 @@ GrTriangulator::BoolFail GrTriangulator::splitEdge(
     Edge* newEdge = this->allocateEdge(top, bottom, winding, edge->fType);
     newEdge->insertBelow(top, c);
     newEdge->insertAbove(bottom, c);
+    fMergeCollinearStackCount = 0;
     if (!this->mergeCollinearEdges(newEdge, activeEdges, current, c)) {
         return BoolFail::kFail;
     }
@@ -1082,6 +1130,7 @@ Edge* GrTriangulator::makeConnectingEdge(Vertex* prev, Vertex* next, EdgeType ty
     edge->insertBelow(edge->fTop, c);
     edge->insertAbove(edge->fBottom, c);
     edge->fWinding *= windingScale;
+    fMergeCollinearStackCount = 0;
     this->mergeCollinearEdges(edge, nullptr, nullptr, c);
     return edge;
 }
@@ -1094,10 +1143,14 @@ void GrTriangulator::mergeVertices(Vertex* src, Vertex* dst, VertexList* mesh,
     if (src->fPartner) {
         src->fPartner->fPartner = dst;
     }
+    // setBottom()/setTop() will call mergeCollinearEdges() but this can recurse,
+    // so we need to clear the stack count here.
     while (Edge* edge = src->fFirstEdgeAbove) {
+        fMergeCollinearStackCount = 0;
         std::ignore = this->setBottom(edge, dst, nullptr, nullptr, c);
     }
     while (Edge* edge = src->fFirstEdgeBelow) {
+        fMergeCollinearStackCount = 0;
         std::ignore = this->setTop(edge, dst, nullptr, nullptr, c);
     }
     mesh->remove(src);
@@ -1430,10 +1483,17 @@ GrTriangulator::SimplifyResult GrTriangulator::simplify(VertexList* mesh,
     TESS_LOG("simplifying complex polygons\n");
 
     int initialNumEdges = fNumEdges;
+    int initialNumVertices = 0;
+    for (Vertex* v = mesh->fHead; v != nullptr; v = v->fNext) {
+        ++initialNumVertices;
+    }
+    int numSelfIntersections = 0;
 
     EdgeList activeEdges;
     auto result = SimplifyResult::kAlreadySimple;
+    int numVisitedVertices = 0;
     for (Vertex* v = mesh->fHead; v != nullptr; v = v->fNext) {
+        ++numVisitedVertices;
         if (!v->isConnected()) {
             continue;
         }
@@ -1442,6 +1502,10 @@ GrTriangulator::SimplifyResult GrTriangulator::simplify(VertexList* mesh,
         // renderers enabled and with the triangulator's maxVerbCount set to the Chrome value is
         // 17x.
         if (fNumEdges > 170*initialNumEdges) {
+            return SimplifyResult::kFailed;
+        }
+
+        if (numVisitedVertices > 170*initialNumVertices) {
             return SimplifyResult::kFailed;
         }
 
@@ -1461,12 +1525,14 @@ GrTriangulator::SimplifyResult GrTriangulator::simplify(VertexList* mesh,
                             leftEnclosingEdge, edge, &activeEdges, &v, mesh, c);
                     if (l == BoolFail::kFail) {
                         return SimplifyResult::kFailed;
-                    } else if (l == BoolFail::kFalse) {
+                    }
+                    if (l == BoolFail::kFalse) {
                         BoolFail r = this->checkForIntersection(
                                 edge, rightEnclosingEdge, &activeEdges, &v, mesh, c);
                         if (r == BoolFail::kFail) {
                             return SimplifyResult::kFailed;
-                        } else if (r == BoolFail::kFalse) {
+                        }
+                        if (r == BoolFail::kFalse) {
                             // Neither l and r are both false.
                             continue;
                         }
@@ -1475,6 +1541,7 @@ GrTriangulator::SimplifyResult GrTriangulator::simplify(VertexList* mesh,
                     // Either l or r are true.
                     result = SimplifyResult::kFoundSelfIntersection;
                     restartChecks = true;
+                    ++numSelfIntersections;
                     break;
                 }  // for
             } else {
@@ -1486,8 +1553,14 @@ GrTriangulator::SimplifyResult GrTriangulator::simplify(VertexList* mesh,
                 if (bf == BoolFail::kTrue) {
                     result = SimplifyResult::kFoundSelfIntersection;
                     restartChecks = true;
+                    ++numSelfIntersections;
                 }
+            }
 
+            // In pathological cases, a path can intersect itself millions of times. After 500,000
+            // self-intersections are found, reject the path.
+            if (numSelfIntersections > 500000) {
+                return SimplifyResult::kFailed;
             }
         } while (restartChecks);
 #ifdef SK_DEBUG
@@ -1551,19 +1624,19 @@ std::tuple<Poly*, bool> GrTriangulator::tessellate(const VertexList& vertices, c
 #endif
         if (v->fFirstEdgeAbove) {
             if (leftPoly) {
-                leftPoly = leftPoly->addEdge(v->fFirstEdgeAbove, kRight_Side, this);
+                leftPoly = leftPoly->addEdge(v->fFirstEdgeAbove, Side::kRight, this);
             }
             if (rightPoly) {
-                rightPoly = rightPoly->addEdge(v->fLastEdgeAbove, kLeft_Side, this);
+                rightPoly = rightPoly->addEdge(v->fLastEdgeAbove, Side::kLeft, this);
             }
             for (Edge* e = v->fFirstEdgeAbove; e != v->fLastEdgeAbove; e = e->fNextEdgeAbove) {
                 Edge* rightEdge = e->fNextEdgeAbove;
                 activeEdges.remove(e);
                 if (e->fRightPoly) {
-                    e->fRightPoly->addEdge(e, kLeft_Side, this);
+                    e->fRightPoly->addEdge(e, Side::kLeft, this);
                 }
                 if (rightEdge->fLeftPoly && rightEdge->fLeftPoly != e->fRightPoly) {
-                    rightEdge->fLeftPoly->addEdge(e, kRight_Side, this);
+                    rightEdge->fLeftPoly->addEdge(e, Side::kRight, this);
                 }
             }
             activeEdges.remove(v->fLastEdgeAbove);
@@ -1579,7 +1652,7 @@ std::tuple<Poly*, bool> GrTriangulator::tessellate(const VertexList& vertices, c
             if (!v->fFirstEdgeAbove) {
                 if (leftPoly && rightPoly) {
                     if (leftPoly == rightPoly) {
-                        if (leftPoly->fTail && leftPoly->fTail->fSide == kLeft_Side) {
+                        if (leftPoly->fTail && leftPoly->fTail->fSide == Side::kLeft) {
                             leftPoly = this->makePoly(&polys, leftPoly->lastVertex(),
                                                       leftPoly->fWinding);
                             leftEnclosingEdge->fRightPoly = leftPoly;
@@ -1590,8 +1663,8 @@ std::tuple<Poly*, bool> GrTriangulator::tessellate(const VertexList& vertices, c
                         }
                     }
                     Edge* join = this->allocateEdge(leftPoly->lastVertex(), v, 1, EdgeType::kInner);
-                    leftPoly = leftPoly->addEdge(join, kRight_Side, this);
-                    rightPoly = rightPoly->addEdge(join, kLeft_Side, this);
+                    leftPoly = leftPoly->addEdge(join, Side::kRight, this);
+                    rightPoly = rightPoly->addEdge(join, Side::kLeft, this);
                 }
             }
             Edge* leftEdge = v->fFirstEdgeBelow;
@@ -1702,23 +1775,21 @@ static int get_contour_count(const SkPath& path, SkScalar tolerance) {
     bool hasPoints = false;
 
     SkPath::Iter iter(path, false);
-    SkPath::Verb verb;
-    SkPoint pts[4];
     bool first = true;
-    while ((verb = iter.next(pts)) != SkPath::kDone_Verb) {
-        switch (verb) {
-            case SkPath::kMove_Verb:
+    while (auto rec = iter.next()) {
+        switch (rec->fVerb) {
+            case SkPathVerb::kMove:
                 if (!first) {
                     ++contourCnt;
                 }
                 [[fallthrough]];
-            case SkPath::kLine_Verb:
-            case SkPath::kConic_Verb:
-            case SkPath::kQuad_Verb:
-            case SkPath::kCubic_Verb:
+            case SkPathVerb::kLine:
+            case SkPathVerb::kConic:
+            case SkPathVerb::kQuad:
+            case SkPathVerb::kCubic:
                 hasPoints = true;
                 break;
-            default:
+            case SkPathVerb::kClose:
                 break;
         }
         first = false;

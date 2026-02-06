@@ -1,9 +1,10 @@
 // Copyright 2019 Google LLC.
-#include "include/core/SkTypeface.h"
 #include "modules/skparagraph/include/FontCollection.h"
+
+#include "include/core/SkTypeface.h"
 #include "modules/skparagraph/include/Paragraph.h"
 #include "modules/skparagraph/src/ParagraphImpl.h"
-#include "modules/skshaper/include/SkShaper.h"
+#include "modules/skshaper/include/SkShaper_harfbuzz.h"
 
 namespace {
 #if defined(SK_BUILD_FOR_MAC) || defined(SK_BUILD_FOR_IOS)
@@ -124,6 +125,9 @@ std::vector<sk_sp<SkTypeface>> FontCollection::findTypefaces(const std::vector<S
             }
         }
         if (match) {
+            if (fontArgs) {
+                match = fontArgs->CloneTypeface(match);
+            }
             typefaces.emplace_back(std::move(match));
         }
     }
@@ -151,7 +155,8 @@ sk_sp<SkTypeface> FontCollection::matchTypeface(const SkString& familyName, SkFo
 // Find ANY font in available font managers that resolves the unicode codepoint
 sk_sp<SkTypeface> FontCollection::defaultFallback(SkUnichar unicode,
                                                   SkFontStyle fontStyle,
-                                                  const SkString& locale) {
+                                                  const SkString& locale,
+                                                  const std::optional<FontArguments>& fontArgs) {
 
     for (const auto& manager : this->getFontManagerOrder()) {
         std::vector<const char*> bcp47;
@@ -162,6 +167,9 @@ sk_sp<SkTypeface> FontCollection::defaultFallback(SkUnichar unicode,
             nullptr, fontStyle, bcp47.data(), bcp47.size(), unicode));
 
         if (typeface != nullptr) {
+            if (fontArgs) {
+                typeface = fontArgs->CloneTypeface(typeface);
+            }
             return typeface;
         }
     }
@@ -220,7 +228,7 @@ void FontCollection::enableFontFallback() { fEnableFontFallback = true; }
 void FontCollection::clearCaches() {
     fParagraphCache.reset();
     fTypefaces.reset();
-    SkShaper::PurgeCaches();
+    SkShapers::HB::PurgeCaches();
 }
 
 }  // namespace textlayout

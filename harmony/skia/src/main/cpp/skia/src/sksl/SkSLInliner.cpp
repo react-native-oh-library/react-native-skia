@@ -77,7 +77,9 @@ using namespace skia_private;
 namespace SkSL {
 namespace {
 
-static constexpr int kInlinedStatementLimit = 2500;
+static bool is_scopeless_block(Statement* stmt) {
+    return stmt->is<Block>() && !stmt->as<Block>().isScope();
+}
 
 static std::unique_ptr<Statement>* find_parent_statement(
         const std::vector<std::unique_ptr<Statement>*>& stmtStack) {
@@ -91,7 +93,7 @@ static std::unique_ptr<Statement>* find_parent_statement(
     // Anything counts as a parent statement other than a scopeless Block.
     for (; iter != stmtStack.rend(); ++iter) {
         std::unique_ptr<Statement>* stmt = *iter;
-        if (!(*stmt)->is<Block>() || (*stmt)->as<Block>().isScope()) {
+        if (!is_scopeless_block(stmt->get())) {
             return stmt;
         }
     }
@@ -136,7 +138,7 @@ void Inliner::ensureScopedBlocks(Statement* inlinedBody, Statement* parentStmt) 
 
     // No changes necessary if the parent statement doesn't require a scope.
     if (!parentStmt || !(parentStmt->is<IfStatement>() || parentStmt->is<ForStatement>() ||
-                         parentStmt->is<DoStatement>())) {
+                         parentStmt->is<DoStatement>() || is_scopeless_block(parentStmt))) {
         return;
     }
 
@@ -182,6 +184,24 @@ std::unique_ptr<Expression> Inliner::inlineExpression(Position pos,
         }
         return args;
     };
+    auto childRemap = [&](const Variable& var) -> const Variable& {
+        // If our variable remapping table contains the passed-in variable...
+        if (std::unique_ptr<Expression>* remap = varMap->find(&var)) {
+            // ... the remapped expression _must_ be another variable reference.
+            // SkSL doesn't allow opaque types to participate in complex expressions.
+            if ((*remap)->is<VariableReference>()) {
+                const VariableReference& remappedRef = (*remap)->as<VariableReference>();
+                return *remappedRef.variable();
+            } else {
+                SkDEBUGFAILF("Child effect '%.*s' remaps to unexpected expression '%s'",
+                             (int)var.name().size(), var.name().data(),
+                             (*remap)->description().c_str());
+            }
+        }
+
+        // There's no remapping for this; return it as-is.
+        return var;
+    };
 
     switch (expression.kind()) {
         case Expression::Kind::kBinary: {
@@ -200,62 +220,77 @@ std::unique_ptr<Expression> Inliner::inlineExpression(Position pos,
             const ChildCall& childCall = expression.as<ChildCall>();
             return ChildCall::Make(*fContext,
                                    pos,
-                                   childCall.type().clone(symbolTableForExpression),
-                                   childCall.child(),
+                                   childCall.type().clone(*fContext, symbolTableForExpression),
+                                   childRemap(childCall.child()),
                                    argList(childCall.arguments()));
         }
         case Expression::Kind::kConstructorArray: {
             const ConstructorArray& ctor = expression.as<ConstructorArray>();
-            return ConstructorArray::Make(*fContext, pos,
-                                          *ctor.type().clone(symbolTableForExpression),
+            return ConstructorArray::Make(*fContext,
+                                          pos,
+                                          *ctor.type().clone(*fContext, symbolTableForExpression),
                                           argList(ctor.arguments()));
         }
         case Expression::Kind::kConstructorArrayCast: {
             const ConstructorArrayCast& ctor = expression.as<ConstructorArrayCast>();
-            return ConstructorArrayCast::Make(*fContext, pos,
-                                              *ctor.type().clone(symbolTableForExpression),
-                                              expr(ctor.argument()));
+            return ConstructorArrayCast::Make(
+                    *fContext,
+                    pos,
+                    *ctor.type().clone(*fContext, symbolTableForExpression),
+                    expr(ctor.argument()));
         }
         case Expression::Kind::kConstructorCompound: {
             const ConstructorCompound& ctor = expression.as<ConstructorCompound>();
-            return ConstructorCompound::Make(*fContext, pos,
-                                              *ctor.type().clone(symbolTableForExpression),
-                                              argList(ctor.arguments()));
+            return ConstructorCompound::Make(
+                    *fContext,
+                    pos,
+                    *ctor.type().clone(*fContext, symbolTableForExpression),
+                    argList(ctor.arguments()));
         }
         case Expression::Kind::kConstructorCompoundCast: {
             const ConstructorCompoundCast& ctor = expression.as<ConstructorCompoundCast>();
-            return ConstructorCompoundCast::Make(*fContext, pos,
-                                                  *ctor.type().clone(symbolTableForExpression),
-                                                  expr(ctor.argument()));
+            return ConstructorCompoundCast::Make(
+                    *fContext,
+                    pos,
+                    *ctor.type().clone(*fContext, symbolTableForExpression),
+                    expr(ctor.argument()));
         }
         case Expression::Kind::kConstructorDiagonalMatrix: {
             const ConstructorDiagonalMatrix& ctor = expression.as<ConstructorDiagonalMatrix>();
-            return ConstructorDiagonalMatrix::Make(*fContext, pos,
-                                                   *ctor.type().clone(symbolTableForExpression),
-                                                   expr(ctor.argument()));
+            return ConstructorDiagonalMatrix::Make(
+                    *fContext,
+                    pos,
+                    *ctor.type().clone(*fContext, symbolTableForExpression),
+                    expr(ctor.argument()));
         }
         case Expression::Kind::kConstructorMatrixResize: {
             const ConstructorMatrixResize& ctor = expression.as<ConstructorMatrixResize>();
-            return ConstructorMatrixResize::Make(*fContext, pos,
-                                                 *ctor.type().clone(symbolTableForExpression),
-                                                 expr(ctor.argument()));
+            return ConstructorMatrixResize::Make(
+                    *fContext,
+                    pos,
+                    *ctor.type().clone(*fContext, symbolTableForExpression),
+                    expr(ctor.argument()));
         }
         case Expression::Kind::kConstructorScalarCast: {
             const ConstructorScalarCast& ctor = expression.as<ConstructorScalarCast>();
-            return ConstructorScalarCast::Make(*fContext, pos,
-                                               *ctor.type().clone(symbolTableForExpression),
-                                               expr(ctor.argument()));
+            return ConstructorScalarCast::Make(
+                    *fContext,
+                    pos,
+                    *ctor.type().clone(*fContext, symbolTableForExpression),
+                    expr(ctor.argument()));
         }
         case Expression::Kind::kConstructorSplat: {
             const ConstructorSplat& ctor = expression.as<ConstructorSplat>();
-            return ConstructorSplat::Make(*fContext, pos,
-                                          *ctor.type().clone(symbolTableForExpression),
+            return ConstructorSplat::Make(*fContext,
+                                          pos,
+                                          *ctor.type().clone(*fContext, symbolTableForExpression),
                                           expr(ctor.argument()));
         }
         case Expression::Kind::kConstructorStruct: {
             const ConstructorStruct& ctor = expression.as<ConstructorStruct>();
-            return ConstructorStruct::Make(*fContext, pos,
-                                           *ctor.type().clone(symbolTableForExpression),
+            return ConstructorStruct::Make(*fContext,
+                                           pos,
+                                           *ctor.type().clone(*fContext, symbolTableForExpression),
                                            argList(ctor.arguments()));
         }
         case Expression::Kind::kFieldAccess: {
@@ -266,7 +301,7 @@ std::unique_ptr<Expression> Inliner::inlineExpression(Position pos,
             const FunctionCall& funcCall = expression.as<FunctionCall>();
             return FunctionCall::Make(*fContext,
                                       pos,
-                                      funcCall.type().clone(symbolTableForExpression),
+                                      funcCall.type().clone(*fContext, symbolTableForExpression),
                                       funcCall.function(),
                                       argList(funcCall.arguments()));
         }
@@ -470,20 +505,21 @@ std::unique_ptr<Statement> Inliner::inlineStatement(Position pos,
             // names are important.
             const std::string* name = symbolTableForStatement->takeOwnershipOfString(
                     fMangler.uniqueName(variable->name(), symbolTableForStatement));
-            auto clonedVar = Variable::Make(pos,
-                                            variable->modifiersPosition(),
-                                            variable->layout(),
-                                            variableModifiers(*variable, initialValue.get()),
-                                            variable->type().clone(symbolTableForStatement),
-                                            name->c_str(),
-                                            /*mangledName=*/"",
-                                            isBuiltinCode,
-                                            variable->storage());
+            auto clonedVar =
+                    Variable::Make(pos,
+                                   variable->modifiersPosition(),
+                                   variable->layout(),
+                                   variableModifiers(*variable, initialValue.get()),
+                                   variable->type().clone(*fContext, symbolTableForStatement),
+                                   name->c_str(),
+                                   /*mangledName=*/"",
+                                   isBuiltinCode,
+                                   variable->storage());
             varMap->set(variable, VariableReference::Make(pos, clonedVar.get()));
             std::unique_ptr<Statement> result =
                     VarDeclaration::Make(*fContext,
                                          clonedVar.get(),
-                                         decl.baseType().clone(symbolTableForStatement),
+                                         decl.baseType().clone(*fContext, symbolTableForStatement),
                                          decl.arraySize(),
                                          std::move(initialValue));
             symbolTableForStatement->add(*fContext, std::move(clonedVar));
@@ -501,8 +537,8 @@ static bool argument_needs_scratch_variable(const Expression* arg,
     // If the parameter isn't written to within the inline function ...
     const ProgramUsage::VariableCounts& paramUsage = usage.get(*param);
     if (!paramUsage.fWrite) {
-        // ... and can be inlined trivially (e.g. a swizzle, or a constant array index),
-        // or any expression without side effects that is only accessed at most once...
+        // ... and it can be inlined trivially (e.g. a swizzle, or a constant array index),
+        // or it is any expression without side effects that is only accessed at most once...
         if ((paramUsage.fRead > 1) ? Analysis::IsTrivialExpression(*arg)
                                    : !Analysis::HasSideEffects(*arg)) {
             // ... we don't need to copy it at all! We can just use the existing expression.
@@ -611,6 +647,14 @@ Inliner::InlinedCall Inliner::inlineCall(const FunctionCall& call,
     return inlinedCall;
 }
 
+bool Inliner::overInlineStatementLimit() const {
+    // Enforce a limit on inlining to avoid pathological cases. (inliner/ExponentialGrowth.sksl)
+    // Modules, which are entirely built-in SkSL, do not need to be limited in this way.
+    static constexpr int kInlinedStatementLimit = 2500;
+    return !fContext->fConfig->isBuiltinCode() &&
+           fInlinedStatementCounter >= kInlinedStatementLimit;
+}
+
 bool Inliner::isSafeToInline(const FunctionDefinition* functionDef, const ProgramUsage& usage) {
     // A threshold of zero indicates that the inliner is completely disabled, so we can just return.
     if (this->settings().fInlineThreshold <= 0) {
@@ -618,7 +662,7 @@ bool Inliner::isSafeToInline(const FunctionDefinition* functionDef, const Progra
     }
 
     // Enforce a limit on inlining to avoid pathological cases. (inliner/ExponentialGrowth.sksl)
-    if (fInlinedStatementCounter >= kInlinedStatementLimit) {
+    if (this->overInlineStatementLimit()) {
         return false;
     }
 
@@ -634,7 +678,7 @@ bool Inliner::isSafeToInline(const FunctionDefinition* functionDef, const Progra
 
     for (const Variable* param : functionDef->declaration().parameters()) {
         // We don't allow inlining functions with parameters that are written-to, if they...
-        // - are `out` parameters (see skia:11326 for rationale.)
+        // - are `out` parameters (see skbug.com/40042700 for rationale.)
         // - are arrays or structures (introducing temporary copies is non-trivial)
         if ((param->modifierFlags() & ModifierFlag::kOut) ||
             param->type().isArray() ||
@@ -967,7 +1011,7 @@ bool Inliner::candidateCanBeInlined(const InlineCandidate& candidate,
 
     // Even if the function is safe, the arguments we are passing may not be. In particular, we
     // can't make copies of opaque values, so we need to reject inline candidates that would need to
-    // do this. Every call has different arguments, so this part is not cacheable. (skia:13824)
+    // do this. Every call has different arguments, so this part is not cacheable. (skbug.com/40044923)
     const FunctionCall& call = candidate.fCandidateExpr->get()->as<FunctionCall>();
     const ExpressionArray& arguments = call.arguments();
     for (int i = 0; i < arguments.size(); ++i) {
@@ -1066,7 +1110,7 @@ bool Inliner::analyze(const std::vector<std::unique_ptr<ProgramElement>>& elemen
     }
 
     // Enforce a limit on inlining to avoid pathological cases. (inliner/ExponentialGrowth.sksl)
-    if (fInlinedStatementCounter >= kInlinedStatementLimit) {
+    if (this->overInlineStatementLimit()) {
         return false;
     }
 
@@ -1129,7 +1173,7 @@ bool Inliner::analyze(const std::vector<std::unique_ptr<ProgramElement>>& elemen
         statementRemappingTable.set(enclosingStmt,&(*enclosingStmt)->as<Block>().children().back());
 
         // Stop inlining if we've reached our hard cap on new statements.
-        if (fInlinedStatementCounter >= kInlinedStatementLimit) {
+        if (this->overInlineStatementLimit()) {
             break;
         }
 
