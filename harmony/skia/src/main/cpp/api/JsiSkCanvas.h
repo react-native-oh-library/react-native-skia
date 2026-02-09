@@ -20,8 +20,6 @@
 #include "JsiSkVertices.h"
 
 #include "RNSkTypedArray.h"
-#include "glog/logging.h"
-
 #include <jsi/jsi.h>
 
 #pragma clang diagnostic push
@@ -533,7 +531,6 @@ public:
   }
 
   JSI_HOST_FUNCTION(drawPicture) {
-    DLOG(INFO) << "createTexture drawPicture 1111";
     auto picture = JsiSkPicture::fromValue(runtime, arguments[0]);
     _canvas->drawPicture(picture);
     return jsi::Value::undefined();

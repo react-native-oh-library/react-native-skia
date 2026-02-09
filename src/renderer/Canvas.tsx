@@ -128,8 +128,18 @@ export const Canvas = ({
     root.render(children);
   }, [children, root, nativeId]);
 
+  let isRootUnmount = false;
+
   useEffect(() => {
+      setTimeout(() => {
+        if(isRootUnmount) {
+          return;
+        }
+        console.log(`requestRedraw Canvas with nativeId: ${nativeId}`);
+        SkiaViewApi.requestRedraw(nativeId);
+      }, 300);
     return () => {
+      isRootUnmount = true;
       root.unmount();
     };
   }, [root]);

@@ -42,9 +42,7 @@ public:
 
         // Try to render directly when the surface has been set so that
         // we don't have to wait until the draw loop returns.
-        DLOG(INFO) << "surfaceAvailable to renderImmediate";
         RNSkView::redraw();
-        DLOG(INFO) << "surfaceAvailable to renderImmediate finish";
     }
 
     void surfaceDestroyed() override {

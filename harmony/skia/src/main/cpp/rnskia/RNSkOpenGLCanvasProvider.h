@@ -413,29 +413,19 @@ public:
     }
 
     void surfaceDestroyed() {
-        DLOG(INFO) << "surfaceDestroyed 当前线程: " << std::this_thread::get_id();
-        // destroy the renderer (a unique pointer so the dtor will be called
-        // immediately.)
-        auto holder = std::move(_surfaceHolder);
-        if(!holder)
-            return;
-        auto sharedHolder = std::shared_ptr<WindowSurfaceHolder>(holder.release());
-        _platformContext->runOnMainThread(
-            [sharedHolder](){
-                sharedHolder->dispose();
-            }
-        );
+        DLOG(INFO) << "RNSkOpenGLCanvasProvider surfaceDestroyed";
     }
 
     void surfaceSizeChanged(int width, int height) {
-        if (width == 0 && height == 0) {
+         DLOG(INFO) << "surfaceSizeChanged width " << width << " height " << height << " _surfaceHolder " << _surfaceHolder;
+        if ((width == 0 && height == 0) || !_surfaceHolder) {
             // Setting width/height to zero is nothing we need to care about when
             // it comes to invalidating the surface.
             return;
         }
         // Recreate RenderContext surface based on size change???
         _surfaceHolder->resize(width, height);
-//        // Redraw after size change
+        // Redraw after size change
         _requestRedraw();
     }
 

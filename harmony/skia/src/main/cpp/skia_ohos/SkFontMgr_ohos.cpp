@@ -16,7 +16,6 @@ using namespace ErrorCode;
  */
 SkFontMgr_OHOS::SkFontMgr_OHOS(const char *path) {
 
-    DLOG(INFO) << "SkFontMgr_OHOS 11111"; 
     fontConfig = std::make_shared<FontConfig_OHOS>(fontScanner, path);
     familyCount = fontConfig->getFamilyCount();
 }
@@ -132,8 +131,6 @@ sk_sp<SkTypeface> SkFontMgr_OHOS::onMatchFamilyStyleCharacter(const char familyN
         }
     }
     if (item == nullptr) {
-//         LOGE("%s : '%s' must be a fallback key in the config file\n",
-//             FontConfig_OHOS::errToString(ERROR_FAMILY_NOT_FOUND), defaultFamily.c_str());
         return nullptr;
     }
     while (true) {
@@ -262,23 +259,6 @@ int SkFontMgr_OHOS::compareLangs(const SkString &langs, const char *bcp47[], int
     return -1;
 }
 
-/*! To get a matched typeface
- * \param typeface the given typeface with which the returned object should be in the same style set
- * \param style the font style to be matching
- * \return The object of typeface which is closest matching to the given 'style'
- * \n      Return null, if the family name of the given typeface is not found in the system
- * \note The caller must call unref() on the returned object if it's not null
- */
-// SkTypeface* SkFontMgr_OHOS::onMatchFaceStyle(const SkTypeface* typeface, const SkFontStyle& style) const
-// {
-//     if (typeface == nullptr) {
-//         return nullptr;
-//     }
-//     SkString familyName;
-//     typeface->getFamilyName(&familyName);
-//     return this->onMatchFamilyStyle(familyName.c_str(), style);
-// }
-
 /*! To create a typeface from the specified data and TTC index
  * \param data the data to be parsed
  * \param index the index of typeface. 0 for none
@@ -368,7 +348,6 @@ sk_sp<SkTypeface> SkFontMgr_OHOS::onLegacyMakeTypeface(const char familyName[], 
     if (typeface) {
         return sk_sp<SkTypeface>(typeface);
     }
-//     LOGE("%s\n", FontConfig_OHOS::errToString(ERROR_NO_AVAILABLE_FAMILY));
     return nullptr;
 }
 
@@ -381,10 +360,6 @@ sk_sp<SkTypeface> SkFontMgr_OHOS::onLegacyMakeTypeface(const char familyName[], 
  */
 sk_sp<SkTypeface> SkFontMgr_OHOS::makeTypeface(std::unique_ptr<SkStreamAsset> stream, const SkFontArguments &args,
                                                const char path[]) const {
-    if(path){
-            DLOG(INFO) << "drawSimpleText makeTypeface " << path;
-    }
-        DLOG(INFO) << "drawSimpleText makeTypeface 1111111111111111111111 " ;
     FontInfo fontInfo;
     int ttcIndex = args.getCollectionIndex();
     int axisCount = args.getVariationDesignPosition().coordinateCount;
@@ -426,9 +401,6 @@ sk_sp<SkTypeface> SkFontMgr_OHOS::makeTypeface(std::unique_ptr<SkStreamAsset> st
             return nullptr;
         }
         if (axisDef.size() > 0) {
-//            SkFixed axis[axisDef.size()];
-//            SkFontScanner_FreeType::computeAxisValues(axisDef, args.getVariationDesignPosition(),
-//                axis, fontInfo.familyName);
             std::vector<SkFixed> axisValues(axisDef.size());
             SkFontArguments::VariationPosition requestedPosition = args.getVariationDesignPosition();
             SkFontArguments::VariationPosition currentPosition;

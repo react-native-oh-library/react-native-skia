@@ -33,10 +33,6 @@ protected:
     virtual sk_sp<SkTypeface> onMatchFamilyStyleCharacter(const char familyName[], const SkFontStyle& style,
                                                     const char* bcp47[], int bcp47Count,
                                                     SkUnichar character) const override;
-
-//     virtual SkTypeface* onMatchFaceStyle(const SkTypeface* typeface,
-//                                          const SkFontStyle& style) const override;
-
     virtual sk_sp<SkTypeface> onMakeFromData(sk_sp<SkData> data, int ttcIndex) const override;
     virtual sk_sp<SkTypeface> onMakeFromStreamIndex(std::unique_ptr<SkStreamAsset> stream,
                                                     int ttcIndex) const override;
@@ -60,8 +56,4 @@ private:
 };
 
 SK_API sk_sp<SkFontMgr> SkFontMgr_New_OHOS(const char* path = "/system/etc/fontconfig.json");
-// SK_API sk_sp<SkFontMgr> SkFontMgr_New_OHOS() {
-//    return SkFontMgr_New_OHOS("/system/etc/fontconfig.json");
-// }
-
 #endif /* SKFONTMGR_OHOS_H */

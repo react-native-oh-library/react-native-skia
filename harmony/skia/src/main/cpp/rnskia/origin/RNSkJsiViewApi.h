@@ -77,6 +77,7 @@ public:
    view when needed.
    */
   JSI_HOST_FUNCTION(setJsiProperty) {
+
     if (count != 3) {
       _platformContext->raiseError(
           std::string("setJsiProperty: Expected 3 arguments, got " +
