@@ -616,15 +616,15 @@ double RNSkHarmonyVideo::framerate() {
 
 void RNSkHarmonyVideo::seek(double timestamp) {
     int64_t time;
+     DLOG(INFO) << "seek enter 跳转时间（毫秒）: " << timestamp;
     if (timestamp == 0) {
         DLOG(INFO) << "seek demuxer loop timestamp: " << timestamp;
         time = timestamp;
     } else {
-        time = static_cast<int64_t>(timestamp) + milliseconds;
-        DLOG(INFO) << "seek enter  跳转时间（毫秒）: " << time << " 当前时间（毫秒）: " << milliseconds;
+        time = static_cast<int64_t>(timestamp);
+        DLOG(INFO) << "seek 跳转时间（毫秒）: " << time << " 当前时间（毫秒）: " << milliseconds;
     }
-    DLOG(INFO) << "seek demuxer timestamp: " << timestamp;
-    int32_t ret = OH_AVDemuxer_SeekToTime(demuxer_->demuxer, time, OH_AVSeekMode::SEEK_MODE_CLOSEST_SYNC);
+    int32_t ret = OH_AVDemuxer_SeekToTime(demuxer_->demuxer, time, OH_AVSeekMode::SEEK_MODE_PREVIOUS_SYNC);
     if (ret != AV_ERR_OK) {
         DLOG(ERROR) << "seek demuxer loop failed";
         return;

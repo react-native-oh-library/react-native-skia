@@ -54,7 +54,6 @@
   "licenseFilename": "LICENSE.md",
   "readmeFilename": "README.md",
   "peerDependencies": {
-    "@shopify/react-native-skia": "2.4.14",
     "react": ">=19.0",
     "react-native": ">=0.78",
     "react-native-reanimated": ">=3.19.1"
@@ -93,7 +92,8 @@
   },
   "dependencies": {
     "canvaskit-wasm": "0.40.0",
-    "react-reconciler": "0.31.0"
+    "react-reconciler": "0.31.0",
+    "@shopify/react-native-skia": "2.4.14"
   },
   "eslintIgnore": [
     "node_modules/",
