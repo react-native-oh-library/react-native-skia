@@ -74,6 +74,7 @@ public:
             OH_NativeWindow_DestroyNativeWindow(_window);
             _window = nullptr;
         }
+        DLOG(INFO) << "WindowSurfaceHolder dispose";
     }
 
     // 析构函数，释放本地窗口
@@ -414,6 +415,19 @@ public:
 
     void surfaceDestroyed() {
         DLOG(INFO) << "RNSkOpenGLCanvasProvider surfaceDestroyed";
+        std::shared_ptr<WindowSurfaceHolder> sharedHolder;
+        if (_surfaceHolder) {
+            sharedHolder = std::shared_ptr<WindowSurfaceHolder>(_surfaceHolder.get());
+        }
+        if (!sharedHolder) {
+            return;
+        }
+        _platformContext->runOnMainThread(
+            [sharedHolder]() mutable {
+                sharedHolder->dispose();
+                sharedHolder.reset();
+            }
+        );
     }
 
     void surfaceSizeChanged(int width, int height) {
