@@ -43,7 +43,9 @@ HarmonyPlatformContext::HarmonyPlatformContext(jsi::Runtime *runtime, std::share
     _runtime = runtime;
 }
 
-HarmonyPlatformContext::~HarmonyPlatformContext() { SetStopRunOnMainThread(); }
+HarmonyPlatformContext::~HarmonyPlatformContext() { 
+    SetStopRunOnMainThread(); 
+}
 
 // 添加任务队列，通知主线程
 void HarmonyPlatformContext::runTaskOnMainThread() {

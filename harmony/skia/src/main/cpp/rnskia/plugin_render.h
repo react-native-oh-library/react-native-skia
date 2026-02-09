@@ -70,7 +70,7 @@ public:
             DLOG(ERROR) << "napi RegisterView get nValIsColorSpace fail";
             return nullptr;
         }
-        DLOG(INFO) << "napi RegisterView xComponentId: " << xComponentId << " nativeId: " << nativeId << " isColorSpace: " << isColorSpace;
+        DLOG(INFO) << "napi RegisterView xComponentId : " << xComponentId << " nativeId: " << nativeId << " isColorSpace: " << isColorSpace;
         std::string id(xComponentId.get());
         if (m_instance.find(id) != m_instance.end()) {
             auto instance = m_instance[id];
@@ -117,6 +117,7 @@ public:
             SkiaManager::getInstance().getManager()->unregisterSkiaView(nId);
             DLOG(INFO) << "napi DropInstance finish XComponentId: " << id
                        << " threadId: " << std::this_thread::get_id();
+            
         }
         return nullptr;
     }
@@ -157,7 +158,6 @@ public:
         if (m_instance.find(id) != m_instance.end()) {
             auto instance = m_instance[id];
             auto view = instance->_harmonyView;
-//            view->setMode(modeStr);
             view->setShowDebugInfo(showDebug);
             DLOG(INFO) << "napi SetModeAndDebug finish XComponentId: " << id
                        << " threadId: " << std::this_thread::get_id();

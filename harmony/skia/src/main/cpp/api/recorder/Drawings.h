@@ -944,7 +944,6 @@ public:
   }
 
   void draw(DrawingCtx *ctx) {
-     DLOG(INFO) << "Drawing Atlas 6666666666666";   
     if (props.image) {
       // Validate transforms and sprites have the same size
       if (props.transforms.size() != props.sprites.size()) {

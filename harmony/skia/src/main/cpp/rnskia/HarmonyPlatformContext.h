@@ -12,7 +12,6 @@
 #include <rawfile/raw_file_manager.h>
 #include <multimedia/image_framework/image_pixel_map_napi.h>
 
-#include "HarmonyPlayLink.h"
 #include "HarmonyBufferUtils.h"
 #include "RNSkOpenGLCanvasProvider.h"
 #include "RNSkPlatformContext.h"
@@ -37,8 +36,6 @@ public:
 
     ~HarmonyPlatformContext() override;
 
-//    void startDrawLoop() override;
-//    void stopDrawLoop() override;
     void runTaskOnMainThread();
     void SetStopRunOnMainThread();
     void runOnMainThread(std::function<void()>) override; // 运行在主线程上
@@ -58,12 +55,6 @@ public:
     void raiseError(const std::exception &err) override;
 
     sk_sp<SkSurface> makeOffscreenSurface(int width, int height) override;
-
-    // static sk_sp<SkImage> makeImageFromHardwareBuffer(void *buffer, bool requireKnownFormat = false);
-
-    // static std::unique_ptr<WindowSurfaceHolder> makeWindowedSurface(OHNativeWindow *window, int width, int height) {
-    //     return std::make_unique<WindowSurfaceHolder>(window, width, height);
-    // }
 
     sk_sp<SkFontMgr> createFontMgr() override;
 
@@ -107,7 +98,6 @@ private:
     std::string DEFAULT_ASSETS_DEST = "assets/";
     // 绘制循环
     bool drawLoopActive = false;
-    std::unique_ptr<PlayLink> playLink;
     std::queue<std::function<void()>> taskQueue;
     std::mutex taskMutex;
     std::condition_variable taskCond; // 线程间的同步和通知

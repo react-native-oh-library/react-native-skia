@@ -159,11 +159,6 @@ sk_sp<SkTypeface> SkTypeface_OHOS::onMakeClone(const SkFontArguments& args) cons
             return nullptr;
         }
         if (axisDefs.size() > 0) {
-//            SkFixed axis[axisDefs.size()];
-//            fontScanner.computeAxisValues(axisDefs, args.getVariationDesignPosition(),
-//                axis, info.familyName);
-//            info.setAxisSet(axisCount, axis, axisDefs.data());
-//            info.style = info.computeFontStyle();
             std::vector<SkFixed> axisValues(axisDefs.size());
             SkFontArguments::VariationPosition requestedPosition = args.getVariationDesignPosition();
             SkFontArguments::VariationPosition currentPosition;

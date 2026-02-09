@@ -168,7 +168,6 @@ struct SkiaOpenGLContext {
         }
 
         if (glContext != EGL_NO_CONTEXT) {
-            DLOG(INFO) << "555555555555555555555555555555555555;";
             eglDestroyContext(OpenGLResourceHolder::getInstance().glDisplay, // Harmony支持eglDestroyContext
                               glContext);
             glContext = EGL_NO_CONTEXT;
@@ -274,7 +273,6 @@ public:
                 DLOG(INFO) << "Failed creating a 1x1 pbuffer surface;";
                 return false;
             }
-            DLOG(INFO) << "GrGLMakeNativeInterface 111111111111111111111";
             // Activate
             if (!SkiaOpenGLHelper::makeCurrent(context, context->gl1x1Surface)) {
                 return false;
