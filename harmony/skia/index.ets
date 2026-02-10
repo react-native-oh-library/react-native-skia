@@ -22,5 +22,5 @@
  * SOFTWARE.
  */
 
-export * from "./src/main/ets/RNCSkiaPictureView"
+export * from "./src/main/ets/RNCSkiaDomView"
 export * from "./ts";

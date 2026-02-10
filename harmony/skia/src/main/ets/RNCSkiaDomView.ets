@@ -39,14 +39,14 @@ export interface SkiaPictureViewProps extends ViewRawProps {
   opaque: boolean
 }
 
-export const SKIA_PICTURE_VIEW_TYPE: string = "SkiaPictureView";
+export const SKIA_DOM_VIEW_TYPE: string = "SkiaPictureView";
 
 export type SkiaPictureViewDescriptor = Descriptor<"SkiaPictureView", ViewBaseProps, SkiaPictureViewState, SkiaPictureViewProps>
 
 const TAG: string = 'RNOH in SkiaPictureView'
 
 @Component
-export struct RNCSkiaPictureView {
+export struct RNCSkiaDomView {
   ctx!: RNOHContext;
   tag: number = -1;
   @State descriptor: SkiaPictureViewDescriptor = {} as SkiaPictureViewDescriptor;
