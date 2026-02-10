@@ -1,6 +1,10 @@
 # Changelog
 ## 鸿蒙化Log
 
+### v3.0.0-rc.1
+
+- feat:react-native-skia升级2.4.14版本适配0.82框架
+
 ### v1.4.0-rc.1
 
 - pre-release version 1.4.0-rc.1

@@ -1,6 +1,6 @@
 # @react-native-ohos/react-native-skia
 
-This project is based on [react-native-skia@1.3.7](https://github.com/Shopify/react-native-skia/releases/tag/v1.3.7)
+This project is based on [react-native-skia@2.4.14](https://github.com/Shopify/react-native-skia/releases/tag/v2.4.14)
 
 ## Documentation
 
