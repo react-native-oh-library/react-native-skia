@@ -15,12 +15,12 @@ const X_COMPONENT_ID = 'SkiaDomView';
 export struct SkiaDomView {
   private xComponentController: XComponentController = new XComponentController();
   private xComponentContext: XComponentContext | undefined = undefined;
-  viewWidth: number = 0;
-  viewHeight: number = 0;
-  nativeID: number = 0;
-  xComponentId: string = '';
-  mode: string = 'default';
-  debug: boolean = true;
+  @Prop viewWidth: number = 0;
+  @Prop viewHeight: number = 0;
+  @Prop nativeID: number = 0;
+  @Prop xComponentId: string = '';
+  @Prop mode: string = 'default';
+  @Prop debug: boolean = true;
 
   aboutToAppear(): void {
     this.xComponentId = X_COMPONENT_ID + '_' + this.nativeID;
