@@ -251,7 +251,8 @@ void PluginRender::OnSurfaceChanged(OH_NativeXComponent *component, void *window
     uint64_t height;
     OH_NativeXComponent_GetXComponentSize(component, window, &width, &height);
     if (render != nullptr) {
-        render->_harmonyView->surfaceSizeChanged(width, height);
+        render->m_width = width;
+        render->m_height = height;
     }
 }
 
