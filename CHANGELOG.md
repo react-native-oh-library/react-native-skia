@@ -1,7 +1,11 @@
 # Changelog
 ## 鸿蒙化Log
 
-### v3.0.0-rc.1
+### v2.0.0-rc.2
+
+- fix:修复release模式编译失败问题以及运行crash问题
+
+### v2.0.0-rc.1
 
 - feat:react-native-skia升级2.4.14版本适配0.82框架
 
