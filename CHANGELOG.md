@@ -1,6 +1,8 @@
 # Changelog
 ## 鸿蒙化Log
 
+### v1.4.1
+ release version1.4.1
 ### v1.4.1-rc.1
 
 - pre-release version 1.4.1-rc.1
