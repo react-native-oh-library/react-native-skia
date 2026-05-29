@@ -13,6 +13,7 @@
 
 
 #include "RNSkDomView.h"
+#include "RNSkPictureView.h"
 #include "RNSkHarmonyView.h"
 #include "common.h"
 #include "plugin_manager.h"
@@ -22,16 +23,23 @@
 
 namespace RNSkia {
 std::unordered_map<std::string,std::shared_ptr<PluginRender>>PluginRender::m_instance;
-PluginRender::PluginRender(std::shared_ptr<RNSkia::RNSkPlatformContext> context)
+PluginRender::PluginRender(std::shared_ptr<RNSkia::RNSkPlatformContext> context, std::string &id)
 {
     _context = context;
-    _harmonyView = std::make_shared<RNSkHarmonyView<RNSkia::RNSkDomView>>(context);
+    // Check if this is a SkiaPictureView based on the XComponent ID prefix
+    if (id.find("SkiaPictureView_") == 0) {
+        DLOG(INFO) << "Creating RNSkHarmonyView<RNSkPictureView> for id: " << id;
+        _harmonyView = std::make_shared<RNSkHarmonyView<RNSkia::RNSkPictureView>>(context);
+    } else {
+        DLOG(INFO) << "Creating RNSkHarmonyView<RNSkDomView> for id: " << id;
+        _harmonyView = std::make_shared<RNSkHarmonyView<RNSkia::RNSkDomView>>(context);
+    }
 }
 
 
 std::shared_ptr<PluginRender>PluginRender::GetInstance(std::string &id) {
     if (m_instance.find(id) == m_instance.end()) {
-        auto instance = std::make_shared<PluginRender>(SkiaManager::getInstance().getContext());
+        auto instance = std::make_shared<PluginRender>(SkiaManager::getInstance().getContext(), id);
         m_instance[id] = instance;
         return instance;
     } else {
@@ -251,8 +259,7 @@ void PluginRender::OnSurfaceChanged(OH_NativeXComponent *component, void *window
     uint64_t height;
     OH_NativeXComponent_GetXComponentSize(component, window, &width, &height);
     if (render != nullptr) {
-        render->m_width = width;
-        render->m_height = height;
+        render->_harmonyView->surfaceSizeChanged(width, height);
     }
 }
 

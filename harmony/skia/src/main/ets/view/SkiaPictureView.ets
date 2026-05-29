@@ -8,11 +8,11 @@ import XComponentContext from '../XComponentContext';
 import { display } from '@kit.ArkUI';
 import Logger from '../Logger';
 
-const TAG: string = 'SkiaDomView'
-const X_COMPONENT_ID = 'SkiaDomView';
+const TAG: string = 'SkiaPictureView'
+const X_COMPONENT_ID = 'SkiaPictureView';
 
 @Component
-export struct SkiaDomView {
+export struct SkiaPictureView {
   private xComponentController: XComponentController = new XComponentController();
   private xComponentContext: XComponentContext | undefined = undefined;
   viewWidth: number = 0;

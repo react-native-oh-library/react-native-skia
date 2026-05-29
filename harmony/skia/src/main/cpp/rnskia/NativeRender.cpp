@@ -8,6 +8,7 @@
 #include <native_window/external_window.h>
 #include <sys/mman.h>
 #include "RNSkDomView.h"
+#include "RNSkPictureView.h"
 #include "RNSkHarmonyView.h"
 #include "common.h"
 #include "SkiaManager.h"
