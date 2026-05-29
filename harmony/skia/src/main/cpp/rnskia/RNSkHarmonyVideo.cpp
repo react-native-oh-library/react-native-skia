@@ -26,9 +26,9 @@ namespace RNSkia {
 
 RNSkHarmonyVideo RNSkHarmonyVideo::HarmonyVideo;
 RNSkHarmonyVideo::~RNSkHarmonyVideo() {
-    DLOG(INFO) << "~RNSkHarmonyVideo 析构";
+    DLOG(INFO) << "~RNSkHarmonyVideo";
     StartRelease();
-    DLOG(INFO) << "~RNSkHarmonyVideo 析构 end";
+    DLOG(INFO) << "~RNSkHarmonyVideo end";
 }
 
 int32_t RNSkHarmonyVideo::OpenFile(SampleInfo &sampleInfo) {
@@ -113,9 +113,6 @@ int32_t RNSkHarmonyVideo::Init(SampleInfo &sampleInfo) {
         }
     }
     videoSignal_ = new VDecSignal;
-
-    //  sampleInfo_.window = PluginManager::GetInstance()->m_window; // PluginManager  OH_NativeWindow
-
     ret = videoDecoder_->Config(sampleInfo_, videoSignal_);
     if (ret != AV_ERR_OK) {
         DLOG(ERROR) << "Decoder config failed";
@@ -187,8 +184,8 @@ void RNSkHarmonyVideo::StartRelease() {
 void RNSkHarmonyVideo::ReleaseAudio() {
     DLOG(INFO) << "ReleaseAudio enter.";
     if (audioRenderer_) {
-        OH_AudioRenderer_Flush(audioRenderer_);   // 释放缓存数据
-        OH_AudioRenderer_Release(audioRenderer_); //	释放播放实例
+        OH_AudioRenderer_Flush(audioRenderer_); 
+        OH_AudioRenderer_Release(audioRenderer_);
         audioRenderer_ = nullptr;
     }
     if (builder_) {
@@ -274,26 +271,30 @@ void RNSkHarmonyVideo::ReleaseVideo() {
 
 void RNSkHarmonyVideo::DecVideoInputThread() {
     DLOG(INFO) << "DecInputThread enter";
-    while (true) {
-        if (SkiaManager::getInstance().getReleaseVideo()) {
-            DLOG(ERROR) << "DecInputThread stop";
+    int currentLoop = 0;
+    bool shouldContinue = true;
+    videoDecoderStopStatus.store(false);
+    while (shouldContinue) {
+        // 检查是否需要停止
+        if (SkiaManager::getInstance().getReleaseVideo() || !isStarted_.load()) {
+            DLOG(INFO) << "DecInputThread stop requested";
             break;
         }
-        if (!isStarted_) {
-            DLOG(ERROR) << "Decoder input thread out";
-            break;
-        }
+        
         std::unique_lock<std::mutex> lock(videoSignal_->inputMutex_);
         videoSignal_->videoInputCond_.wait(lock, [this]() {
             return !isPause_.load() && (!isStarted_ || !videoSignal_->inputBufferInfoQueue_.empty());
         });
 
-        if (!isStarted_) {
-            DLOG(ERROR) << "Work done, thread out";
+        // 再次检查状态
+        if (!isStarted_.load()) {
+            DLOG(INFO) << "DecInputThread stopped by external request";
             break;
         }
+        
         if (videoSignal_->inputBufferInfoQueue_.empty()) {
-            DLOG(ERROR) << "Buffer queue is empty";
+            DLOG(WARNING) << "DecInputThread Buffer queue is empty, waiting...";
+            continue;
         }
 
         CodecBufferInfo bufferInfo = videoSignal_->inputBufferInfoQueue_.front();
@@ -302,97 +303,123 @@ void RNSkHarmonyVideo::DecVideoInputThread() {
         lock.unlock();
 
         demuxer_->ReadSample(reinterpret_cast<OH_AVBuffer *>(bufferInfo.buffer), bufferInfo.attr);
-
         flags = bufferInfo.attr.flags;
 
-        // 送入输入队列进行解码
-
         if (bufferInfo.attr.flags & AVCODEC_BUFFER_FLAGS_EOS) {
-//             bufferInfo.attr.flags = AVCODEC_BUFFER_FLAGS_NONE;
+            DLOG(INFO) << "DecInputThread Catch EOS, current loop: " << currentLoop << ", total loops: " << loops_.load();
             videoDecoder_->Flush(bufferInfo);
-            demuxer_->ReadSample(reinterpret_cast<OH_AVBuffer *>(bufferInfo.buffer), bufferInfo.attr);
-            DLOG(ERROR) << "Catch EOS, thread out";
-            break;
+            int32_t targetLoops = loops_.load();
+            if (targetLoops == 1) {
+                DLOG(INFO) << "DecInputThread Infinite loop, seeking to beginning";
+                seek(0);
+                currentLoop = 0;
+                continue;
+            } else {
+                DLOG(INFO) << "DecInputThread No loop configured, ending playback";
+                shouldContinue = false;
+                isVideoEndOfFile_.store(true);
+                break;
+            }
         } else {
             int32_t ret = videoDecoder_->PushInputData(bufferInfo);
             if (ret != AV_ERR_OK) {
-                DLOG(ERROR) << "Push data failed, thread out";
-                break;
+                if (!isStarted_.load() || SkiaManager::getInstance().getReleaseVideo()) {
+                    DLOG(INFO) << "DecInputThread Push data failed due to normal shutdown";
+                    shouldContinue = false;
+                    break;
+                } else {
+                    DLOG(ERROR) << "DecInputThread Push data failed unexpectedly, ret: " << ret;
+                    std::this_thread::sleep_for(std::chrono::milliseconds(10));
+                    continue;
+                }
             }
         }
     }
-    // 循环退出时关闭解释器 1018
-    //     videoDecoder_->Release();
+    videoDecoderStopStatus.store(true);
+    DLOG(INFO) << "DecInputThread exiting";
 }
 
 void RNSkHarmonyVideo::DecVideoOutputThread() {
-    DLOG(INFO) << "DecOutputThread enter";
     if (sampleInfo_.frameRate <= 0) {
         sampleInfo_.frameRate = DEFAULT_FRAME_RATE;
     }
     sampleInfo_.frameInterval = MICROSECOND / sampleInfo_.frameRate;
-    DLOG(INFO) << "sampleInfo_.frameInterval:  " << sampleInfo_.frameInterval;
-    while (true) {
-        if (SkiaManager::getInstance().getReleaseVideo()) {
-            DLOG(ERROR) << "DecOutputThread stop";
+    DLOG(INFO) << "sampleInfo_.frameInterval: " << sampleInfo_.frameInterval;
+    
+    int currentLoop = 0;
+    bool shouldContinue = true;
+    
+    while (shouldContinue) {
+        if (SkiaManager::getInstance().getReleaseVideo() || !isStarted_.load()) {
+            DLOG(INFO) << "DecOutputThread stop requested";
             break;
         }
         thread_local auto lastPushTime = std::chrono::system_clock::now();
-        if (!isStarted_) {
-            DLOG(ERROR) << "Decoder output thread out";
-            break;
-        }
         std::unique_lock<std::mutex> lock(videoSignal_->outputMutex_);
         videoSignal_->videoOutputCond_.wait(lock, [this]() {
             return !isPause_.load() && (!isStarted_ || !videoSignal_->outputBufferInfoQueue_.empty());
         });
-        if (!isStarted_) {
-            DLOG(ERROR) << "Work done, thread out";
+        if (!isStarted_.load()) {
+            DLOG(INFO) << "DecOutputThread stopped by external request";
             break;
         }
         if (videoSignal_->outputBufferInfoQueue_.empty()) {
-            DLOG(ERROR) << "Buffer queue is empty";
+            DLOG(WARNING) << "DecOutputThread Buffer queue is empty, waiting...";
             continue;
         }
-        // 拷贝对象同时更新buffer属性
         CodecBufferInfo bufferInfo = videoSignal_->outputBufferInfoQueue_.front();
         videoSignal_->outputBufferInfoQueue_.pop();
-        //         触碰到EOS(End of Stream)状态, 此时编码器不再接受新输入
-//         if (bufferInfo.attr.flags & AVCODEC_BUFFER_FLAGS_EOS) {
-//             DLOG(ERROR) << "Catch EOS, thread out";
-//             break;
-//         }
-        // 触碰到EOS(End of Stream)状态, 此时编码器不再接受新输入
-            if (bufferInfo.attr.flags & AVCODEC_BUFFER_FLAGS_EOS) {
-                DLOG(INFO) << "Catch EOS, flushing decoder and continuing";
-                // 调用刷新解码器的方法
-                videoDecoder_->Flush(bufferInfo);
-                // 清空队列
-//                     while (!videoSignal_->outputBufferInfoQueue_.empty()) {
-//                         videoSignal_->outputBufferInfoQueue_.pop();
-//                     }
-                continue; // 继续循环
+        if (bufferInfo.attr.flags & AVCODEC_BUFFER_FLAGS_EOS) {
+            DLOG(INFO) << "DecOutputThread Catch EOS, flushing decoder";
+            videoDecoder_->Flush(bufferInfo);
+            int32_t targetLoops = loops_.load();
+            if (targetLoops == 1) {
+                DLOG(INFO) << "DecOutputThread Infinite loop, waiting for restart";
+                std::this_thread::sleep_for(std::chrono::milliseconds(50));
+                continue;
+            } else {
+                DLOG(INFO) << "DecOutputThread No loop configured, ending playback";
+                shouldContinue = false;
+                isVideoEndOfFile_.store(true);
+                break;
             }
+        }
+        
         videoSignal_->outputFrameCount_++;
         frameCount = videoSignal_->outputFrameCount_;
         milliseconds = bufferInfo.attr.pts / 1000;
-        DLOG(INFO) << "DecOutputThread 输出线程 第 " << videoSignal_->outputFrameCount_
-                   << " 帧, 大小: " << bufferInfo.attr.size << " flag: " << bufferInfo.attr.flags
-                   << " 播放时间标记: " << bufferInfo.attr.pts << " 微秒, bufferOrigin: " << bufferInfo.bufferOrigin
-                   << " theardid: " << std::this_thread::get_id();
+        
+        DLOG(INFO) << "DecOutputThread processing frame " << videoSignal_->outputFrameCount_
+                   << ", size: " << bufferInfo.attr.size 
+                   << ", pts: " << bufferInfo.attr.pts << "us"
+                   << ", thread_id: " << std::this_thread::get_id();
+        
         lock.unlock();
+        
         OH_AVBuffer *Buffer = reinterpret_cast<OH_AVBuffer *>(bufferInfo.buffer);
         nativeBuffer = OH_AVBuffer_GetNativeBuffer(Buffer);
-
+        if (!videoDecoder_) {
+            DLOG(INFO) << "DecOutputThread exit videoDecoder_ null";
+            break;
+        }
         int32_t ret = videoDecoder_->FreeOutputData(bufferInfo.bufferIndex, true);
         if (ret != AV_ERR_OK) {
-            DLOG(ERROR) << "DecOutputThread 解码器输出线程退出";
-            break;
+            DLOG(ERROR) << "DecOutputThread FreeOutputData failed, ret: " << ret;
+            if (!isStarted_.load() || SkiaManager::getInstance().getReleaseVideo()) {
+                DLOG(INFO) << "DecOutputThread exit due to normal shutdown";
+                shouldContinue = false;
+                break;
+            }
+            continue;
         }
         std::this_thread::sleep_until(lastPushTime + std::chrono::microseconds(sampleInfo_.frameInterval));
         lastPushTime = std::chrono::system_clock::now();
     }
-    DLOG(ERROR) << "DecOutputThread 线程结束, 当前帧: " << videoSignal_->outputFrameCount_;
+    DLOG(INFO) << "DecOutputThread exiting";
+    if (videoSignal_) {
+        videoSignal_->videoInputCond_.notify_all();
+        videoSignal_->videoOutputCond_.notify_all();
+    }
 }
 
 int32_t RNSkHarmonyVideo::InitAudio() {
@@ -454,6 +481,9 @@ void RNSkHarmonyVideo::InitControlSignal() {
     isPause_ = false;
     isEndOfFile_ = false;
     isVideoEndOfFile_ = false;
+    
+    // 初始化循环相关状态
+    DLOG(INFO) << "InitControlSignal: loops_ = " << loops_.load();
 }
 
 void RNSkHarmonyVideo::DecAudioInputThread() {
@@ -482,6 +512,10 @@ void RNSkHarmonyVideo::DecAudioInputThread() {
         AudioCodecBufferInfo bufferInfo = audioSignal_->audioInputBufferInfoQueue_.front();
         audioSignal_->audioInputBufferInfoQueue_.pop();
         lock.unlock();
+        if (videoDecoderStopStatus) {
+            DLOG(ERROR) << "audio input stop";
+            break;
+        }
 
         demuxer_->ReadAudioSample(bufferInfo.bufferOrigin, bufferInfo.attr);
 
@@ -537,6 +571,10 @@ void RNSkHarmonyVideo::DecAudioOutputThread() {
             audioSignal_->renderQueue.push(*(source + i));
         }
         lock.unlock();
+         if (videoDecoderStopStatus) {
+            DLOG(ERROR) << "audio output stop";
+            break;
+        }
         int32_t ret = audioDecoder_->FreeOutputData(bufferInfo.bufferIndex, false);
         if (ret != AV_ERR_OK) {
             DLOG(ERROR) << "audio Decoder output thread out free";
@@ -581,16 +619,11 @@ void RNSkHarmonyVideo::seek(double timestamp) {
     if (timestamp == 0) {
         DLOG(INFO) << "seek demuxer loop timestamp: " << timestamp;
         time = timestamp;
-        //         StartRelease();
-        //         Init(sampleInfo_);
-        //         play();
     } else {
         time = static_cast<int64_t>(timestamp) + milliseconds;
         DLOG(INFO) << "seek enter  跳转时间（毫秒）: " << time << " 当前时间（毫秒）: " << milliseconds;
     }
-
-
-    // 只能跳关键帧
+    DLOG(INFO) << "seek demuxer timestamp: " << timestamp;
     int32_t ret = OH_AVDemuxer_SeekToTime(demuxer_->demuxer, time, OH_AVSeekMode::SEEK_MODE_CLOSEST_SYNC);
     if (ret != AV_ERR_OK) {
         DLOG(ERROR) << "seek demuxer loop failed";
@@ -607,12 +640,12 @@ float RNSkHarmonyVideo::getRotationInDegrees() {
 SkISize RNSkHarmonyVideo::getSize() {
     DLOG(INFO) << "getSize enter  width: " << demuxer_->sampleInfo.videoWidth
                << " height :" << demuxer_->sampleInfo.videoHeight;
-    return SkISize::Make(demuxer_->sampleInfo.videoWidth, demuxer_->sampleInfo.height);
+    return SkISize::Make(demuxer_->sampleInfo.videoWidth, demuxer_->sampleInfo.videoHeight);
 }
 
 void RNSkHarmonyVideo::play() {
     DLOG(INFO) << "play enter";
-    if (demuxer_->sampleInfo.duration == 0) {
+    if (!demuxer_ || demuxer_->sampleInfo.duration == 0) {
         return;
     }
     isPause_.store(false);
@@ -642,6 +675,29 @@ void RNSkHarmonyVideo::pause() {
 void RNSkHarmonyVideo::setVolume(float volume) {
     DLOG(INFO) << "setVolume enter volume: " << volume;
     OH_AudioRenderer_SetVolume(audioRenderer_, volume);
+}
+
+void RNSkHarmonyVideo::setLoop(bool loops) { 
+    int32_t oldLoops = loops_.load();
+    loops_.store(loops);
+    DLOG(INFO) << "SetLoop: changed from " << oldLoops << " to " << loops;
+    if (isStarted_.load()) {
+        DLOG(INFO) << "SetLoop: Video is running, loop change will take effect on next cycle";
+    }
+    if (videoSignal_) {
+        videoSignal_->videoInputCond_.notify_all();
+        videoSignal_->videoOutputCond_.notify_all();
+    }
+    if (audioSignal_) {
+        audioSignal_->audioInputCond_.notify_all();
+        audioSignal_->audioOutputCond_.notify_all();
+    }
+}
+
+void RNSkHarmonyVideo::stop() {
+    DLOG(INFO) << "RNSkHarmonyVideo::stop";
+    videoDecoderStopStatus = true;
+    StartRelease();
 }
 
 } // namespace RNSkia

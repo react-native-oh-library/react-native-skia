@@ -25,7 +25,7 @@ namespace RNSkia {
 
 class PluginRender {
 public:
-    PluginRender(std::shared_ptr<RNSkia::RNSkPlatformContext> context);
+    PluginRender(std::shared_ptr<RNSkia::RNSkPlatformContext> context, std::string &id);
     ~PluginRender() {
         m_window = nullptr;
     }

@@ -11,7 +11,7 @@ import {
   RNViewBase,
   ViewRawProps
 } from '@rnoh/react-native-openharmony'
-import { SkiaDomView } from './view/SkiaDomView';
+import { SkiaPictureView } from './view/SkiaPictureView';
 import Logger from './Logger';
 
 export interface SkiaPictureViewState {}
@@ -92,7 +92,7 @@ export struct RNCSkiaPictureView {
 
   build() {
     RNViewBase({ ctx: this.ctx, tag: this.tag }) {
-      SkiaDomView({ nativeID: this.nativeID, viewWidth: this.viewWidth, viewHeight: this.viewHeight })
+      SkiaPictureView({ nativeID: this.nativeID, viewWidth: this.viewWidth, viewHeight: this.viewHeight })
         .align(Alignment.Center)
         .height(this.viewHeight)
         .width(this.viewWidth)

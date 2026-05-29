@@ -83,13 +83,27 @@ public:
     getObject()->setVolume(static_cast<float>(volume));
     return jsi::Value::undefined();
   }
+    
+  JSI_HOST_FUNCTION(setLoop) {
+    auto isLoop = arguments[0].asBool();
+    getObject()->setLoop(isLoop);
+    return jsi::Value::undefined();
+  }
+
+  JSI_HOST_FUNCTION(stop) {
+    if(getObject() != nullptr) {
+       getObject()->stop();
+    }    
+    return jsi::Value::undefined();
+  }
 
   JSI_EXPORT_FUNCTIONS(
       JSI_EXPORT_FUNC(JsiVideo, nextImage), JSI_EXPORT_FUNC(JsiVideo, duration),
       JSI_EXPORT_FUNC(JsiVideo, framerate), JSI_EXPORT_FUNC(JsiVideo, seek),
       JSI_EXPORT_FUNC(JsiVideo, rotation), JSI_EXPORT_FUNC(JsiVideo, size),
       JSI_EXPORT_FUNC(JsiVideo, play), JSI_EXPORT_FUNC(JsiVideo, pause),
-      JSI_EXPORT_FUNC(JsiVideo, setVolume), JSI_EXPORT_FUNC(JsiVideo, dispose))
+      JSI_EXPORT_FUNC(JsiVideo, setVolume), JSI_EXPORT_FUNC(JsiVideo, setLoop),
+      JSI_EXPORT_FUNC(JsiVideo, stop), JSI_EXPORT_FUNC(JsiVideo, dispose));
 
   JsiVideo(std::shared_ptr<RNSkPlatformContext> context,
            std::shared_ptr<RNSkVideo> video)
