@@ -1,6 +1,9 @@
 # Changelog
 ## 鸿蒙化Log
 
+### v1.4.2-rc.1
+ - fix:修复SkiaPictureView组件无法使用问题以及Video组件播放异常问题
+
 ### v1.4.1
  release version1.4.1
 ### v1.4.1-rc.1
