@@ -1,13 +1,13 @@
-# @react-native-oh-tpl/react-native-skia
+#  迁移声明
 
-This project is based on [react-native-skia v1.3.7](https://github.com/Shopify/react-native-skia/releases/tag/v1.3.7)
+- 本仓库已迁移至 GitCode：[OpenHarmony-SIG/rntpc_react-native-skia](https://gitcode.com/openharmony-sig/rntpc_react-native-skia)。
+- 包名已更改为 `@react-native-ohos/react-native-skia`，支持直接从 npm 下载。
+- 更多详情请查阅新仓库的 README 文件。
+- 本仓库旧版本的文档已归档：[链接](/doc/zh-cn.md)
 
-## Documentation
+# Migration Announcement
 
-- [中文](https://gitee.com/react-native-oh-library/usage-docs/blob/master/zh-cn/react-native-skia.md)
-
-- [English](https://gitee.com/react-native-oh-library/usage-docs/blob/master/en/react-native-skia.md)
-
-## License
-
-This library is licensed under [The MIT License (MIT)](https://github.com/Shopify/react-native-skia/blob/main/LICENSE.md)
+- This repository has been migrated to GitCode：[OpenHarmony-SIG/rntpc_react-native-skia](https://gitcode.com/openharmony-sig/rntpc_react-native-skia)       
+- The package name has been changed to `@react-native-ohos/react-native-skia` and is now available for direct download from npm.
+- For more details, please refer to the README in the new repository.
+- Archived documentation for versions in this repository can be found here: [Link](/doc/en.md)
