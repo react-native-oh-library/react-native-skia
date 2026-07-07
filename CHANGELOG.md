@@ -1,6 +1,10 @@
 # Changelog
 ## 鸿蒙化Log
 
+### v2.0.1-rc.1
+
+- fix:修复使用RN框架的release包运行导致crash问题
+
 ### v2.0.0-rc.2
 
 - fix:修复release模式编译失败问题以及运行crash问题
