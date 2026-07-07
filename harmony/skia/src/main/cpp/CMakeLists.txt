@@ -55,7 +55,10 @@ target_link_libraries(${PACKAGE_NAME} PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/skia/li
 target_link_libraries(${PACKAGE_NAME} PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/skia/lib/libthird_party__zlib.a)
 target_link_libraries(${PACKAGE_NAME} PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/skia/lib/libthird_party__zlib_compression_utils_portable.a)
 
-if(CMAKE_BUILD_TYPE STREQUAL "Release")
+get_directory_property(COMPILE_DEFS COMPILE_DEFINITIONS)
+list(FIND COMPILE_DEFS "NDEBUG" NDEBUG_INDEX)
+
+if(CMAKE_BUILD_TYPE STREQUAL "Release" OR NDEBUG_INDEX GREATER -1 OR CMAKE_CXX_FLAGS MATCHES "-DNDEBUG" OR CMAKE_C_FLAGS MATCHES "-DNDEBUG")
     target_link_libraries(${PACKAGE_NAME} PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/skia/lib/libmodules__skottie.a)
     target_link_libraries(${PACKAGE_NAME} PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/skia/lib/libmodules__sksg.a)
     target_link_libraries(${PACKAGE_NAME} PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/skia/lib/libskia.a)
